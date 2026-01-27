@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
-import 'workout_session_screen.dart';
+import 'workout_session_screen.dart'; // Плеер тренировки
+import 'create_workout_screen.dart'; // Конструктор тренировки (НОВОЕ)
 
 class DashboardScreen extends StatefulWidget {
   const DashboardScreen({super.key});
@@ -13,8 +14,8 @@ class _DashboardScreenState extends State<DashboardScreen> {
 
   static const List<Widget> _widgetOptions = <Widget>[
     HomeTab(),
-    Center(child: Text('WORKOUTS (Coming Soon)')),
-    Center(child: Text('PROFILE (Coming Soon)')),
+    Center(child: Text('ТРЕНИРОВКИ (Скоро)')),
+    Center(child: Text('ПРОФИЛЬ (Скоро)')),
   ];
 
   void _onItemTapped(int index) {
@@ -35,12 +36,15 @@ class _DashboardScreenState extends State<DashboardScreen> {
         onTap: _onItemTapped,
         type: BottomNavigationBarType.fixed,
         items: const [
-          BottomNavigationBarItem(icon: Icon(Icons.home_filled), label: 'Home'),
+          BottomNavigationBarItem(
+            icon: Icon(Icons.home_filled),
+            label: 'Главная',
+          ),
           BottomNavigationBarItem(
             icon: Icon(Icons.fitness_center),
-            label: 'Workout',
+            label: 'Тренировка',
           ),
-          BottomNavigationBarItem(icon: Icon(Icons.person), label: 'Profile'),
+          BottomNavigationBarItem(icon: Icon(Icons.person), label: 'Профиль'),
         ],
       ),
     );
@@ -52,7 +56,12 @@ class HomeTab extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    bool hasActiveProgram = true;
+    // -----------------------------------------------------------
+    // ПЕРЕКЛЮЧАТЕЛЬ ДЛЯ ТЕСТА:
+    // false = Видим экран "Новичка" (Кнопка "Создать программу")
+    // true  = Видим экран "Опытного" (Кнопка "Начать")
+    // -----------------------------------------------------------
+    bool hasActiveProgram = false;
 
     return SafeArea(
       child: Padding(
@@ -65,6 +74,7 @@ class HomeTab extends StatelessWidget {
   }
 }
 
+/// ВАРИАНТ 1: Новичок (Empty State)
 class _EmptyStateView extends StatelessWidget {
   const _EmptyStateView();
 
@@ -83,20 +93,27 @@ class _EmptyStateView extends StatelessWidget {
         ),
         const SizedBox(height: 32),
         Text(
-          'START YOUR JOURNEY TODAY',
+          'НАЧНИ СВОЙ ПУТЬ',
           textAlign: TextAlign.center,
           style: Theme.of(context).textTheme.headlineMedium,
         ),
         const SizedBox(height: 12),
         const Text(
-          'Create a workout plan tailored to your goals and fitness level.',
+          'Создай план тренировок, адаптированный под твои цели и уровень подготовки.',
           textAlign: TextAlign.center,
           style: TextStyle(color: Color(0xFF8E8E93), fontSize: 16),
         ),
         const Spacer(),
+        // КНОПКА ВЕДЕТ В КОНСТРУКТОР
         ElevatedButton(
-          onPressed: () {},
-          child: const Text('CREATE FIRST PROGRAM'),
+          onPressed: () {
+            Navigator.of(context).push(
+              MaterialPageRoute(
+                builder: (context) => const CreateWorkoutScreen(),
+              ),
+            );
+          },
+          child: const Text('СОЗДАТЬ ПРОГРАММУ'),
         ),
         const SizedBox(height: 32),
       ],
@@ -104,6 +121,7 @@ class _EmptyStateView extends StatelessWidget {
   }
 }
 
+/// ВАРИАНТ 2: Опытный (Dashboard)
 class _ActiveStateView extends StatelessWidget {
   const _ActiveStateView();
 
@@ -120,14 +138,14 @@ class _ActiveStateView extends StatelessWidget {
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   Text(
-                    'HELLO, CHAMPION',
+                    'ПРИВЕТ, ЧЕМПИОН',
                     style: Theme.of(context).textTheme.headlineSmall?.copyWith(
                       fontWeight: FontWeight.bold,
                     ),
                   ),
                   const SizedBox(height: 4),
                   const Text(
-                    'Let\'s crush it today!',
+                    'Давай порвем этот день!',
                     style: TextStyle(color: Color(0xFF8E8E93)),
                   ),
                 ],
@@ -141,7 +159,7 @@ class _ActiveStateView extends StatelessWidget {
           ),
           const SizedBox(height: 40),
           Text(
-            'TODAY\'S WORKOUT',
+            'СЕГОДНЯ ПО ПЛАНУ',
             style: Theme.of(context).textTheme.labelLarge?.copyWith(
               color: const Color(0xFF8E8E93),
               letterSpacing: 1.5,
@@ -151,7 +169,7 @@ class _ActiveStateView extends StatelessWidget {
           const _WorkoutCard(),
           const SizedBox(height: 40),
           Text(
-            'ACTIVITY',
+            'АКТИВНОСТЬ',
             style: Theme.of(context).textTheme.labelLarge?.copyWith(
               color: const Color(0xFF8E8E93),
               letterSpacing: 1.5,
@@ -181,7 +199,7 @@ class _WorkoutCard extends StatelessWidget {
               mainAxisAlignment: MainAxisAlignment.spaceBetween,
               children: [
                 Text(
-                  'FULL BODY START',
+                  'ФУЛЛ-БОДИ СТАРТ',
                   style: Theme.of(context).textTheme.headlineSmall,
                 ),
                 const Icon(Icons.fitness_center, color: Color(0xFFCCFF00)),
@@ -192,7 +210,7 @@ class _WorkoutCard extends StatelessWidget {
               children: [
                 Icon(Icons.timer_outlined, size: 16, color: Color(0xFF8E8E93)),
                 SizedBox(width: 8),
-                Text('45 min', style: TextStyle(color: Color(0xFF8E8E93))),
+                Text('45 мин', style: TextStyle(color: Color(0xFF8E8E93))),
                 SizedBox(width: 16),
                 Icon(
                   Icons.local_fire_department_outlined,
@@ -200,10 +218,11 @@ class _WorkoutCard extends StatelessWidget {
                   color: Color(0xFF8E8E93),
                 ),
                 SizedBox(width: 8),
-                Text('320 kcal', style: TextStyle(color: Color(0xFF8E8E93))),
+                Text('320 ккал', style: TextStyle(color: Color(0xFF8E8E93))),
               ],
             ),
             const SizedBox(height: 24),
+            // КНОПКА ВЕДЕТ В ПЛЕЕР
             ElevatedButton(
               onPressed: () {
                 Navigator.of(context).push(
@@ -212,7 +231,7 @@ class _WorkoutCard extends StatelessWidget {
                   ),
                 );
               },
-              child: const Text('START'),
+              child: const Text('НАЧАТЬ'),
             ),
           ],
         ),

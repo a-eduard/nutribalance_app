@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_localizations/flutter_localizations.dart'; // Импорт локализации
 import 'package:google_fonts/google_fonts.dart';
 import 'dashboard_screen.dart';
 
@@ -14,6 +15,17 @@ class FitnessApp extends StatelessWidget {
     return MaterialApp(
       title: 'Neon Fitness MVP',
       debugShowCheckedModeBanner: false,
+
+      // НАСТРОЙКИ ЛОКАЛИЗАЦИИ
+      localizationsDelegates: const [
+        GlobalMaterialLocalizations.delegate,
+        GlobalWidgetsLocalizations.delegate,
+        GlobalCupertinoLocalizations.delegate,
+      ],
+      supportedLocales: const [
+        Locale('ru', 'RU'), // Принудительно ставим Русский
+      ],
+
       theme: _buildThemeData(),
       home: const DashboardScreen(),
     );

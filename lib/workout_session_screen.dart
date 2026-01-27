@@ -1,5 +1,5 @@
 import 'dart:async';
-import 'dart:ui'; // Нужно для FontFeature
+import 'dart:ui';
 import 'package:flutter/material.dart';
 
 class WorkoutSessionScreen extends StatefulWidget {
@@ -13,9 +13,10 @@ class _WorkoutSessionScreenState extends State<WorkoutSessionScreen> {
   Timer? _timer;
   int _secondsElapsed = 0;
 
+  // Моковые данные переведены на русский
   final List<Map<String, dynamic>> _exercises = [
     {
-      "title": "Bench Press (Barbell)",
+      "title": "Жим лежа (Штанга)",
       "sets": [
         {"weight": "60", "reps": "12", "isCompleted": false},
         {"weight": "60", "reps": "10", "isCompleted": false},
@@ -23,7 +24,7 @@ class _WorkoutSessionScreenState extends State<WorkoutSessionScreen> {
       ],
     },
     {
-      "title": "Squat (Barbell)",
+      "title": "Приседания",
       "sets": [
         {"weight": "80", "reps": "10", "isCompleted": false},
         {"weight": "80", "reps": "10", "isCompleted": false},
@@ -31,7 +32,7 @@ class _WorkoutSessionScreenState extends State<WorkoutSessionScreen> {
       ],
     },
     {
-      "title": "Pull Ups",
+      "title": "Подтягивания",
       "sets": [
         {"weight": "0", "reps": "10", "isCompleted": false},
         {"weight": "0", "reps": "8", "isCompleted": false},
@@ -87,7 +88,7 @@ class _WorkoutSessionScreenState extends State<WorkoutSessionScreen> {
           TextButton(
             onPressed: () => Navigator.of(context).pop(),
             child: const Text(
-              'FINISH',
+              'ЗАВЕРШИТЬ',
               style: TextStyle(
                 color: Color(0xFFCCFF00),
                 fontWeight: FontWeight.bold,
@@ -147,7 +148,7 @@ class _ExerciseCard extends StatelessWidget {
                 SizedBox(
                   width: 24,
                   child: Text(
-                    "SET",
+                    "СЕТ",
                     style: TextStyle(color: Colors.grey, fontSize: 12),
                   ),
                 ),
@@ -155,7 +156,7 @@ class _ExerciseCard extends StatelessWidget {
                 Expanded(
                   child: Center(
                     child: Text(
-                      "KG",
+                      "ВЕС (КГ)",
                       style: TextStyle(color: Colors.grey, fontSize: 12),
                     ),
                   ),
@@ -164,7 +165,7 @@ class _ExerciseCard extends StatelessWidget {
                 Expanded(
                   child: Center(
                     child: Text(
-                      "REPS",
+                      "ПОВТОРЫ",
                       style: TextStyle(color: Colors.grey, fontSize: 12),
                     ),
                   ),
@@ -232,7 +233,6 @@ class _SetRowWidgetState extends State<SetRowWidget> {
 
   @override
   Widget build(BuildContext context) {
-    // ИСПРАВЛЕНИЕ: withValues вместо withOpacity (убирает синюю ошибку)
     final backgroundColor = isCompleted
         ? Colors.green.withValues(alpha: 0.2)
         : Colors.transparent;

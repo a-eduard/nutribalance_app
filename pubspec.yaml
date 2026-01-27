@@ -10,7 +10,9 @@ dependencies:
   flutter:
     sdk: flutter
   cupertino_icons: ^1.0.8
-  google_fonts: ^6.1.0 # Добавили шрифт
+  google_fonts: ^6.1.0
+  flutter_localizations: # <--- ДОБАВИТЬ ЭТУ СТРОКУ
+    sdk: flutter         # <--- И ЭТУ СТРОКУ     
 
 dev_dependencies:
   flutter_test:

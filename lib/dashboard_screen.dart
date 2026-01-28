@@ -61,7 +61,7 @@ class HomeTab extends StatelessWidget {
     // false = Видим экран "Новичка" (Кнопка "Создать программу")
     // true  = Видим экран "Опытного" (Кнопка "Начать")
     // -----------------------------------------------------------
-    bool hasActiveProgram = false;
+    bool hasActiveProgram = true;
 
     return SafeArea(
       child: Padding(

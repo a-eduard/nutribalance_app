@@ -1,6 +1,7 @@
 import 'dart:async';
-import 'dart:ui';
+import 'dart:ui'; // Для FontFeature
 import 'package:flutter/material.dart';
+import 'workout_success_screen.dart'; // <--- ВАЖНЫЙ ИМПОРТ
 
 class WorkoutSessionScreen extends StatefulWidget {
   const WorkoutSessionScreen({super.key});
@@ -13,7 +14,7 @@ class _WorkoutSessionScreenState extends State<WorkoutSessionScreen> {
   Timer? _timer;
   int _secondsElapsed = 0;
 
-  // Моковые данные переведены на русский
+  // Данные тренировки
   final List<Map<String, dynamic>> _exercises = [
     {
       "title": "Жим лежа (Штанга)",
@@ -66,6 +67,46 @@ class _WorkoutSessionScreenState extends State<WorkoutSessionScreen> {
     return "$minutes:$seconds";
   }
 
+  // Логика завершения тренировки
+  void _finishWorkout() {
+    int totalVolume = 0;
+    int completedExercisesCount = 0;
+
+    // 1. Проходим по всем упражнениям
+    for (var exercise in _exercises) {
+      bool isExerciseStarted = false;
+
+      for (var set in exercise['sets']) {
+        // Если сет выполнен (галочка стоит)
+        if (set['isCompleted'] == true) {
+          isExerciseStarted = true;
+          // Парсим вес и повторы (защита от ошибок, если там пусто)
+          int weight = int.tryParse(set['weight'].toString()) ?? 0;
+          int reps = int.tryParse(set['reps'].toString()) ?? 0;
+
+          // Если вес 0 (свой вес), можно считать условные 60-70кг или 0,
+          // но для MVP считаем чистый поднятый вес железа.
+          totalVolume += (weight * reps);
+        }
+      }
+
+      if (isExerciseStarted) {
+        completedExercisesCount++;
+      }
+    }
+
+    // 2. Переходим на экран успеха
+    Navigator.of(context).push(
+      MaterialPageRoute(
+        builder: (context) => WorkoutSuccessScreen(
+          durationInMinutes: (_secondsElapsed ~/ 60), // Секунды в минуты
+          totalWeight: totalVolume,
+          exercisesCount: completedExercisesCount,
+        ),
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -86,7 +127,7 @@ class _WorkoutSessionScreenState extends State<WorkoutSessionScreen> {
         backgroundColor: const Color(0xFF1E1E1E),
         actions: [
           TextButton(
-            onPressed: () => Navigator.of(context).pop(),
+            onPressed: _finishWorkout,
             child: const Text(
               'ЗАВЕРШИТЬ',
               style: TextStyle(
@@ -115,6 +156,7 @@ class _WorkoutSessionScreenState extends State<WorkoutSessionScreen> {
   }
 }
 
+/// Виджет карточки упражнения
 class _ExerciseCard extends StatelessWidget {
   final String title;
   final List<dynamic> setsData;
@@ -176,12 +218,9 @@ class _ExerciseCard extends StatelessWidget {
           ),
           ...setsData.asMap().entries.map((entry) {
             int setIndex = entry.key + 1;
+            // Передаем ссылку на Map сета, чтобы обновлять данные напрямую
             Map<String, dynamic> setData = entry.value;
-            return SetRowWidget(
-              setNumber: setIndex,
-              initialWeight: setData['weight'],
-              initialReps: setData['reps'],
-            );
+            return SetRowWidget(setNumber: setIndex, setData: setData);
           }),
           const SizedBox(height: 16),
         ],
@@ -190,16 +229,15 @@ class _ExerciseCard extends StatelessWidget {
   }
 }
 
+/// Виджет строки сета
 class SetRowWidget extends StatefulWidget {
   final int setNumber;
-  final String initialWeight;
-  final String initialReps;
+  final Map<String, dynamic> setData; // Ссылка на данные сета
 
   const SetRowWidget({
     super.key,
     required this.setNumber,
-    required this.initialWeight,
-    required this.initialReps,
+    required this.setData,
   });
 
   @override
@@ -207,15 +245,14 @@ class SetRowWidget extends StatefulWidget {
 }
 
 class _SetRowWidgetState extends State<SetRowWidget> {
-  bool isCompleted = false;
   late TextEditingController _weightController;
   late TextEditingController _repsController;
 
   @override
   void initState() {
     super.initState();
-    _weightController = TextEditingController(text: widget.initialWeight);
-    _repsController = TextEditingController(text: widget.initialReps);
+    _weightController = TextEditingController(text: widget.setData['weight']);
+    _repsController = TextEditingController(text: widget.setData['reps']);
   }
 
   @override
@@ -227,12 +264,17 @@ class _SetRowWidgetState extends State<SetRowWidget> {
 
   void _toggleComplete() {
     setState(() {
-      isCompleted = !isCompleted;
+      // Меняем состояние в UI
+      bool currentStatus = widget.setData['isCompleted'] ?? false;
+      widget.setData['isCompleted'] = !currentStatus;
     });
   }
 
   @override
   Widget build(BuildContext context) {
+    bool isCompleted = widget.setData['isCompleted'] ?? false;
+
+    // Используем withValues (современный аналог withOpacity)
     final backgroundColor = isCompleted
         ? Colors.green.withValues(alpha: 0.2)
         : Colors.transparent;
@@ -253,10 +295,13 @@ class _SetRowWidgetState extends State<SetRowWidget> {
             ),
           ),
           const SizedBox(width: 16),
-          Expanded(child: _buildInput(_weightController)),
+          // Поле Вес
+          Expanded(child: _buildInput(_weightController, 'weight')),
           const SizedBox(width: 16),
-          Expanded(child: _buildInput(_repsController)),
+          // Поле Повторы
+          Expanded(child: _buildInput(_repsController, 'reps')),
           const SizedBox(width: 16),
+          // Чекбокс
           InkWell(
             onTap: _toggleComplete,
             borderRadius: BorderRadius.circular(12),
@@ -281,13 +326,19 @@ class _SetRowWidgetState extends State<SetRowWidget> {
     );
   }
 
-  Widget _buildInput(TextEditingController controller) {
+  Widget _buildInput(TextEditingController controller, String dataKey) {
+    bool isCompleted = widget.setData['isCompleted'] ?? false;
+
     return SizedBox(
       height: 44,
       child: TextField(
         controller: controller,
         keyboardType: TextInputType.number,
         textAlign: TextAlign.center,
+        onChanged: (value) {
+          // Обновляем данные в главном массиве при вводе текста
+          widget.setData[dataKey] = value;
+        },
         style: TextStyle(
           color: isCompleted ? const Color(0xFF8E8E93) : Colors.white,
           fontWeight: FontWeight.bold,

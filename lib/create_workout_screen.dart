@@ -1,173 +1,252 @@
 import 'package:flutter/material.dart';
 import 'exercise_data.dart';
 import 'exercise_selection_screen.dart';
+import 'ui_widgets.dart'; // Виджеты дизайна
+import 'services/database_service.dart'; // <--- ПОДКЛЮЧЕНИЕ К БАЗЕ
 
 class CreateWorkoutScreen extends StatefulWidget {
-  const CreateWorkoutScreen({super.key});
+  // Новые поля для режима Редактирования
+  final String? docId;
+  final String? initialName;
+  final List<String>? initialExercises;
+
+  const CreateWorkoutScreen({
+    super.key, 
+    this.docId, 
+    this.initialName, 
+    this.initialExercises
+  });
 
   @override
   State<CreateWorkoutScreen> createState() => _CreateWorkoutScreenState();
 }
 
 class _CreateWorkoutScreenState extends State<CreateWorkoutScreen> {
-  final TextEditingController _nameController = TextEditingController();
-
-  // Список выбранных упражнений
+  late TextEditingController _nameController;
   final List<Exercise> _selectedExercises = [];
+  
+  bool _isSaving = false;
 
-  // Метод открытия экрана выбора
+  @override
+  void initState() {
+    super.initState();
+    // 1. Инициализация контроллера (если редактируем - ставим старое имя)
+    _nameController = TextEditingController(text: widget.initialName ?? "");
+
+    // 2. Инициализация списка (превращаем строки названий в объекты Exercise)
+    if (widget.initialExercises != null) {
+      for (var name in widget.initialExercises!) {
+        _selectedExercises.add(
+          Exercise(
+            id: DateTime.now().toString(), // Временный ID для UI
+            title: name, 
+            muscleGroup: "Сохраненное" // Заглушка, так как мы храним только имена
+          )
+        );
+      }
+    }
+  }
+
+  @override
+  void dispose() {
+    _nameController.dispose();
+    super.dispose();
+  }
+
   Future<void> _navigateAndAddExercise() async {
-    // Ждем, пока пользователь выберет что-то и вернется
-    final Exercise? result = await Navigator.push(
+    final result = await Navigator.push(
       context,
       MaterialPageRoute(builder: (context) => const ExerciseSelectionScreen()),
     );
 
-    // Если упражнение выбрано, добавляем в список
-    if (result != null) {
+    if (result != null && result is List<Exercise>) {
       setState(() {
-        _selectedExercises.add(result);
+        _selectedExercises.addAll(result);
       });
     }
   }
 
-  // Логика перетаскивания
   void _onReorder(int oldIndex, int newIndex) {
     setState(() {
-      if (oldIndex < newIndex) {
-        newIndex -= 1;
-      }
+      if (oldIndex < newIndex) newIndex -= 1;
       final Exercise item = _selectedExercises.removeAt(oldIndex);
       _selectedExercises.insert(newIndex, item);
     });
   }
 
-  // Удаление упражнения из списка
   void _removeExercise(int index) {
     setState(() {
       _selectedExercises.removeAt(index);
     });
   }
 
+  // --- УМНАЯ ЛОГИКА СОХРАНЕНИЯ ---
+  Future<void> _saveWorkout() async {
+    final name = _nameController.text.trim();
+    
+    // Валидация
+    if (name.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Введите название тренировки'), backgroundColor: Colors.red)
+      );
+      return;
+    }
+    
+    if (_selectedExercises.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Добавьте хотя бы одно упражнение'), backgroundColor: Colors.red)
+      );
+      return;
+    }
+
+    setState(() => _isSaving = true);
+
+    try {
+      List<String> exerciseNames = _selectedExercises.map((e) => e.title).toList();
+
+      if (widget.docId == null) {
+        // РЕЖИМ СОЗДАНИЯ
+        await DatabaseService().saveUserWorkout(name, exerciseNames);
+      } else {
+        // РЕЖИМ РЕДАКТИРОВАНИЯ
+        await DatabaseService().updateWorkout(widget.docId!, name, exerciseNames);
+      }
+
+      if (mounted) {
+        Navigator.pop(context, true);
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text("Ошибка: $e"), backgroundColor: Colors.red),
+        );
+      }
+    } finally {
+      if (mounted) setState(() => _isSaving = false);
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
+    // Меняем заголовок в зависимости от режима
+    final pageTitle = widget.docId == null ? 'Новая тренировка' : 'Редактирование';
+
     return Scaffold(
+      backgroundColor: const Color(0xFF0F0F0F),
       appBar: AppBar(
-        title: const Text('Новая тренировка'),
+        title: Text(pageTitle, style: const TextStyle(fontWeight: FontWeight.bold)),
+        centerTitle: true,
         backgroundColor: Colors.transparent,
         elevation: 0,
         actions: [
-          TextButton(
-            onPressed: () {
-              // Тут будет логика сохранения в БД
-              if (_nameController.text.isEmpty) {
-                ScaffoldMessenger.of(context).showSnackBar(
-                  const SnackBar(content: Text('Введите название тренировки')),
-                );
-                return;
-              }
-              Navigator.pop(context); // Просто выходим назад
-            },
-            child: const Text(
-              'СОХРАНИТЬ',
-              style: TextStyle(
-                color: Color(0xFFCCFF00),
-                fontWeight: FontWeight.bold,
-              ),
-            ),
-          ),
+          _isSaving 
+            ? const Padding(
+                padding: EdgeInsets.only(right: 16),
+                child: Center(
+                  child: SizedBox(
+                    width: 20, height: 20, 
+                    child: CircularProgressIndicator(color: Color(0xFFCCFF00), strokeWidth: 2)
+                  ),
+                ),
+              )
+            : TextButton(
+                onPressed: _saveWorkout,
+                child: const Text(
+                  'СОХРАНИТЬ', 
+                  style: TextStyle(color: Color(0xFFCCFF00), fontWeight: FontWeight.bold)
+                ),
+              )
         ],
       ),
-      // Кнопка добавления внизу
-      floatingActionButton: FloatingActionButton.extended(
-        onPressed: _navigateAndAddExercise,
-        backgroundColor: const Color(0xFFCCFF00),
-        icon: const Icon(Icons.add, color: Colors.black),
-        label: const Text(
-          'ДОБАВИТЬ УПРАЖНЕНИЕ',
-          style: TextStyle(color: Colors.black, fontWeight: FontWeight.bold),
+      bottomNavigationBar: Container(
+        padding: const EdgeInsets.all(24),
+        color: const Color(0xFF0F0F0F),
+        child: IgnorePointer(
+          ignoring: _isSaving,
+          child: Opacity(
+            opacity: _isSaving ? 0.5 : 1.0,
+            child: NeonActionButton(
+              text: "ДОБАВИТЬ УПРАЖНЕНИЕ",
+              onTap: _navigateAndAddExercise,
+              isFullWidth: true,
+            ),
+          ),
         ),
       ),
       body: GestureDetector(
-        onTap: () => FocusScope.of(context).unfocus(), // Скрыть клавиатуру
+        onTap: () => FocusScope.of(context).unfocus(),
         child: Column(
           children: [
-            // 1. Название тренировки
             Padding(
               padding: const EdgeInsets.all(24.0),
               child: TextField(
                 controller: _nameController,
-                style: const TextStyle(
-                  fontSize: 24,
-                  fontWeight: FontWeight.bold,
-                  color: Colors.white,
-                ),
+                style: const TextStyle(fontSize: 24, fontWeight: FontWeight.bold, color: Colors.white),
                 decoration: const InputDecoration(
-                  hintText: 'Название (напр. День груди)',
-                  hintStyle: TextStyle(color: Color(0xFF8E8E93)),
-                  border: InputBorder.none, // Без рамки, как заголовок
+                  hintText: 'Название (напр. Спина)',
+                  hintStyle: TextStyle(color: Colors.grey),
+                  border: InputBorder.none,
+                  suffixIcon: Icon(Icons.edit, color: Color(0xFFCCFF00)),
                 ),
+                enabled: !_isSaving,
               ),
             ),
-
-            const Divider(color: Color(0xFF2C2C2E)),
-
-            // 2. Список упражнений (Drag & Drop)
+            
+            const Divider(color: Colors.white10),
+            
             Expanded(
               child: _selectedExercises.isEmpty
                   ? Center(
-                      child: Text(
-                        'Список упражнений пуст',
-                        style: TextStyle(color: Colors.grey.withOpacity(0.5)),
+                      child: Column(
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        children: [
+                          Icon(Icons.fitness_center, size: 48, color: Colors.white.withOpacity(0.1)),
+                          const SizedBox(height: 16),
+                          Text(
+                            'Список пуст',
+                            style: TextStyle(color: Colors.white.withOpacity(0.3), fontSize: 16),
+                          ),
+                        ],
                       ),
                     )
                   : ReorderableListView.builder(
-                      padding: const EdgeInsets.only(
-                        bottom: 100,
-                      ), // Отступ под кнопку
+                      padding: const EdgeInsets.only(bottom: 20),
                       itemCount: _selectedExercises.length,
                       onReorder: _onReorder,
+                      buildDefaultDragHandles: !_isSaving,
                       itemBuilder: (context, index) {
                         final exercise = _selectedExercises[index];
-                        // Ключ обязателен для ReorderableListView
                         return Container(
-                          key: ValueKey(
-                            "${exercise.id}_$index",
-                          ), // Уникальный ключ
-                          margin: const EdgeInsets.symmetric(
-                            horizontal: 16,
-                            vertical: 4,
-                          ),
-                          decoration: BoxDecoration(
-                            color: const Color(0xFF1E1E1E),
-                            borderRadius: BorderRadius.circular(16),
-                          ),
-                          child: ListTile(
-                            contentPadding: const EdgeInsets.symmetric(
-                              horizontal: 16,
-                              vertical: 8,
-                            ),
-                            leading: const Icon(
-                              Icons.drag_handle,
-                              color: Color(0xFF8E8E93),
-                            ),
-                            title: Text(
-                              exercise.title,
-                              style: const TextStyle(
-                                color: Colors.white,
-                                fontWeight: FontWeight.bold,
-                              ),
-                            ),
-                            subtitle: Text(
-                              exercise.muscleGroup,
-                              style: const TextStyle(color: Color(0xFF8E8E93)),
-                            ),
-                            trailing: IconButton(
-                              icon: const Icon(
-                                Icons.delete_outline,
-                                color: Color(0xFFFF453A),
-                              ),
-                              onPressed: () => _removeExercise(index),
+                          key: ValueKey("${exercise.id}_${index}_${DateTime.now().millisecondsSinceEpoch}"),
+                          child: PremiumGlassCard(
+                            child: Row(
+                              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                              children: [
+                                Row(
+                                  children: [
+                                    const Icon(Icons.drag_handle, color: Color(0xFF8E8E93)),
+                                    const SizedBox(width: 16),
+                                    Column(
+                                      crossAxisAlignment: CrossAxisAlignment.start,
+                                      children: [
+                                        Text(
+                                          exercise.title, 
+                                          style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 16)
+                                        ),
+                                        const SizedBox(height: 4),
+                                        Text(
+                                          exercise.muscleGroup, 
+                                          style: const TextStyle(color: Color(0xFF8E8E93), fontSize: 12)
+                                        ),
+                                      ],
+                                    ),
+                                  ],
+                                ),
+                                IconButton(
+                                  icon: const Icon(Icons.remove_circle_outline, color: Color(0xFFFF453A)),
+                                  onPressed: _isSaving ? null : () => _removeExercise(index),
+                                ),
+                              ],
                             ),
                           ),
                         );

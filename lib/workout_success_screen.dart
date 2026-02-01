@@ -1,152 +1,133 @@
 import 'package:flutter/material.dart';
-import 'dashboard_screen.dart'; // Для возврата домой
 
 class WorkoutSuccessScreen extends StatelessWidget {
-  final int durationInMinutes;
-  final int totalWeight;
+  final int durationMinutes;
+  final int tonnage;
   final int exercisesCount;
 
   const WorkoutSuccessScreen({
     super.key,
-    required this.durationInMinutes,
-    required this.totalWeight,
+    required this.durationMinutes,
+    required this.tonnage,
     required this.exercisesCount,
   });
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: const Color(0xFF121212),
+      backgroundColor: const Color(0xFF0F0F0F),
       body: SafeArea(
         child: Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 24.0, vertical: 24.0),
+          padding: const EdgeInsets.symmetric(horizontal: 24.0),
           child: Column(
             mainAxisAlignment: MainAxisAlignment.center,
             children: [
               const Spacer(),
-
-              // 1. Иконка Трофея с Hero анимацией
-              const Hero(
-                tag: 'trophy_icon',
-                child: Icon(
-                  Icons.emoji_events_rounded,
-                  size: 120,
-                  color: Color(0xFFCCFF00), // Neon Lime
+              
+              // 1. TROPHY ICON
+              Container(
+                padding: const EdgeInsets.all(30),
+                decoration: BoxDecoration(
+                  color: const Color(0xFFCCFF00).withOpacity(0.1),
+                  shape: BoxShape.circle,
+                  boxShadow: [
+                    BoxShadow(
+                      color: const Color(0xFFCCFF00).withOpacity(0.2),
+                      blurRadius: 40,
+                      spreadRadius: 10,
+                    )
+                  ],
                 ),
+                child: const Icon(Icons.emoji_events, size: 80, color: Color(0xFFCCFF00)),
               ),
-
+              
               const SizedBox(height: 32),
-
-              // 2. Заголовки
-              Text(
-                'ТРЕНИРОВКА ЗАВЕРШЕНА!',
+              
+              const Text(
+                "ТРЕНИРОВКА ЗАВЕРШЕНА!",
                 textAlign: TextAlign.center,
-                style: Theme.of(context).textTheme.headlineMedium?.copyWith(
-                  fontWeight: FontWeight.bold,
-                  fontSize: 28,
+                style: TextStyle(
+                  // fontFamily: 'Manrope', // Если шрифт подключен
+                  fontWeight: FontWeight.w900,
+                  fontSize: 24,
+                  color: Colors.white,
+                  letterSpacing: 1.0,
                 ),
               ),
-              const SizedBox(height: 12),
-              const Text(
-                'Ты стал сильнее, чем вчера.',
-                textAlign: TextAlign.center,
-                style: TextStyle(color: Color(0xFF8E8E93), fontSize: 16),
+              const SizedBox(height: 8),
+              Text(
+                "Ты стал сильнее, чем вчера.",
+                style: TextStyle(color: Colors.white.withOpacity(0.5), fontSize: 16),
               ),
 
               const SizedBox(height: 48),
 
-              // 3. Блок Статистики
+              // 2. STATS ROW
               Row(
                 mainAxisAlignment: MainAxisAlignment.spaceBetween,
                 children: [
-                  _StatItem(
-                    value: '$durationInMinutes',
-                    label: 'Мин',
-                    subLabel: 'Время',
-                  ),
-                  _StatItem(
-                    value: '$totalWeight',
-                    label: 'кг',
-                    subLabel: 'Тоннаж',
-                  ),
-                  _StatItem(
-                    value: '$exercisesCount',
-                    label: '',
-                    subLabel: 'Упражнений',
-                  ),
+                  _buildStatItem("$durationMinutes", "Мин", "ВРЕМЯ"),
+                  _buildStatItem("$tonnage", "кг", "ТОННАЖ"),
+                  _buildStatItem("$exercisesCount", "", "УПРАЖНЕНИЙ"),
                 ],
               ),
 
               const Spacer(),
 
-              // 4. Кнопки
-              SizedBox(
+              // 3. ACTION BUTTONS
+              OutlinedButton.icon(
+                onPressed: () {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    const SnackBar(content: Text("Результат скопирован! (Имитация)")),
+                  );
+                },
+                icon: const Icon(Icons.share, color: Colors.white),
+                label: const Text("ПОДЕЛИТЬСЯ", style: TextStyle(color: Colors.white)),
+                style: OutlinedButton.styleFrom(
+                  minimumSize: const Size(double.infinity, 56),
+                  side: BorderSide(color: Colors.white.withOpacity(0.2)),
+                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+                ),
+              ),
+              
+              const SizedBox(height: 16),
+
+              Container(
                 width: double.infinity,
                 height: 56,
-                child: OutlinedButton.icon(
-                  onPressed: () {
-                    ScaffoldMessenger.of(context).showSnackBar(
-                      const SnackBar(
-                        content: Text(
-                          'Функция "Поделиться" будет доступна позже!',
-                        ),
-                        duration: Duration(seconds: 2),
-                      ),
-                    );
-                  },
-                  icon: const Icon(Icons.share, color: Colors.white),
-                  label: const Text(
-                    'ПОДЕЛИТЬСЯ',
-                    style: TextStyle(
-                      color: Colors.white,
-                      fontWeight: FontWeight.bold,
-                    ),
-                  ),
-                  style: OutlinedButton.styleFrom(
-                    side: const BorderSide(color: Color(0xFF2C2C2E), width: 2),
-                    shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(16),
-                    ),
-                  ),
+                decoration: BoxDecoration(
+                  gradient: const LinearGradient(colors: [Color(0xFFCCFF00), Color(0xFFAACC00)]),
+                  borderRadius: BorderRadius.circular(16),
+                  boxShadow: [
+                    BoxShadow(color: const Color(0xFFCCFF00).withOpacity(0.3), blurRadius: 16, offset: const Offset(0, 4))
+                  ],
                 ),
-              ),
-              const SizedBox(height: 16),
-              SizedBox(
-                width: double.infinity,
                 child: ElevatedButton(
                   onPressed: () {
-                    // Удаляем все экраны из стека и возвращаемся на Dashboard
-                    Navigator.of(context).pushAndRemoveUntil(
-                      MaterialPageRoute(
-                        builder: (context) => const DashboardScreen(),
-                      ),
-                      (Route<dynamic> route) => false,
-                    );
+                    // Возврат на главную (очищаем стек до первого экрана)
+                    Navigator.of(context).popUntil((route) => route.isFirst);
                   },
-                  child: const Text('ДОМОЙ'),
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: Colors.transparent,
+                    shadowColor: Colors.transparent,
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+                  ),
+                  child: const Text(
+                    "ДОМОЙ",
+                    style: TextStyle(color: Colors.black, fontWeight: FontWeight.w900, fontSize: 16, letterSpacing: 1.0),
+                  ),
                 ),
               ),
+              
+              const SizedBox(height: 20),
             ],
           ),
         ),
       ),
     );
   }
-}
 
-class _StatItem extends StatelessWidget {
-  final String value;
-  final String label;
-  final String subLabel;
-
-  const _StatItem({
-    required this.value,
-    required this.label,
-    required this.subLabel,
-  });
-
-  @override
-  Widget build(BuildContext context) {
+  Widget _buildStatItem(String value, String unit, String label) {
     return Column(
       children: [
         Row(
@@ -156,34 +137,24 @@ class _StatItem extends StatelessWidget {
             Text(
               value,
               style: const TextStyle(
-                fontFamily: 'Manrope', // Или RobotoMono если хочется цифр
-                fontSize: 32,
-                fontWeight: FontWeight.w800,
-                color: Colors.white,
+                color: Colors.white, 
+                fontSize: 32, 
+                fontWeight: FontWeight.w900, // Очень жирный для цифр
+                // fontFamily: 'Manrope',
               ),
             ),
-            if (label.isNotEmpty)
-              Padding(
-                padding: const EdgeInsets.only(left: 4.0),
-                child: Text(
-                  label,
-                  style: const TextStyle(
-                    fontSize: 14,
-                    color: Color(0xFF8E8E93),
-                    fontWeight: FontWeight.bold,
-                  ),
-                ),
+            if (unit.isNotEmpty) ...[
+              const SizedBox(width: 2),
+              Text(
+                unit,
+                style: const TextStyle(color: Color(0xFFCCFF00), fontSize: 16, fontWeight: FontWeight.bold),
               ),
+            ],
           ],
         ),
-        const SizedBox(height: 4),
         Text(
-          subLabel.toUpperCase(),
-          style: const TextStyle(
-            fontSize: 12,
-            color: Color(0xFF8E8E93),
-            letterSpacing: 1.0,
-          ),
+          label,
+          style: TextStyle(color: Colors.white.withOpacity(0.4), fontSize: 10, fontWeight: FontWeight.bold, letterSpacing: 1.0),
         ),
       ],
     );

@@ -1,9 +1,20 @@
 import 'package:flutter/material.dart';
-import 'package:flutter_localizations/flutter_localizations.dart'; // Импорт локализации
+import 'package:firebase_core/firebase_core.dart';
+import 'package:firebase_auth/firebase_auth.dart';
 import 'package:google_fonts/google_fonts.dart';
+import 'package:flutter_localizations/flutter_localizations.dart';
+import 'auth_screen.dart';
 import 'dashboard_screen.dart';
+import 'firebase_options.dart'; // <--- 1. ВАЖНЫЙ ИМПОРТ
 
-void main() {
+void main() async {
+  WidgetsFlutterBinding.ensureInitialized();
+  
+  // 2. ВАЖНОЕ ИСПРАВЛЕНИЕ: Передаем options
+  await Firebase.initializeApp(
+    options: DefaultFirebaseOptions.currentPlatform, 
+  );
+
   runApp(const FitnessApp());
 }
 
@@ -13,82 +24,59 @@ class FitnessApp extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
-      title: 'Neon Fitness MVP',
+      title: 'Iron Tracker',
       debugShowCheckedModeBanner: false,
-
-      // НАСТРОЙКИ ЛОКАЛИЗАЦИИ
       localizationsDelegates: const [
         GlobalMaterialLocalizations.delegate,
         GlobalWidgetsLocalizations.delegate,
         GlobalCupertinoLocalizations.delegate,
       ],
       supportedLocales: const [
-        Locale('ru', 'RU'), // Принудительно ставим Русский
+        Locale('ru', 'RU'),
       ],
-
-      theme: _buildThemeData(),
-      home: const DashboardScreen(),
+      theme: ThemeData(
+        brightness: Brightness.dark,
+        scaffoldBackgroundColor: const Color(0xFF0F0F0F),
+        primaryColor: const Color(0xFFCCFF00),
+        textTheme: GoogleFonts.manropeTextTheme(ThemeData.dark().textTheme),
+      ),
+      home: const AuthGate(),
     );
   }
+}
 
-  ThemeData _buildThemeData() {
-    final baseTheme = ThemeData(
-      brightness: Brightness.dark,
-      scaffoldBackgroundColor: const Color(0xFF121212),
-      primaryColor: const Color(0xFFCCFF00),
-      colorScheme: const ColorScheme.dark(
-        primary: Color(0xFFCCFF00),
-        surface: Color(0xFF1E1E1E),
-        error: Color(0xFFFF453A),
-        onPrimary: Colors.black,
-      ),
-    );
+class AuthGate extends StatelessWidget {
+  const AuthGate({super.key});
 
-    return baseTheme.copyWith(
-      textTheme: GoogleFonts.manropeTextTheme(baseTheme.textTheme).copyWith(
-        headlineMedium: GoogleFonts.manrope(
-          fontWeight: FontWeight.w700,
-          color: Colors.white,
-        ),
-        bodyMedium: GoogleFonts.manrope(
-          fontWeight: FontWeight.w500,
-          color: Colors.white,
-        ),
-        labelLarge: GoogleFonts.robotoMono(
-          fontWeight: FontWeight.w500,
-          color: Colors.white,
-        ),
-      ),
-      cardTheme: CardThemeData(
-        color: const Color(0xFF1E1E1E),
-        shape: RoundedRectangleBorder(
-          borderRadius: BorderRadius.circular(24.0),
-        ),
-        elevation: 0,
-      ),
-      inputDecorationTheme: InputDecorationTheme(
-        filled: true,
-        fillColor: const Color(0xFF2C2C2E),
-        border: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(16.0),
-          borderSide: BorderSide.none,
-        ),
-        hintStyle: const TextStyle(color: Color(0xFF8E8E93)),
-      ),
-      elevatedButtonTheme: ElevatedButtonThemeData(
-        style: ElevatedButton.styleFrom(
-          backgroundColor: const Color(0xFFCCFF00),
-          foregroundColor: Colors.black,
-          minimumSize: const Size.fromHeight(56.0),
-          shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(16.0),
-          ),
-          textStyle: GoogleFonts.manrope(
-            fontWeight: FontWeight.w700,
-            letterSpacing: 1.2,
-          ),
-        ),
-      ),
+  @override
+  Widget build(BuildContext context) {
+    return StreamBuilder<User?>(
+      stream: FirebaseAuth.instance.authStateChanges(),
+      builder: (context, snapshot) {
+        if (snapshot.connectionState == ConnectionState.waiting) {
+          return const Scaffold(
+            backgroundColor: Color(0xFF0F0F0F),
+            body: Center(
+              child: CircularProgressIndicator(color: Color(0xFFCCFF00)),
+            ),
+          );
+        }
+
+        if (snapshot.hasError) {
+          return const Scaffold(
+            backgroundColor: Color(0xFF0F0F0F),
+            body: Center(
+              child: Text("Ошибка подключения к базе данных", style: TextStyle(color: Colors.red)),
+            ),
+          );
+        }
+
+        if (snapshot.hasData) {
+          return const DashboardScreen();
+        }
+
+        return const AuthScreen();
+      },
     );
   }
 }

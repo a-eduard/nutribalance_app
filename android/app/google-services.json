@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "830594518730",
+    "project_id": "gym-tracker-9925c",
+    "storage_bucket": "gym-tracker-9925c.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:830594518730:android:83575990bf418cbd3e2e33",
+        "android_client_info": {
+          "package_name": "com.example.flutter_application_1"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyDOEfzqyqAsCCIpxowhi0bJJcsAmp1_oCA"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

@@ -3,7 +3,7 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'exercise_data.dart'; 
 import 'workout_session_screen.dart'; 
 import 'create_workout_screen.dart'; 
-import 'profile_screen.dart'; // <--- Подключили Профиль
+import 'profile_screen.dart'; 
 import 'ui_widgets.dart'; 
 import 'services/database_service.dart';
 
@@ -19,16 +19,15 @@ class _DashboardScreenState extends State<DashboardScreen> {
 
   @override
   Widget build(BuildContext context) {
-    // СПИСОК ЭКРАНОВ ДЛЯ НИЖНЕЙ НАВИГАЦИИ
+    // СПИСОК ЭКРАНОВ
     final List<Widget> widgetOptions = <Widget>[
       const HomeTab(),          // 0: Главная
       const WorkoutsListTab(),  // 1: Список тренировок
-      const ProfileScreen(),    // 2: Профиль (Новый экран)
+      const ProfileScreen(),    // 2: Профиль
     ];
 
     return Scaffold(
       backgroundColor: const Color(0xFF0F0F0F),
-      // extendBodyBehindAppBar: true, // Можно убрать, если мешает на профиле
       body: widgetOptions.elementAt(_selectedIndex),
       bottomNavigationBar: Container(
         decoration: BoxDecoration(
@@ -53,6 +52,32 @@ class _DashboardScreenState extends State<DashboardScreen> {
   }
 }
 
+// --- ХЕЛПЕР ДЛЯ ПРЕОБРАЗОВАНИЯ ДАННЫХ ---
+Workout _convertDocToWorkout(QueryDocumentSnapshot doc) {
+  Map<String, dynamic> data = doc.data() as Map<String, dynamic>;
+  
+  // 1. Упражнения
+  List<dynamic> exerciseNames = data['exercises'] ?? [];
+  List<Exercise> exercises = exerciseNames.map((name) {
+    return Exercise(id: DateTime.now().toString(), title: name.toString(), muscleGroup: "Общее");
+  }).toList();
+
+  // 2. Цели (Новая логика)
+  Map<String, String> targets = {};
+  if (data['targets'] != null) {
+    Map<String, dynamic> rawTargets = data['targets'];
+    rawTargets.forEach((key, value) {
+      targets[key] = value.toString();
+    });
+  }
+
+  return Workout(
+    name: data['name'] ?? "Без названия",
+    exercises: exercises,
+    targets: targets, // Передаем цели
+  );
+}
+
 // --- ВКЛАДКА 1: ГЛАВНАЯ ---
 class HomeTab extends StatelessWidget {
   const HomeTab({super.key});
@@ -62,12 +87,10 @@ class HomeTab extends StatelessWidget {
     return StreamBuilder<QuerySnapshot>(
       stream: DatabaseService().getUserWorkouts(),
       builder: (context, snapshot) {
-        // 1. ЗАГРУЗКА
         if (snapshot.connectionState == ConnectionState.waiting) {
           return const Center(child: CircularProgressIndicator(color: Color(0xFFCCFF00)));
         }
 
-        // 2. ОШИБКА
         if (snapshot.hasError) {
           return Center(child: Text("Ошибка: ${snapshot.error}", style: const TextStyle(color: Colors.red)));
         }
@@ -77,7 +100,6 @@ class HomeTab extends StatelessWidget {
 
         return Stack(
           children: [
-            // Фоновый градиент сверху
             Positioned(
               top: 0, left: 0, right: 0, height: 400,
               child: Container(
@@ -104,7 +126,6 @@ class HomeTab extends StatelessWidget {
   }
 }
 
-// СОСТОЯНИЕ: НЕТ ТРЕНИРОВОК
 class _EmptyStateView extends StatelessWidget {
   const _EmptyStateView();
 
@@ -141,27 +162,11 @@ class _EmptyStateView extends StatelessWidget {
   }
 }
 
-// СОСТОЯНИЕ: ЕСТЬ ТРЕНИРОВКИ
 class _ActiveStateView extends StatelessWidget {
   final QueryDocumentSnapshot latestWorkoutDoc;
   final int totalWorkouts;
 
   const _ActiveStateView({required this.latestWorkoutDoc, required this.totalWorkouts});
-
-  // Преобразование документа Firestore в объект Workout
-  Workout _convertDocToWorkout(QueryDocumentSnapshot doc) {
-    Map<String, dynamic> data = doc.data() as Map<String, dynamic>;
-    List<dynamic> exerciseNames = data['exercises'] ?? [];
-    
-    List<Exercise> exercises = exerciseNames.map((name) {
-      return Exercise(id: DateTime.now().toString(), title: name.toString(), muscleGroup: "Общее");
-    }).toList();
-
-    return Workout(
-      name: data['name'] ?? "Без названия",
-      exercises: exercises,
-    );
-  }
 
   @override
   Widget build(BuildContext context) {
@@ -173,7 +178,6 @@ class _ActiveStateView extends StatelessWidget {
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           const SizedBox(height: 20),
-          // ПРИВЕТСТВИЕ
           Padding(
             padding: const EdgeInsets.symmetric(horizontal: 24),
             child: Row(
@@ -198,7 +202,6 @@ class _ActiveStateView extends StatelessWidget {
           
           const SizedBox(height: 40),
           
-          // ЗАГОЛОВОК СТАТИСТИКИ
           Padding(
             padding: const EdgeInsets.symmetric(horizontal: 24),
             child: Row(children: const [
@@ -209,7 +212,6 @@ class _ActiveStateView extends StatelessWidget {
           ),
           const SizedBox(height: 8),
           
-          // ПЛАШКА СТАТИСТИКИ
           PremiumGlassCard(
             child: Row(
               mainAxisAlignment: MainAxisAlignment.spaceAround,
@@ -223,7 +225,6 @@ class _ActiveStateView extends StatelessWidget {
 
           const SizedBox(height: 32),
 
-          // ЗАГОЛОВОК ПОСЛЕДНЕЙ ТРЕНИРОВКИ
           Padding(
             padding: const EdgeInsets.symmetric(horizontal: 24),
             child: Row(children: const [
@@ -234,7 +235,6 @@ class _ActiveStateView extends StatelessWidget {
           ),
           const SizedBox(height: 8),
           
-          // КАРТОЧКА ПОСЛЕДНЕЙ ТРЕНИРОВКИ С МЕНЮ
           PremiumGlassCard(
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
@@ -246,16 +246,22 @@ class _ActiveStateView extends StatelessWidget {
                       child: Text(workoutObj.name.toUpperCase(), 
                         style: Theme.of(context).textTheme.headlineSmall?.copyWith(fontSize: 24), overflow: TextOverflow.ellipsis),
                     ),
-                    // --- МЕНЮ УПРАВЛЕНИЯ (EDIT/DELETE) ---
                     PopupMenuButton<String>(
                       icon: const Icon(Icons.more_vert, color: Colors.white),
                       color: const Color(0xFF1C1C1E),
                       onSelected: (value) {
                         if (value == 'edit') {
+                          // Подготовка целей для редактирования
+                          Map<String, String> currentTargets = {};
+                          if (data['targets'] != null) {
+                             (data['targets'] as Map<String, dynamic>).forEach((k, v) => currentTargets[k] = v.toString());
+                          }
+
                           Navigator.push(context, MaterialPageRoute(builder: (_) => CreateWorkoutScreen(
                             docId: latestWorkoutDoc.id,
                             initialName: data['name'],
                             initialExercises: List<String>.from(data['exercises']),
+                            initialTargets: currentTargets, // ПЕРЕДАЕМ ЦЕЛИ
                           )));
                         } else if (value == 'delete') {
                           DatabaseService().deleteWorkout(latestWorkoutDoc.id);
@@ -304,7 +310,6 @@ class _ActiveStateView extends StatelessWidget {
   }
 }
 
-// ВИДЖЕТ ЭЛЕМЕНТА СТАТИСТИКИ
 class _StatItem extends StatelessWidget {
   final String value;
   final String label;
@@ -322,18 +327,9 @@ class _StatItem extends StatelessWidget {
   }
 }
 
-// --- ВКЛАДКА 2: СПИСОК ВСЕХ ТРЕНИРОВОК ---
+// --- ВКЛАДКА 2: СПИСОК ---
 class WorkoutsListTab extends StatelessWidget {
   const WorkoutsListTab({super.key});
-
-  Workout _convertDocToWorkout(QueryDocumentSnapshot doc) {
-    Map<String, dynamic> data = doc.data() as Map<String, dynamic>;
-    List<dynamic> exerciseNames = data['exercises'] ?? [];
-    List<Exercise> exercises = exerciseNames.map((name) {
-      return Exercise(id: DateTime.now().toString(), title: name.toString(), muscleGroup: "Общее");
-    }).toList();
-    return Workout(name: data['name'] ?? "Без названия", exercises: exercises);
-  }
 
   @override
   Widget build(BuildContext context) {
@@ -388,16 +384,20 @@ class WorkoutsListTab extends StatelessWidget {
                       ),
                     ),
                     
-                    // --- МЕНЮ В СПИСКЕ ---
                     PopupMenuButton<String>(
                       icon: const Icon(Icons.more_vert, color: Colors.white),
                       color: const Color(0xFF1C1C1E),
                       onSelected: (value) {
                         if (value == 'edit') {
+                          Map<String, String> currentTargets = {};
+                          if (data['targets'] != null) {
+                             (data['targets'] as Map<String, dynamic>).forEach((k, v) => currentTargets[k] = v.toString());
+                          }
                           Navigator.push(context, MaterialPageRoute(builder: (_) => CreateWorkoutScreen(
                             docId: doc.id,
                             initialName: data['name'],
                             initialExercises: List<String>.from(data['exercises']),
+                            initialTargets: currentTargets,
                           )));
                         } else if (value == 'delete') {
                           DatabaseService().deleteWorkout(doc.id);

@@ -21,6 +21,7 @@ dependencies:
   firebase_core: ^3.10.1
   firebase_auth: ^5.4.1
   cloud_firestore: ^5.6.2
+  google_sign_in: 6.2.1
 
 dev_dependencies:
   flutter_test:
@@ -35,6 +36,9 @@ flutter_icons:
   ios: true
   image_path: "assets/icon.png"
   min_sdk_android: 21
+  # Адаптивные иконки (Android 8+)
+  adaptive_icon_background: "#0F0F0F"  # Твой черный цвет фона
+  adaptive_icon_foreground: "assets/icon.png" # Сама картинка
 
 flutter:
   uses-material-design: true

@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart'; // Auth
 import 'package:cloud_firestore/cloud_firestore.dart'; // DB
 import 'ui_widgets.dart';
+import 'services/auth_service.dart'; // <--- ПОДКЛЮЧИЛИ СЕРВИС
 
 class AuthScreen extends StatefulWidget {
   const AuthScreen({super.key});
@@ -17,9 +18,9 @@ class _AuthScreenState extends State<AuthScreen> {
   final _passwordController = TextEditingController();
   final _nameController = TextEditingController();
   
-  bool _isLoading = false; // Чтобы блокировать кнопку во время загрузки
+  bool _isLoading = false; 
 
-  // --- ЛОГИКА АВТОРИЗАЦИИ ---
+  // --- ОБЫЧНЫЙ ВХОД (Email/Pass) ---
   Future<void> _submitAuth() async {
     final email = _emailController.text.trim();
     final password = _passwordController.text.trim();
@@ -34,27 +35,24 @@ class _AuthScreenState extends State<AuthScreen> {
 
     try {
       if (isLogin) {
-        // 1. ВХОД
+        // ВХОД
         await FirebaseAuth.instance.signInWithEmailAndPassword(
           email: email,
           password: password,
         );
-        // Переход случится автоматически благодаря StreamBuilder в main.dart
       } else {
-        // 2. РЕГИСТРАЦИЯ
+        // РЕГИСТРАЦИЯ
         if (name.isEmpty) {
           _showError("Введите ваше Имя");
           setState(() => _isLoading = false);
           return;
         }
 
-        // Создаем юзера в Auth
         UserCredential cred = await FirebaseAuth.instance.createUserWithEmailAndPassword(
           email: email,
           password: password,
         );
 
-        // Сохраняем доп. данные в Firestore (имя)
         if (cred.user != null) {
           await FirebaseFirestore.instance.collection('users').doc(cred.user!.uid).set({
             'uid': cred.user!.uid,
@@ -65,7 +63,6 @@ class _AuthScreenState extends State<AuthScreen> {
         }
       }
     } on FirebaseAuthException catch (e) {
-      // Обработка ошибок Firebase
       String message = "Произошла ошибка";
       if (e.code == 'user-not-found') {
         message = "Пользователь не найден";
@@ -73,10 +70,22 @@ class _AuthScreenState extends State<AuthScreen> {
       else if (e.code == 'email-already-in-use') message = "Email уже занят";
       else if (e.code == 'weak-password') message = "Пароль слишком простой";
       else if (e.code == 'invalid-email') message = "Некорректный Email";
-      
       _showError(message);
     } catch (e) {
       _showError("Ошибка: $e");
+    } finally {
+      if (mounted) setState(() => _isLoading = false);
+    }
+  }
+
+  // --- ВХОД ЧЕРЕЗ GOOGLE ---
+  Future<void> _handleGoogleSignIn() async {
+    setState(() => _isLoading = true);
+    try {
+      await AuthService().signInWithGoogle();
+      // Навигация произойдет автоматически через StreamBuilder в main.dart
+    } catch (e) {
+      _showError("Ошибка входа через Google: $e");
     } finally {
       if (mounted) setState(() => _isLoading = false);
     }
@@ -107,8 +116,8 @@ class _AuthScreenState extends State<AuthScreen> {
                 const Icon(Icons.fitness_center, size: 80, color: Color(0xFFCCFF00)),
                 const SizedBox(height: 16),
                 const Text(
-                  "IRON TRACKER", 
-                  style: TextStyle(color: Colors.white, fontFamily: 'Manrope', fontWeight: FontWeight.w900, fontSize: 24, letterSpacing: 2),
+                  "TONNA", // Новое название
+                  style: TextStyle(color: Colors.white, fontWeight: FontWeight.w900, fontSize: 24, letterSpacing: 2),
                 ),
                 const SizedBox(height: 40),
 
@@ -128,21 +137,38 @@ class _AuthScreenState extends State<AuthScreen> {
                 ),
                 const SizedBox(height: 32),
 
-                // 3. INPUT FIELDS
+              // 3. INPUT FIELDS
                 if (!isLogin) ...[
                   _buildLabel("ИМЯ"),
-                  HeavyInput(controller: _nameController, hint: "Алекс", keyboardType: TextInputType.name, textAlign: TextAlign.left),
+                  HeavyInput(
+                    controller: _nameController, 
+                    hint: "Алекс", 
+                    keyboardType: TextInputType.name, 
+                    textAlign: TextAlign.left,
+                    onChanged: (val) {}, // <--- ДОБАВИЛИ ЗАГЛУШКУ
+                  ),
                   const SizedBox(height: 16),
                 ],
 
                 _buildLabel("EMAIL"),
-                HeavyInput(controller: _emailController, hint: "example@mail.ru", keyboardType: TextInputType.emailAddress, textAlign: TextAlign.left),
+                HeavyInput(
+                  controller: _emailController, 
+                  hint: "example@mail.ru", 
+                  keyboardType: TextInputType.emailAddress, 
+                  textAlign: TextAlign.left,
+                  onChanged: (val) {}, // <--- ДОБАВИЛИ ЗАГЛУШКУ
+                ),
                 const SizedBox(height: 16),
 
                 _buildLabel("ПАРОЛЬ"),
-                HeavyInput(controller: _passwordController, hint: "••••••", keyboardType: TextInputType.visiblePassword, textAlign: TextAlign.left, obscureText: true),
-                
-                const SizedBox(height: 32),
+                HeavyInput(
+                  controller: _passwordController, 
+                  hint: "••••••", 
+                  keyboardType: TextInputType.visiblePassword, 
+                  textAlign: TextAlign.left, 
+                  obscureText: true,
+                  onChanged: (val) {}, // <--- ДОБАВИЛИ ЗАГЛУШКУ
+                ),
 
                 // 4. ACTION BUTTON
                 _isLoading 
@@ -154,22 +180,33 @@ class _AuthScreenState extends State<AuthScreen> {
 
                 const SizedBox(height: 32),
 
-                // 5. SOCIAL (Визуал)
+                // 5. SOCIAL (Только Google)
                 Row(
                   children: [
                     Expanded(child: Divider(color: Colors.white.withOpacity(0.1))),
-                    Padding(padding: const EdgeInsets.symmetric(horizontal: 16), child: Text("ИЛИ", style: TextStyle(color: Colors.white.withOpacity(0.3), fontSize: 12))),
+                    Padding(padding: const EdgeInsets.symmetric(horizontal: 16), child: Text("ИЛИ ЧЕРЕЗ", style: TextStyle(color: Colors.white.withOpacity(0.3), fontSize: 12))),
                     Expanded(child: Divider(color: Colors.white.withOpacity(0.1))),
                   ],
                 ),
                 const SizedBox(height: 24),
-                Row(
-                  mainAxisAlignment: MainAxisAlignment.center,
-                  children: [
-                    _buildSocialBtn(Icons.g_mobiledata),
-                    const SizedBox(width: 20),
-                    _buildSocialBtn(Icons.apple),
-                  ],
+                
+                // Кнопка Google
+                GestureDetector(
+                  onTap: _isLoading ? null : _handleGoogleSignIn,
+                  child: Container(
+                    padding: const EdgeInsets.all(16),
+                    decoration: BoxDecoration(
+                      color: const Color(0xFF1C1C1E),
+                      shape: BoxShape.circle,
+                      border: Border.all(color: Colors.white.withOpacity(0.1)),
+                    ),
+                    child: Image.network(
+                      'https://cdn-icons-png.flaticon.com/512/2991/2991148.png', // Google Logo
+                      width: 30, 
+                      height: 30,
+                      errorBuilder: (context, error, stackTrace) => const Icon(Icons.g_mobiledata, color: Colors.white, size: 30),
+                    ),
+                  ),
                 )
               ],
             ),
@@ -212,18 +249,6 @@ class _AuthScreenState extends State<AuthScreen> {
         alignment: Alignment.centerLeft,
         child: Text(text, style: TextStyle(color: Colors.white.withOpacity(0.4), fontSize: 10, fontWeight: FontWeight.bold, letterSpacing: 1)),
       ),
-    );
-  }
-
-  Widget _buildSocialBtn(IconData icon) {
-    return Container(
-      width: 60, height: 60,
-      decoration: BoxDecoration(
-        color: const Color(0xFF1C1C1E),
-        shape: BoxShape.circle,
-        border: Border.all(color: Colors.white.withOpacity(0.1)),
-      ),
-      child: Icon(icon, color: Colors.white, size: 30),
     );
   }
 }

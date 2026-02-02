@@ -14,8 +14,13 @@ class DatabaseService {
     return user.uid;
   }
 
-  /// 1. СОЗДАТЬ: Сохранить новую программу
-  Future<void> saveUserWorkout(String name, List<String> exerciseNames) async {
+  // ==========================================
+  //                ТРЕНИРОВКИ
+  // ==========================================
+
+ /// 1. СОЗДАТЬ: Сохранить новую программу
+  // Добавили аргумент targets
+  Future<void> saveUserWorkout(String name, List<String> exerciseNames, Map<String, String> targets) async {
     try {
       await _db
           .collection('users')
@@ -24,6 +29,7 @@ class DatabaseService {
           .add({
         'name': name,
         'exercises': exerciseNames,
+        'targets': targets, // <--- СОХРАНЯЕМ В БАЗУ
         'createdAt': FieldValue.serverTimestamp(),
       });
     } catch (e) {
@@ -31,6 +37,8 @@ class DatabaseService {
       rethrow;
     }
   }
+
+  // ... (getUserWorkouts оставляем как есть, он просто тянет снапшот) ...
 
   /// 2. ЧИТАТЬ: Получить список программ (Stream)
   Stream<QuerySnapshot> getUserWorkouts() {
@@ -47,8 +55,9 @@ class DatabaseService {
     }
   }
 
-  /// 3. ОБНОВИТЬ: Изменить программу (название или список упражнений)
-  Future<void> updateWorkout(String docId, String newName, List<String> newExercises) async {
+/// 3. ОБНОВИТЬ: Изменить программу
+  // Добавили аргумент targets
+  Future<void> updateWorkout(String docId, String newName, List<String> newExercises, Map<String, String> targets) async {
     try {
       await _db
           .collection('users')
@@ -58,6 +67,7 @@ class DatabaseService {
           .update({
         'name': newName,
         'exercises': newExercises,
+        'targets': targets, // <--- ОБНОВЛЯЕМ В БАЗЕ
         'updatedAt': FieldValue.serverTimestamp(),
       });
     } catch (e) {
@@ -66,6 +76,7 @@ class DatabaseService {
     }
   }
 
+// ... остальные методы без изменений
   /// 4. УДАЛИТЬ: Удалить программу
   Future<void> deleteWorkout(String docId) async {
     try {
@@ -98,5 +109,56 @@ class DatabaseService {
       print("Error saving session: $e");
       rethrow;
     }
+  }
+
+  // ==========================================
+  //           БИБЛИОТЕКА УПРАЖНЕНИЙ
+  // ==========================================
+
+  /// 1. Получить поток упражнений
+  Stream<QuerySnapshot> getCustomExercises() {
+    try {
+      return _db
+          .collection('users')
+          .doc(_uid)
+          .collection('custom_exercises')
+          .orderBy('title') // Сортируем по алфавиту
+          .snapshots();
+    } catch (e) {
+      print("Error getting exercises: $e");
+      return const Stream.empty();
+    }
+  }
+
+  /// 2. Добавить упражнение
+  Future<void> addCustomExercise(String title, String muscleGroup) async {
+    await _db.collection('users').doc(_uid).collection('custom_exercises').add({
+      'title': title,
+      'muscleGroup': muscleGroup,
+      'createdAt': FieldValue.serverTimestamp(),
+    });
+  }
+
+  /// 3. Обновить упражнение
+  Future<void> updateExercise(String docId, String newName, String newMuscleGroup) async {
+    await _db
+        .collection('users')
+        .doc(_uid)
+        .collection('custom_exercises')
+        .doc(docId)
+        .update({
+      'title': newName,
+      'muscleGroup': newMuscleGroup,
+    });
+  }
+
+  /// 4. Удалить упражнение
+  Future<void> deleteExercise(String docId) async {
+    await _db
+        .collection('users')
+        .doc(_uid)
+        .collection('custom_exercises')
+        .doc(docId)
+        .delete();
   }
 }

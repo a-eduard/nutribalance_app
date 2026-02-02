@@ -96,52 +96,46 @@ class NeonActionButton extends StatelessWidget {
 class HeavyInput extends StatelessWidget {
   final TextEditingController controller;
   final String hint;
-  final Function(String)? onChanged;
-  final TextInputType? keyboardType;
-  final TextAlign? textAlign;
-  final bool obscureText;
+  final Function(String) onChanged;
+  final VoidCallback? onPickerTap; // <--- НОВОЕ ПОЛЕ
 
   const HeavyInput({
-    super.key, 
-    required this.controller, 
-    required this.hint, 
-    this.onChanged,
-    this.keyboardType,
-    this.textAlign,
-    this.obscureText = false,
+    super.key,
+    required this.controller,
+    required this.hint,
+    required this.onChanged,
+    this.onPickerTap, // <--- В КОНСТРУКТОР
+    TextInputType? keyboardType,
+    TextAlign? textAlign,
+    bool? obscureText,
   });
 
   @override
   Widget build(BuildContext context) {
     return Container(
-      height: 50,
       decoration: BoxDecoration(
-        color: const Color(0xFF1C1C1E), // Чуть светлее фона
+        color: const Color(0xFF1C1C1E),
         borderRadius: BorderRadius.circular(12),
         border: Border.all(color: Colors.white.withOpacity(0.1)),
       ),
-      child: Center(
-        child: TextField(
-          controller: controller,
-          onChanged: onChanged,
-          obscureText: obscureText,
-          // Если тип не передан, используем цифры
-          keyboardType: keyboardType ?? TextInputType.number, 
-          // Если выравнивание не передано, по центру
-          textAlign: textAlign ?? TextAlign.center,
-          style: const TextStyle(
-            color: Colors.white, 
-            fontSize: 16, 
-            fontWeight: FontWeight.w700,
-            // fontFamily: 'Manrope',
-          ),
-          decoration: InputDecoration(
-            hintText: hint,
-            hintStyle: TextStyle(color: Colors.white.withOpacity(0.2)),
-            border: InputBorder.none,
-            // Сдвигаем контент, чтобы курсор был ровно
-            contentPadding: const EdgeInsets.symmetric(horizontal: 16), 
-          ),
+      child: TextField(
+        controller: controller,
+        onChanged: onChanged,
+        keyboardType: TextInputType.number,
+        style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 18),
+        textAlign: TextAlign.center,
+        decoration: InputDecoration(
+          hintText: hint,
+          hintStyle: TextStyle(color: Colors.white.withOpacity(0.3)),
+          border: InputBorder.none,
+          contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+          // ДОБАВЛЯЕМ ИКОНКУ, ЕСЛИ ПЕРЕДАН CALLBACK
+          suffixIcon: onPickerTap != null 
+            ? GestureDetector(
+                onTap: onPickerTap,
+                child: Icon(Icons.unfold_more, color: Colors.white.withOpacity(0.3), size: 20),
+              )
+            : null,
         ),
       ),
     );

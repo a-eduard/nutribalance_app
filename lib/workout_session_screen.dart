@@ -1,10 +1,11 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
-import 'dart:ui'; // Нужно для FontFeature
+import 'package:flutter/cupertino.dart'; // ДЛЯ ПИКЕРА
+import 'dart:ui'; // ДЛЯ FontFeature
 import 'exercise_data.dart';
 import 'workout_success_screen.dart';
-import 'ui_widgets.dart'; // Виджеты дизайна
-import 'services/database_service.dart'; // <--- СЕРВИС БАЗЫ ДАННЫХ
+import 'ui_widgets.dart';
+import 'services/database_service.dart';
 
 class WorkoutSessionScreen extends StatefulWidget {
   final Workout workout;
@@ -19,17 +20,16 @@ class _WorkoutSessionScreenState extends State<WorkoutSessionScreen> {
   Timer? _timer;
   int _secondsElapsed = 0;
   
-  // 1. Время начала для расчета длительности
   late DateTime _startTime;
   
   late List<Map<String, dynamic>> _sessionData;
   final Map<String, List<Map<String, dynamic>>> _historyCache = {};
-  bool _isSaving = false; // Чтобы не нажать дважды
+  bool _isSaving = false;
 
   @override
   void initState() {
     super.initState();
-    _startTime = DateTime.now(); // Фиксируем старт
+    _startTime = DateTime.now();
     _initializeSession();
     _startTimer();
   }
@@ -69,24 +69,19 @@ class _WorkoutSessionScreenState extends State<WorkoutSessionScreen> {
     return "$minutes:$seconds";
   }
 
-  // --- 2. ЛОГИКА ЗАВЕРШЕНИЯ ---
   void _finishWorkout() async {
-    if (_isSaving) return; // Защита от двойного клика
+    if (_isSaving) return; 
     setState(() => _isSaving = true);
 
-    // Считаем статистику
     int totalTonnage = 0;
     int completedExercisesCount = 0;
 
-    // Проходим по всем упражнениям
     for (var exercise in _sessionData) {
       bool isExerciseStarted = false;
-      
       for (var set in exercise['sets']) {
         String wStr = set['weight'].toString();
         String rStr = set['reps'].toString();
         
-        // Если сет заполнен
         if (wStr.isNotEmpty && rStr.isNotEmpty) {
           isExerciseStarted = true;
           int weight = int.tryParse(wStr) ?? 0;
@@ -94,19 +89,13 @@ class _WorkoutSessionScreenState extends State<WorkoutSessionScreen> {
           totalTonnage += (weight * reps);
         }
       }
-      
-      if (isExerciseStarted) {
-        completedExercisesCount++;
-      }
+      if (isExerciseStarted) completedExercisesCount++;
     }
 
-    // Считаем время в минутах
     int durationMinutes = DateTime.now().difference(_startTime).inMinutes;
-    // Если меньше 1 минуты, пишем 1, чтобы не было 0
     if (durationMinutes == 0) durationMinutes = 1;
 
     try {
-      // Сохраняем в Firebase
       await DatabaseService().saveWorkoutSession(
         widget.workout.name,
         totalTonnage,
@@ -115,13 +104,12 @@ class _WorkoutSessionScreenState extends State<WorkoutSessionScreen> {
 
       if (!mounted) return;
 
-      // 3. Переход на Экран Успеха
       Navigator.pushReplacement(
         context,
         MaterialPageRoute(
           builder: (context) => WorkoutSuccessScreen(
             durationMinutes: durationMinutes,
-            tonnage: totalTonnage, // ИСПРАВЛЕНО: Оставили только tonnage
+            tonnage: totalTonnage, 
             exercisesCount: completedExercisesCount,
           ),
         ),
@@ -164,7 +152,6 @@ class _WorkoutSessionScreenState extends State<WorkoutSessionScreen> {
         backgroundColor: Colors.transparent,
         elevation: 0,
       ),
-      // Кнопка ЗАВЕРШИТЬ внизу
       bottomNavigationBar: Container(
         color: const Color(0xFF0F0F0F),
         padding: const EdgeInsets.all(24),
@@ -172,7 +159,7 @@ class _WorkoutSessionScreenState extends State<WorkoutSessionScreen> {
           ? const Center(child: CircularProgressIndicator(color: Color(0xFFCCFF00)))
           : NeonActionButton(
               text: 'ЗАВЕРШИТЬ ТРЕНИРОВКУ',
-              onTap: _finishWorkout, // Привязали метод
+              onTap: _finishWorkout,
             ),
       ),
       body: GestureDetector(
@@ -185,8 +172,12 @@ class _WorkoutSessionScreenState extends State<WorkoutSessionScreen> {
             final title = exercise['title'];
             final history = _historyCache[title];
 
+            // ДОСТАЕМ ЦЕЛЬ ИЗ WORKOUT
+            final targetGoal = widget.workout.targets[title];
+
             return _ExerciseCard(
               title: title,
+              target: targetGoal, // ПЕРЕДАЕМ ЦЕЛЬ В UI
               setsData: exercise['sets'],
               historySets: history,
               onAddSet: () => _addSet(index),
@@ -201,6 +192,7 @@ class _WorkoutSessionScreenState extends State<WorkoutSessionScreen> {
 
 class _ExerciseCard extends StatelessWidget {
   final String title;
+  final String? target; // <-- НОВОЕ ПОЛЕ
   final List<dynamic> setsData;
   final List<Map<String, dynamic>>? historySets;
   final VoidCallback onAddSet;
@@ -208,6 +200,7 @@ class _ExerciseCard extends StatelessWidget {
 
   const _ExerciseCard({
     required this.title,
+    this.target,
     required this.setsData,
     this.historySets,
     required this.onAddSet,
@@ -220,7 +213,30 @@ class _ExerciseCard extends StatelessWidget {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text(title, style: Theme.of(context).textTheme.headlineSmall?.copyWith(fontSize: 20, color: Colors.white)),
+          // ЗАГОЛОВОК + ЦЕЛЬ
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              Expanded(child: Text(title, style: Theme.of(context).textTheme.headlineSmall?.copyWith(fontSize: 20, color: Colors.white))),
+              if (target != null && target!.isNotEmpty)
+                Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                  decoration: BoxDecoration(
+                    color: const Color(0xFFCCFF00).withOpacity(0.1),
+                    borderRadius: BorderRadius.circular(8),
+                    border: Border.all(color: const Color(0xFFCCFF00).withOpacity(0.3)),
+                  ),
+                  child: Row(
+                    children: [
+                      const Icon(Icons.track_changes, size: 14, color: Color(0xFFCCFF00)),
+                      const SizedBox(width: 4),
+                      Text(target!, style: const TextStyle(color: Color(0xFFCCFF00), fontWeight: FontWeight.bold, fontSize: 12)),
+                    ],
+                  ),
+                ),
+            ],
+          ),
+          
           const SizedBox(height: 16),
           
           Row(
@@ -321,6 +337,75 @@ class _AutoSaveSetRowState extends State<AutoSaveSetRow> {
     _checkIfFilled();
   }
 
+  // --- ЛОГИКА БАРАБАНА (PICKER) ---
+  void _showWheelPicker({
+    required TextEditingController controller,
+    required String dataKey,
+    required int min,
+    required int max,
+    String suffix = '',
+  }) {
+    FocusScope.of(context).unfocus();
+
+    int currentValue = int.tryParse(controller.text) ?? 0;
+    if (currentValue < min) currentValue = min;
+    if (currentValue > max) currentValue = max;
+
+    final FixedExtentScrollController scrollController = 
+        FixedExtentScrollController(initialItem: currentValue - min);
+
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: const Color(0xFF1C1C1E),
+      shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(24))),
+      builder: (context) {
+        return SizedBox(
+          height: 250,
+          child: Column(
+            children: [
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                decoration: BoxDecoration(
+                  border: Border(bottom: BorderSide(color: Colors.white.withOpacity(0.1))),
+                ),
+                child: Row(
+                  mainAxisAlignment: MainAxisAlignment.end,
+                  children: [
+                    GestureDetector(
+                      onTap: () => Navigator.pop(context),
+                      child: const Text("ГОТОВО", style: TextStyle(color: Color(0xFFCCFF00), fontWeight: FontWeight.bold)),
+                    )
+                  ],
+                ),
+              ),
+              Expanded(
+                child: CupertinoTheme(
+                  data: const CupertinoThemeData(
+                    textTheme: CupertinoTextThemeData(pickerTextStyle: TextStyle(color: Colors.white, fontSize: 24)),
+                  ),
+                  child: CupertinoPicker(
+                    scrollController: scrollController,
+                    itemExtent: 40,
+                    magnification: 1.22,
+                    useMagnifier: true,
+                    onSelectedItemChanged: (index) {
+                      final newValue = (min + index).toString();
+                      controller.text = newValue;
+                      _updateData(dataKey, newValue);
+                    },
+                    children: List.generate(max - min + 1, (index) {
+                      return Center(child: Text("${min + index}$suffix", style: const TextStyle(color: Colors.white)));
+                    }),
+                  ),
+                ),
+              ),
+            ],
+          ),
+        );
+      },
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     return Container(
@@ -339,9 +424,36 @@ class _AutoSaveSetRowState extends State<AutoSaveSetRow> {
             ),
           ),
           const SizedBox(width: 16),
-          Expanded(child: HeavyInput(controller: _weightController, hint: widget.prevWeight ?? "-", onChanged: (val) => _updateData('weight', val))),
+          Expanded(
+            child: HeavyInput(
+              controller: _weightController, 
+              hint: widget.prevWeight ?? "-", 
+              onChanged: (val) => _updateData('weight', val),
+              // ПИКЕР ВЕСА
+              onPickerTap: () => _showWheelPicker(
+                controller: _weightController, 
+                dataKey: 'weight', 
+                min: 0, 
+                max: 500, 
+                suffix: ' кг'
+              ),
+            )
+          ),
           const SizedBox(width: 16),
-          Expanded(child: HeavyInput(controller: _repsController, hint: widget.prevReps ?? "-", onChanged: (val) => _updateData('reps', val))),
+          Expanded(
+            child: HeavyInput(
+              controller: _repsController, 
+              hint: widget.prevReps ?? "-", 
+              onChanged: (val) => _updateData('reps', val),
+              // ПИКЕР ПОВТОРОВ
+              onPickerTap: () => _showWheelPicker(
+                controller: _repsController, 
+                dataKey: 'reps', 
+                min: 0, 
+                max: 100
+              ),
+            )
+          ),
         ],
       ),
     );

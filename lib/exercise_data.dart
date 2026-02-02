@@ -17,10 +17,12 @@ class Exercise {
 class Workout {
   final String name;
   final List<Exercise> exercises;
+  final Map<String, String> targets; // <--- НОВОЕ ПОЛЕ
 
   Workout({
     required this.name,
     required this.exercises,
+    this.targets = const {}, // По умолчанию пустая map
   });
 }
 

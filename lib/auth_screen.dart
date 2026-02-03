@@ -143,9 +143,9 @@ class _AuthScreenState extends State<AuthScreen> {
                   HeavyInput(
                     controller: _nameController, 
                     hint: "Алекс", 
-                    keyboardType: TextInputType.name, 
-                    textAlign: TextAlign.left,
-                    onChanged: (val) {}, // <--- ДОБАВИЛИ ЗАГЛУШКУ
+                    keyboardType: TextInputType.name, // БУКВЫ
+                    textAlign: TextAlign.left,        // СЛЕВА
+                    onChanged: (val) {}, 
                   ),
                   const SizedBox(height: 16),
                 ],
@@ -154,9 +154,9 @@ class _AuthScreenState extends State<AuthScreen> {
                 HeavyInput(
                   controller: _emailController, 
                   hint: "example@mail.ru", 
-                  keyboardType: TextInputType.emailAddress, 
+                  keyboardType: TextInputType.emailAddress, // EMAIL КЛАВИАТУРА (@)
                   textAlign: TextAlign.left,
-                  onChanged: (val) {}, // <--- ДОБАВИЛИ ЗАГЛУШКУ
+                  onChanged: (val) {}, 
                 ),
                 const SizedBox(height: 16),
 
@@ -164,10 +164,10 @@ class _AuthScreenState extends State<AuthScreen> {
                 HeavyInput(
                   controller: _passwordController, 
                   hint: "••••••", 
-                  keyboardType: TextInputType.visiblePassword, 
+                  keyboardType: TextInputType.visiblePassword, // ПАРОЛЬ
                   textAlign: TextAlign.left, 
-                  obscureText: true,
-                  onChanged: (val) {}, // <--- ДОБАВИЛИ ЗАГЛУШКУ
+                  obscureText: true, // <--- СКРЫВАЕМ ТОЧКАМИ
+                  onChanged: (val) {}, 
                 ),
 
                 // 4. ACTION BUTTON

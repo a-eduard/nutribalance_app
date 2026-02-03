@@ -97,17 +97,20 @@ class HeavyInput extends StatelessWidget {
   final TextEditingController controller;
   final String hint;
   final Function(String) onChanged;
-  final VoidCallback? onPickerTap; // <--- НОВОЕ ПОЛЕ
+  final VoidCallback? onPickerTap; 
+  final TextInputType keyboardType; // <--- НОВОЕ ПОЛЕ
+  final bool obscureText;           // <--- НОВОЕ ПОЛЕ (для пароля)
+  final TextAlign textAlign;        // <--- НОВОЕ ПОЛЕ (для выравнивания)
 
   const HeavyInput({
     super.key,
     required this.controller,
     required this.hint,
     required this.onChanged,
-    this.onPickerTap, // <--- В КОНСТРУКТОР
-    TextInputType? keyboardType,
-    TextAlign? textAlign,
-    bool? obscureText,
+    this.onPickerTap,
+    this.keyboardType = TextInputType.number, // По умолчанию - цифры (для тренировок)
+    this.obscureText = false,                 // По умолчанию - текст виден
+    this.textAlign = TextAlign.center,        // По умолчанию - по центру
   });
 
   @override
@@ -121,15 +124,15 @@ class HeavyInput extends StatelessWidget {
       child: TextField(
         controller: controller,
         onChanged: onChanged,
-        keyboardType: TextInputType.number,
+        keyboardType: keyboardType, // <--- ИСПОЛЬЗУЕМ ПЕРЕДАННЫЙ ТИП
+        obscureText: obscureText,   // <--- СКРЫВАЕМ ТЕКСТ ЕСЛИ НАДО
         style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 18),
-        textAlign: TextAlign.center,
+        textAlign: textAlign,       // <--- ИСПОЛЬЗУЕМ ВЫРАВНИВАНИЕ
         decoration: InputDecoration(
           hintText: hint,
           hintStyle: TextStyle(color: Colors.white.withOpacity(0.3)),
           border: InputBorder.none,
           contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
-          // ДОБАВЛЯЕМ ИКОНКУ, ЕСЛИ ПЕРЕДАН CALLBACK
           suffixIcon: onPickerTap != null 
             ? GestureDetector(
                 onTap: onPickerTap,

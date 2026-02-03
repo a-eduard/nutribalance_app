@@ -1,22 +1,15 @@
 import 'package:flutter/material.dart';
+import 'package:cloud_firestore/cloud_firestore.dart'; // <--- ВАЖНО
 import 'exercise_data.dart';
 import 'exercise_selection_screen.dart';
 import 'ui_widgets.dart';
 import 'services/database_service.dart';
 
 class CreateWorkoutScreen extends StatefulWidget {
-  final String? docId;
-  final String? initialName;
-  final List<String>? initialExercises;
-  final Map<String, String>? initialTargets; // <--- ПРИНИМАЕМ ЦЕЛИ
+  // Вместо кучи параметров принимаем один документ (если редактируем)
+  final DocumentSnapshot? existingWorkout;
 
-  const CreateWorkoutScreen({
-    super.key, 
-    this.docId, 
-    this.initialName, 
-    this.initialExercises,
-    this.initialTargets,
-  });
+  const CreateWorkoutScreen({super.key, this.existingWorkout});
 
   @override
   State<CreateWorkoutScreen> createState() => _CreateWorkoutScreenState();
@@ -26,32 +19,45 @@ class _CreateWorkoutScreenState extends State<CreateWorkoutScreen> {
   late TextEditingController _nameController;
   final List<Exercise> _selectedExercises = [];
   
-  // Храним контроллеры для ввода целей: Ключ = ID упражнения (временный)
-  final Map<String, TextEditingController> _targetControllers = {}; 
+  // Контроллеры для целей: Ключ = ID упражнения (уникальный)
+  final Map<String, TextEditingController> _targetControllers = {};
   
   bool _isSaving = false;
 
   @override
   void initState() {
     super.initState();
-    _nameController = TextEditingController(text: widget.initialName ?? "");
+    _nameController = TextEditingController();
 
-    // Инициализация при редактировании
-    if (widget.initialExercises != null) {
-      for (var name in widget.initialExercises!) {
-        final newExercise = Exercise(
-            id: DateTime.now().toString() + name, // Уникальный ID для UI
+    // ЛОГИКА ЗАПОЛНЕНИЯ ДАННЫМИ (ЕСЛИ РЕДАКТИРУЕМ)
+    if (widget.existingWorkout != null) {
+      final data = widget.existingWorkout!.data() as Map<String, dynamic>;
+      
+      // 1. Название
+      _nameController.text = data['name'] ?? '';
+
+      // 2. Упражнения и Цели
+      if (data['exercises'] != null) {
+        final exercisesList = List<String>.from(data['exercises']);
+        final targetsMap = data['targets'] != null 
+            ? Map<String, String>.from(data['targets']) 
+            : <String, String>{};
+
+        for (var name in exercisesList) {
+          // Генерируем уникальный ID для UI
+          final uniqueId = DateTime.now().millisecondsSinceEpoch.toString() + name + _selectedExercises.length.toString();
+          
+          // Добавляем упражнение в список
+          _selectedExercises.add(Exercise(
+            id: uniqueId, 
             title: name, 
-            muscleGroup: "Сохраненное"
-        );
-        _selectedExercises.add(newExercise);
-        
-        // Достаем цель, если есть
-        String existingTarget = "";
-        if (widget.initialTargets != null && widget.initialTargets!.containsKey(name)) {
-          existingTarget = widget.initialTargets![name]!;
+            muscleGroup: "Сохраненное" // Можно не уточнять, это для UI
+          ));
+          
+          // Создаем контроллер и сразу вписываем туда старую цель
+          String existingTarget = targetsMap[name] ?? "";
+          _targetControllers[uniqueId] = TextEditingController(text: existingTarget);
         }
-        _targetControllers[newExercise.id] = TextEditingController(text: existingTarget);
       }
     }
   }
@@ -64,21 +70,13 @@ class _CreateWorkoutScreenState extends State<CreateWorkoutScreen> {
   }
 
   Future<void> _navigateAndAddExercise() async {
-    final result = await Navigator.push(
-      context,
-      MaterialPageRoute(builder: (context) => const ExerciseSelectionScreen()),
-    );
-
+    final result = await Navigator.push(context, MaterialPageRoute(builder: (context) => const ExerciseSelectionScreen()));
     if (result != null && result is List<Exercise>) {
       setState(() {
         for (var ex in result) {
-           // Создаем копию упражнения с уникальным ID для этого экрана
-           // чтобы контроллеры не путались
            final uniqueId = DateTime.now().millisecondsSinceEpoch.toString() + ex.title;
-           final newEx = Exercise(id: uniqueId, title: ex.title, muscleGroup: ex.muscleGroup);
-           
-           _selectedExercises.add(newEx);
-           _targetControllers[uniqueId] = TextEditingController(); // Пустой контроллер
+           _selectedExercises.add(Exercise(id: uniqueId, title: ex.title, muscleGroup: ex.muscleGroup));
+           _targetControllers[uniqueId] = TextEditingController(); 
         }
       });
     }
@@ -95,7 +93,7 @@ class _CreateWorkoutScreenState extends State<CreateWorkoutScreen> {
   void _removeExercise(int index) {
     setState(() {
       final ex = _selectedExercises[index];
-      _targetControllers[ex.id]?.dispose(); // Чистим память
+      _targetControllers[ex.id]?.dispose();
       _targetControllers.remove(ex.id);
       _selectedExercises.removeAt(index);
     });
@@ -103,34 +101,36 @@ class _CreateWorkoutScreenState extends State<CreateWorkoutScreen> {
 
   Future<void> _saveWorkout() async {
     final name = _nameController.text.trim();
-    if (name.isEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Введите название'), backgroundColor: Colors.red));
+    if (name.isEmpty || _selectedExercises.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Введите название и добавьте упражнения'), backgroundColor: Colors.red));
       return;
     }
-    if (_selectedExercises.isEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Добавьте упражнения'), backgroundColor: Colors.red));
-      return;
-    }
-
     setState(() => _isSaving = true);
 
     try {
-      // 1. Собираем список имен
       List<String> exerciseNames = _selectedExercises.map((e) => e.title).toList();
       
-      // 2. Собираем карту целей (Имя -> Цель)
-      Map<String, String> targetsMap = {};
+      // Собираем карту целей
+      Map<String, String> targetsToSave = {};
       for (var ex in _selectedExercises) {
-        final text = _targetControllers[ex.id]?.text.trim() ?? "";
+        String text = _targetControllers[ex.id]?.text.trim() ?? "";
         if (text.isNotEmpty) {
-          targetsMap[ex.title] = text;
+          targetsToSave[ex.title] = text;
         }
       }
 
-      if (widget.docId == null) {
-        await DatabaseService().saveUserWorkout(name, exerciseNames, targetsMap);
+      // ГЛАВНОЕ ИЗМЕНЕНИЕ: ПРОВЕРКА НА REUPDATE
+      if (widget.existingWorkout != null) {
+        // ОБНОВЛЕНИЕ
+        await DatabaseService().updateWorkout(
+          widget.existingWorkout!.id, 
+          name, 
+          exerciseNames, 
+          targetsToSave
+        );
       } else {
-        await DatabaseService().updateWorkout(widget.docId!, name, exerciseNames, targetsMap);
+        // СОЗДАНИЕ
+        await DatabaseService().saveUserWorkout(name, exerciseNames, targetsToSave);
       }
 
       if (mounted) Navigator.pop(context, true);
@@ -143,30 +143,26 @@ class _CreateWorkoutScreenState extends State<CreateWorkoutScreen> {
 
   @override
   Widget build(BuildContext context) {
-    final pageTitle = widget.docId == null ? 'Новая тренировка' : 'Редактирование';
+    final isEditing = widget.existingWorkout != null;
 
     return Scaffold(
       backgroundColor: const Color(0xFF0F0F0F),
       appBar: AppBar(
-        title: Text(pageTitle, style: const TextStyle(fontWeight: FontWeight.bold)),
-        centerTitle: true,
+        title: Text(isEditing ? 'Редактировать' : 'Новая тренировка', style: const TextStyle(fontWeight: FontWeight.bold)),
         backgroundColor: Colors.transparent,
         elevation: 0,
         actions: [
           _isSaving 
-            ? const Padding(padding: EdgeInsets.only(right: 16), child: Center(child: SizedBox(width: 20, height: 20, child: CircularProgressIndicator(color: Color(0xFFCCFF00), strokeWidth: 2))))
+            ? const Center(child: Padding(padding: EdgeInsets.only(right: 16), child: CircularProgressIndicator(color: Color(0xFFCCFF00))))
             : TextButton(onPressed: _saveWorkout, child: const Text('СОХРАНИТЬ', style: TextStyle(color: Color(0xFFCCFF00), fontWeight: FontWeight.bold)))
         ],
       ),
       bottomNavigationBar: Container(
         padding: const EdgeInsets.all(24),
         color: const Color(0xFF0F0F0F),
-        child: IgnorePointer(
-          ignoring: _isSaving,
-          child: Opacity(
-            opacity: _isSaving ? 0.5 : 1.0,
-            child: NeonActionButton(text: "ДОБАВИТЬ УПРАЖНЕНИЕ", onTap: _navigateAndAddExercise, isFullWidth: true),
-          ),
+        child: Opacity(
+          opacity: _isSaving ? 0.5 : 1.0,
+          child: NeonActionButton(text: "ДОБАВИТЬ УПРАЖНЕНИЕ", onTap: _isSaving ? () {} : _navigateAndAddExercise, isFullWidth: true),
         ),
       ),
       body: GestureDetector(
@@ -178,69 +174,57 @@ class _CreateWorkoutScreenState extends State<CreateWorkoutScreen> {
               child: TextField(
                 controller: _nameController,
                 style: const TextStyle(fontSize: 24, fontWeight: FontWeight.bold, color: Colors.white),
-                decoration: const InputDecoration(
-                  hintText: 'Название (напр. Спина)',
-                  hintStyle: TextStyle(color: Colors.grey),
-                  border: InputBorder.none,
-                  suffixIcon: Icon(Icons.edit, color: Color(0xFFCCFF00)),
-                ),
+                decoration: const InputDecoration(hintText: 'Название (напр. Спина)', hintStyle: TextStyle(color: Colors.grey), border: InputBorder.none, suffixIcon: Icon(Icons.edit, color: Color(0xFFCCFF00))),
                 enabled: !_isSaving,
               ),
             ),
             const Divider(color: Colors.white10),
             Expanded(
-              child: _selectedExercises.isEmpty
-                  ? Center(child: Text('Список пуст', style: TextStyle(color: Colors.white.withOpacity(0.3))))
-                  : ReorderableListView.builder(
-                      padding: const EdgeInsets.only(bottom: 20),
-                      itemCount: _selectedExercises.length,
-                      onReorder: _onReorder,
-                      buildDefaultDragHandles: !_isSaving,
-                      itemBuilder: (context, index) {
-                        final exercise = _selectedExercises[index];
-                        return Container(
-                          key: ValueKey(exercise.id),
-                          child: PremiumGlassCard(
-                            child: Row(
+              child: ReorderableListView.builder(
+                padding: const EdgeInsets.only(bottom: 20),
+                itemCount: _selectedExercises.length,
+                onReorder: _onReorder,
+                buildDefaultDragHandles: !_isSaving,
+                itemBuilder: (context, index) {
+                  final exercise = _selectedExercises[index];
+                  return Container(
+                    key: ValueKey(exercise.id),
+                    child: PremiumGlassCard(
+                      child: Row(
+                        children: [
+                          const Icon(Icons.drag_handle, color: Color(0xFF8E8E93)),
+                          const SizedBox(width: 16),
+                          Expanded(
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
                               children: [
-                                const Icon(Icons.drag_handle, color: Color(0xFF8E8E93)),
-                                const SizedBox(width: 16),
-                                Expanded(
-                                  child: Column(
-                                    crossAxisAlignment: CrossAxisAlignment.start,
-                                    children: [
-                                      Text(exercise.title, style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 16)),
-                                      const SizedBox(height: 8),
-                                      // ПОЛЕ ВВОДА ЦЕЛИ
-                                      Container(
-                                        height: 36,
-                                        padding: const EdgeInsets.symmetric(horizontal: 10),
-                                        decoration: BoxDecoration(
-                                          color: Colors.black.withOpacity(0.3),
-                                          borderRadius: BorderRadius.circular(8),
-                                        ),
-                                        child: TextField(
-                                          controller: _targetControllers[exercise.id],
-                                          style: const TextStyle(color: Color(0xFFCCFF00), fontSize: 14),
-                                          decoration: const InputDecoration(
-                                            hintText: "Цель (напр. 3x12)",
-                                            hintStyle: TextStyle(color: Colors.grey, fontSize: 12),
-                                            border: InputBorder.none,
-                                            icon: Icon(Icons.track_changes, size: 14, color: Colors.grey),
-                                            contentPadding: EdgeInsets.only(bottom: 12)
-                                          ),
-                                        ),
-                                      ),
-                                    ],
+                                Text(exercise.title, style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 16)),
+                                const SizedBox(height: 8),
+                                Container(
+                                  height: 40,
+                                  padding: const EdgeInsets.symmetric(horizontal: 10),
+                                  decoration: BoxDecoration(color: Colors.black.withValues(alpha: 0.3), borderRadius: BorderRadius.circular(8)),
+                                  child: TextField(
+                                    controller: _targetControllers[exercise.id],
+                                    style: const TextStyle(color: Color(0xFFCCFF00), fontSize: 14),
+                                    decoration: const InputDecoration(
+                                      hintText: "Цель (напр. 4x12)", 
+                                      hintStyle: TextStyle(color: Colors.grey, fontSize: 13), 
+                                      border: InputBorder.none,
+                                      icon: Icon(Icons.notes, size: 16, color: Colors.grey)
+                                    ),
                                   ),
                                 ),
-                                IconButton(icon: const Icon(Icons.remove_circle_outline, color: Color(0xFFFF453A)), onPressed: _isSaving ? null : () => _removeExercise(index)),
                               ],
                             ),
                           ),
-                        );
-                      },
+                          IconButton(icon: const Icon(Icons.remove_circle_outline, color: Color(0xFFFF453A)), onPressed: _isSaving ? null : () => _removeExercise(index)),
+                        ],
+                      ),
                     ),
+                  );
+                },
+              ),
             ),
           ],
         ),

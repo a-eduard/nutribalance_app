@@ -1,11 +1,19 @@
+import 'dart:io';
 import 'package:flutter/material.dart';
+import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
-import 'exercise_data.dart';
-import 'workout_session_screen.dart'; // Убедись, что этот файл существует
-import 'create_workout_screen.dart';
-import 'profile_screen.dart';
-import 'ui_widgets.dart';
+import 'package:shared_preferences/shared_preferences.dart';
+
 import 'services/database_service.dart';
+import 'ui_widgets.dart';
+import 'create_workout_screen.dart';
+import 'workout_session_screen.dart';
+import 'exercise_data.dart';
+import 'widgets/activity_chart.dart';
+import 'screens/profile_screen.dart';
+import 'screens/ai_workout_screen.dart';
+import 'screens/history_screen.dart'; // <--- ПОДКЛЮЧИЛИ ИСТОРИЮ
+import 'screens/ai_chat_screen.dart'; // <--- ПОДКЛЮЧИЛИ ЧАТ
 
 class DashboardScreen extends StatefulWidget {
   const DashboardScreen({super.key});
@@ -17,33 +25,28 @@ class DashboardScreen extends StatefulWidget {
 class _DashboardScreenState extends State<DashboardScreen> {
   int _selectedIndex = 0;
 
+  final List<Widget> _pages = [
+    const HomeTab(),
+    const HistoryScreen(), // <--- ТЕПЕРЬ ТУТ ПОЛНОЦЕННЫЙ ЭКРАН ИСТОРИИ
+    const ProfileScreen(),
+  ];
+
   @override
   Widget build(BuildContext context) {
-    // СПИСОК ЭКРАНОВ ДЛЯ НИЖНЕЙ НАВИГАЦИИ
-    final List<Widget> widgetOptions = <Widget>[
-      const HomeTab(),          // 0: Главная
-      const WorkoutsListTab(),  // 1: Список тренировок
-      const ProfileScreen(),    // 2: Профиль
-    ];
-
     return Scaffold(
       backgroundColor: const Color(0xFF0F0F0F),
-      body: widgetOptions.elementAt(_selectedIndex),
+      body: _pages[_selectedIndex],
       bottomNavigationBar: Container(
-        decoration: BoxDecoration(
-          border: Border(top: BorderSide(color: Colors.white.withOpacity(0.05)))
-        ),
+        decoration: const BoxDecoration(border: Border(top: BorderSide(color: Colors.white10))),
         child: BottomNavigationBar(
           backgroundColor: const Color(0xFF0F0F0F),
-          elevation: 0,
           selectedItemColor: const Color(0xFFCCFF00),
-          unselectedItemColor: const Color(0xFF8E8E93),
+          unselectedItemColor: Colors.grey,
           currentIndex: _selectedIndex,
           onTap: (index) => setState(() => _selectedIndex = index),
-          type: BottomNavigationBarType.fixed,
           items: const [
-            BottomNavigationBarItem(icon: Icon(Icons.home_filled), label: 'Главная'),
             BottomNavigationBarItem(icon: Icon(Icons.fitness_center), label: 'Тренировки'),
+            BottomNavigationBarItem(icon: Icon(Icons.history), label: 'История'),
             BottomNavigationBarItem(icon: Icon(Icons.person), label: 'Профиль'),
           ],
         ),
@@ -52,376 +55,183 @@ class _DashboardScreenState extends State<DashboardScreen> {
   }
 }
 
-// --- ХЕЛПЕР: Преобразование документа Firestore в объект Workout ---
-Workout _convertDocToWorkout(QueryDocumentSnapshot doc) {
-  Map<String, dynamic> data = doc.data() as Map<String, dynamic>;
-
-  // 1. Извлекаем список упражнений
-  List<dynamic> exerciseNames = data['exercises'] ?? [];
-  List<Exercise> exercises = exerciseNames.map((name) {
-    return Exercise(
-      id: DateTime.now().toString(), // Генерируем временный ID для UI
-      title: name.toString(),
-      muscleGroup: "Общее"
-    );
-  }).toList();
-
-  // 2. Извлекаем цели (targets)
-  Map<String, String> targets = {};
-  if (data['targets'] != null) {
-    Map<String, dynamic> rawTargets = data['targets'];
-    rawTargets.forEach((key, value) {
-      targets[key] = value.toString();
-    });
-  }
-
-  return Workout(
-    name: data['name'] ?? "Без названия",
-    exercises: exercises,
-    targets: targets,
-  );
+class HomeTab extends StatefulWidget {
+  const HomeTab({super.key});
+  @override
+  State<HomeTab> createState() => _HomeTabState();
 }
 
-// --- ВКЛАДКА 1: ГЛАВНАЯ (HomeTab) ---
-class HomeTab extends StatelessWidget {
-  const HomeTab({super.key});
+class _HomeTabState extends State<HomeTab> {
+  List<Map<String, dynamic>> _history = [];
+  int _totalWorkouts = 0;
+  int _totalTonnage = 0;
+  bool _loadingStats = true;
+  String? _avatarPath;
+
+  @override
+  void initState() {
+    super.initState();
+    _loadStats();
+    _loadAvatar();
+  }
+
+  Future<void> _loadAvatar() async {
+    final prefs = await SharedPreferences.getInstance();
+    setState(() => _avatarPath = prefs.getString('avatar_path'));
+  }
+
+  Future<void> _loadStats() async {
+    final historyData = await DatabaseService().getUserHistory();
+    int tonnage = 0;
+    for (var session in historyData) {
+      tonnage += (session['tonnage'] as int? ?? 0);
+    }
+    if (mounted) {
+      setState(() {
+        _history = historyData;
+        _totalWorkouts = historyData.length;
+        _totalTonnage = tonnage;
+        _loadingStats = false;
+      });
+    }
+  }
+
+  Map<String, dynamic> _calculateLevelInfo(int totalTonnageKg, String gender) {
+    final int levelThresholdKg = (gender == 'male' ? 100 : 50) * 1000;
+    int currentLevel = (totalTonnageKg / levelThresholdKg).floor();
+    if (currentLevel < 1) currentLevel = 0; 
+    int remainder = totalTonnageKg % levelThresholdKg;
+    int neededForNext = levelThresholdKg - remainder;
+    double progressPercent = remainder / levelThresholdKg;
+    return {"level": currentLevel, "progress": progressPercent, "neededTons": (neededForNext / 1000).toStringAsFixed(1)};
+  }
+
+  String _getGreetingPhrase(String name, String gender) {
+    final random = DateTime.now().millisecondsSinceEpoch;
+    final index = random % 5;
+    if (gender == 'male') {
+      const phrases = ["Привет, машина!", "Время побеждать, {name}!", "Покажи мощь!", "Твоя цель близка.", "Железо ждет."];
+      return phrases[index].replaceAll("{name}", name);
+    } else {
+      const phrases = ["Сияй, {name}!", "Ты прекрасна!", "Время для себя.", "С каждым днем лучше.", "Спорт тебе к лицу!"];
+      return phrases[index].replaceAll("{name}", name);
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
-    return StreamBuilder<QuerySnapshot>(
-      stream: DatabaseService().getUserWorkouts(),
-      builder: (context, snapshot) {
-        // 1. ЗАГРУЗКА
-        if (snapshot.connectionState == ConnectionState.waiting) {
-          return const Center(child: CircularProgressIndicator(color: Color(0xFFCCFF00)));
+    final uid = FirebaseAuth.instance.currentUser?.uid;
+    if (uid == null) return const Center(child: CircularProgressIndicator());
+
+    return StreamBuilder<DocumentSnapshot>(
+      stream: FirebaseFirestore.instance.collection('users').doc(uid).snapshots(),
+      builder: (context, userSnap) {
+        String name = "Чемпион";
+        String gender = "male";
+        if (userSnap.hasData && userSnap.data!.exists) {
+          final data = userSnap.data!.data() as Map<String, dynamic>;
+          name = data['name'] ?? "Чемпион";
+          gender = data['gender'] ?? "male";
         }
 
-        // 2. ОШИБКА
-        if (snapshot.hasError) {
-          return Center(child: Text("Ошибка: ${snapshot.error}", style: const TextStyle(color: Colors.red)));
-        }
-
-        final docs = snapshot.data?.docs ?? [];
-        bool hasWorkouts = docs.isNotEmpty;
-
-        return Stack(
-          children: [
-            // Фоновый градиент сверху
-            Positioned(
-              top: 0, left: 0, right: 0, height: 400,
-              child: Container(
-                decoration: BoxDecoration(
-                  gradient: LinearGradient(
-                    begin: Alignment.topCenter, end: Alignment.bottomCenter,
-                    colors: [const Color(0xFFCCFF00).withOpacity(0.08), Colors.transparent],
+        final greeting = _getGreetingPhrase(name, gender);
+        final levelInfo = _calculateLevelInfo(_totalTonnage, gender);
+        
+        return Scaffold(
+          backgroundColor: const Color(0xFF0F0F0F),
+          floatingActionButton: FloatingActionButton(
+            backgroundColor: const Color(0xFFCCFF00),
+            child: const Icon(Icons.add, color: Colors.black),
+            onPressed: () => Navigator.push(context, MaterialPageRoute(builder: (context) => const CreateWorkoutScreen())),
+          ),
+          body: SafeArea(
+            child: SingleChildScrollView(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  // ШАПКА
+                  Padding(
+                    padding: const EdgeInsets.fromLTRB(24, 24, 24, 0),
+                    child: Row(
+                      crossAxisAlignment: CrossAxisAlignment.center,
+                      children: [
+                        Stack(
+                          clipBehavior: Clip.none,
+                          children: [
+                            CircleAvatar(
+                              radius: 28,
+                              backgroundColor: const Color(0xFF1C1C1E),
+                              backgroundImage: _avatarPath != null ? FileImage(File(_avatarPath!)) : null,
+                              child: _avatarPath == null ? const Icon(Icons.person, color: Colors.grey) : null,
+                            ),
+                            Positioned(
+                              bottom: -4, right: -4,
+                              child: Container(padding: const EdgeInsets.all(4), decoration: const BoxDecoration(color: Color(0xFFCCFF00), shape: BoxShape.circle), child: Text("${levelInfo['level']}", style: const TextStyle(color: Colors.black, fontWeight: FontWeight.bold, fontSize: 12))),
+                            )
+                          ],
+                        ),
+                        const SizedBox(width: 16),
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(greeting.toUpperCase(), style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w900, fontStyle: FontStyle.italic, fontSize: 18)),
+                              const SizedBox(height: 6),
+                              Row(children: [Expanded(child: ClipRRect(borderRadius: BorderRadius.circular(4), child: LinearProgressIndicator(value: levelInfo['progress'], backgroundColor: Colors.white10, color: const Color(0xFFCCFF00), minHeight: 6))), const SizedBox(width: 8), Text("+${levelInfo['neededTons']} т", style: const TextStyle(color: Colors.grey, fontSize: 10))]),
+                            ],
+                          ),
+                        ),
+                        const SizedBox(width: 12),
+                        
+                        // КНОПКА ГЕНЕРАТОРА
+                        _buildHeaderBtn(Icons.auto_awesome, () => Navigator.push(context, MaterialPageRoute(builder: (context) => const AIWorkoutScreen()))),
+                        const SizedBox(width: 8),
+                        // КНОПКА ЧАТА (НОВАЯ)
+                        _buildHeaderBtn(Icons.chat_bubble_outline, () => Navigator.push(context, MaterialPageRoute(builder: (context) => const AIChatScreen()))),
+                      ],
+                    ),
                   ),
-                ),
+
+                  // ОСТАЛЬНОЙ КОНТЕНТ (График и Список)
+                  const SizedBox(height: 24),
+                  if (!_loadingStats) Padding(padding: const EdgeInsets.symmetric(horizontal: 16.0), child: Row(children: [Expanded(flex: 3, child: Container(height: 140, padding: const EdgeInsets.all(12), decoration: BoxDecoration(color: const Color(0xFF1C1C1E), borderRadius: BorderRadius.circular(16), border: Border.all(color: Colors.white10)), child: ActivityChart(history: _history))), const SizedBox(width: 12), Expanded(flex: 2, child: Column(children: [_StatCard(label: "ТРЕНИРОВОК", value: "$_totalWorkouts"), const SizedBox(height: 12), _StatCard(label: "ТОННАЖ", value: "${(_totalTonnage / 1000).toStringAsFixed(1)} т")]))])),
+                  const SizedBox(height: 24),
+                  const Padding(padding: EdgeInsets.symmetric(horizontal: 24.0), child: Text("ТВОИ ПРОГРАММЫ", style: TextStyle(color: Colors.grey, fontSize: 14, fontWeight: FontWeight.bold))),
+                  const SizedBox(height: 12),
+                  StreamBuilder<QuerySnapshot>(
+                    stream: DatabaseService().getUserWorkouts(),
+                    builder: (context, snapshot) {
+                      if (!snapshot.hasData || snapshot.data!.docs.isEmpty) return _buildEmptyState(context);
+                      final docs = snapshot.data!.docs;
+                      return ListView.builder(padding: const EdgeInsets.symmetric(horizontal: 16), shrinkWrap: true, physics: const NeverScrollableScrollPhysics(), itemCount: docs.length, itemBuilder: (context, index) {
+                          final doc = docs[index];
+                          final data = doc.data() as Map<String, dynamic>;
+                          final workout = Workout(name: data['name'] ?? "Без названия", exercises: (data['exercises'] as List<dynamic>).map((e) => Exercise(id: e, title: e, muscleGroup: "Unknown")).toList(), targets: Map<String, String>.from(data['targets'] ?? {}));
+                          return Padding(padding: const EdgeInsets.only(bottom: 12), child: _WorkoutCard(workout: workout, docId: doc.id));
+                        });
+                    },
+                  ),
+                  const SizedBox(height: 80),
+                ],
               ),
             ),
-            SafeArea(
-              child: Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 0),
-                child: hasWorkouts
-                  ? _ActiveStateView(latestWorkoutDoc: docs.first, totalWorkouts: docs.length)
-                  : const _EmptyStateView(),
-              ),
-            ),
-          ],
+          ),
         );
       },
     );
   }
-}
 
-// СОСТОЯНИЕ: НЕТ ТРЕНИРОВОК
-class _EmptyStateView extends StatelessWidget {
-  const _EmptyStateView();
-
-  @override
-  Widget build(BuildContext context) {
-    return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 24),
-      child: Column(
-        mainAxisAlignment: MainAxisAlignment.center,
-        children: [
-          const Spacer(),
-          PremiumGlassCard(
-            child: Column(
-              children: [
-                const Icon(Icons.add_task, size: 64, color: Color(0xFF8E8E93)),
-                const SizedBox(height: 24),
-                Text('НАЧНИ СВОЙ ПУТЬ', textAlign: TextAlign.center, style: Theme.of(context).textTheme.headlineSmall),
-                const SizedBox(height: 12),
-                const Text('Создай свою первую программу тренировок.', textAlign: TextAlign.center, style: TextStyle(color: Color(0xFF8E8E93), fontSize: 16)),
-              ],
-            ),
-          ),
-          const SizedBox(height: 32),
-          NeonActionButton(
-            text: 'СОЗДАТЬ ПРОГРАММУ',
-            onTap: () {
-              Navigator.of(context).push(MaterialPageRoute(builder: (context) => const CreateWorkoutScreen()));
-            },
-          ),
-          const Spacer(),
-        ],
-      ),
+  Widget _buildHeaderBtn(IconData icon, VoidCallback onTap) {
+    return Container(
+      decoration: BoxDecoration(color: const Color(0xFF1C1C1E), borderRadius: BorderRadius.circular(12), border: Border.all(color: const Color(0xFFCCFF00).withOpacity(0.3))),
+      child: IconButton(icon: Icon(icon, color: const Color(0xFFCCFF00), size: 20), onPressed: onTap, padding: EdgeInsets.zero, constraints: const BoxConstraints(minWidth: 40, minHeight: 40)),
     );
   }
+
+  // ... (Остальные виджеты: _buildEmptyState, _StatCard, _WorkoutCard - такие же, как были)
+  Widget _buildEmptyState(BuildContext context) { return Center(child: Padding(padding: const EdgeInsets.all(24.0), child: Column(children: [Icon(Icons.fitness_center, size: 48, color: Colors.white.withOpacity(0.1)), const SizedBox(height: 16), const Text("Пока нет программ", style: TextStyle(color: Colors.grey)), const SizedBox(height: 8), const Text("Нажми +, чтобы создать", style: TextStyle(color: Colors.grey, fontSize: 12))]))); }
 }
 
-// СОСТОЯНИЕ: ЕСТЬ ТРЕНИРОВКИ (Активный вид)
-class _ActiveStateView extends StatelessWidget {
-  final QueryDocumentSnapshot latestWorkoutDoc;
-  final int totalWorkouts;
+class _StatCard extends StatelessWidget { final String label; final String value; const _StatCard({required this.label, required this.value}); @override Widget build(BuildContext context) { return Container(width: double.infinity, padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 8), decoration: BoxDecoration(color: const Color(0xFF1C1C1E), borderRadius: BorderRadius.circular(12), border: Border.all(color: Colors.white10)), child: Column(children: [Text(value, style: const TextStyle(color: Color(0xFFCCFF00), fontSize: 20, fontWeight: FontWeight.bold)), Text(label, style: const TextStyle(color: Colors.grey, fontSize: 9))])); } }
 
-  const _ActiveStateView({required this.latestWorkoutDoc, required this.totalWorkouts});
-
-  @override
-  Widget build(BuildContext context) {
-    final workoutObj = _convertDocToWorkout(latestWorkoutDoc);
-
-    return SingleChildScrollView(
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          const SizedBox(height: 20),
-          // ПРИВЕТСТВИЕ
-          Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 24),
-            child: Row(
-              mainAxisAlignment: MainAxisAlignment.spaceBetween,
-              children: [
-                Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text('ПРИВЕТ, ЧЕМПИОН', style: Theme.of(context).textTheme.headlineSmall),
-                    const SizedBox(height: 4),
-                    const Text('Твоя программа готова!', style: TextStyle(color: Color(0xFF8E8E93), fontSize: 16)),
-                  ],
-                ),
-                Container(
-                  padding: const EdgeInsets.all(2),
-                  decoration: BoxDecoration(shape: BoxShape.circle, border: Border.all(color: const Color(0xFFCCFF00), width: 2)),
-                  child: const CircleAvatar(radius: 22, backgroundColor: Color(0xFF2C2C2E), child: Icon(Icons.person, color: Colors.white)),
-                ),
-              ],
-            ),
-          ),
-
-          const SizedBox(height: 40),
-
-          // ЗАГОЛОВОК СТАТИСТИКИ
-          Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 24),
-            child: Row(children: const [
-              Icon(Icons.bar_chart, color: Color(0xFFCCFF00), size: 20),
-              SizedBox(width: 8),
-              Text('СТАТИСТИКА', style: TextStyle(color: Color(0xFF8E8E93), fontWeight: FontWeight.bold, letterSpacing: 1.0)),
-            ]),
-          ),
-          const SizedBox(height: 8),
-
-          // ПЛАШКА СТАТИСТИКИ
-          PremiumGlassCard(
-            child: Row(
-              mainAxisAlignment: MainAxisAlignment.spaceAround,
-              children: [
-                _StatItem(value: "$totalWorkouts", label: "Программ"),
-                Container(width: 1, height: 40, color: Colors.white12),
-                const _StatItem(value: "0", label: "Выполнено", isHighlighted: true),
-              ],
-            ),
-          ),
-
-          const SizedBox(height: 32),
-
-          // ЗАГОЛОВОК ПОСЛЕДНЕЙ ТРЕНИРОВКИ
-          Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 24),
-            child: Row(children: const [
-              Icon(Icons.bolt, color: Color(0xFFCCFF00), size: 20),
-              SizedBox(width: 8),
-              Text('ПОСЛЕДНЯЯ ДОБАВЛЕННАЯ', style: TextStyle(color: Color(0xFF8E8E93), fontWeight: FontWeight.bold, letterSpacing: 1.0)),
-            ]),
-          ),
-          const SizedBox(height: 8),
-
-          // КАРТОЧКА ПОСЛЕДНЕЙ ТРЕНИРОВКИ С МЕНЮ
-          PremiumGlassCard(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Row(
-                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                  children: [
-                    Expanded(
-                      child: Text(workoutObj.name.toUpperCase(),
-                        style: Theme.of(context).textTheme.headlineSmall?.copyWith(fontSize: 24), overflow: TextOverflow.ellipsis),
-                    ),
-                    // --- МЕНЮ УПРАВЛЕНИЯ ---
-                    PopupMenuButton<String>(
-                      icon: const Icon(Icons.more_vert, color: Colors.white),
-                      color: const Color(0xFF1C1C1E),
-                      onSelected: (value) {
-                        if (value == 'edit') {
-                          // ПЕРЕДАЕМ ВЕСЬ ДОКУМЕНТ ДЛЯ РЕДАКТИРОВАНИЯ
-                          Navigator.push(context, MaterialPageRoute(builder: (_) => CreateWorkoutScreen(
-                            existingWorkout: latestWorkoutDoc,
-                          )));
-                        } else if (value == 'delete') {
-                          DatabaseService().deleteWorkout(latestWorkoutDoc.id);
-                        }
-                      },
-                      itemBuilder: (context) => [
-                        const PopupMenuItem(
-                          value: 'edit',
-                          child: Row(children: [Icon(Icons.edit, color: Colors.blue, size: 20), SizedBox(width: 12), Text("Редактировать", style: TextStyle(color: Colors.white))]),
-                        ),
-                        const PopupMenuItem(
-                          value: 'delete',
-                          child: Row(children: [Icon(Icons.delete, color: Colors.red, size: 20), SizedBox(width: 12), Text("Удалить", style: TextStyle(color: Colors.white))]),
-                        ),
-                      ],
-                    ),
-                  ],
-                ),
-                const SizedBox(height: 8),
-                Text("${workoutObj.exercises.length} упражнений", style: const TextStyle(color: Color(0xFF8E8E93))),
-                const SizedBox(height: 16),
-                NeonActionButton(
-                  text: 'НАЧАТЬ',
-                  onTap: () {
-                    Navigator.of(context).push(MaterialPageRoute(builder: (context) => WorkoutSessionScreen(workout: workoutObj)));
-                  },
-                ),
-              ],
-            ),
-          ),
-
-          const SizedBox(height: 24),
-          Center(
-            child: TextButton.icon(
-              onPressed: () {
-                 Navigator.of(context).push(MaterialPageRoute(builder: (context) => const CreateWorkoutScreen()));
-              },
-              icon: const Icon(Icons.add, color: Colors.grey),
-              label: const Text("СОЗДАТЬ НОВУЮ", style: TextStyle(color: Colors.grey)),
-            ),
-          ),
-          const SizedBox(height: 100),
-        ],
-      ),
-    );
-  }
-}
-
-// ВИДЖЕТ ЭЛЕМЕНТА СТАТИСТИКИ
-class _StatItem extends StatelessWidget {
-  final String value;
-  final String label;
-  final bool isHighlighted;
-  const _StatItem({required this.value, required this.label, this.isHighlighted = false});
-
-  @override
-  Widget build(BuildContext context) {
-    return Column(
-      children: [
-        Text(value, style: TextStyle(fontSize: 28, fontWeight: FontWeight.w800, color: isHighlighted ? const Color(0xFFCCFF00) : Colors.white)),
-        Text(label.toUpperCase(), style: const TextStyle(color: Color(0xFF8E8E93), fontSize: 10, fontWeight: FontWeight.bold)),
-      ],
-    );
-  }
-}
-
-// --- ВКЛАДКА 2: СПИСОК ВСЕХ ТРЕНИРОВОК ---
-class WorkoutsListTab extends StatelessWidget {
-  const WorkoutsListTab({super.key});
-
-  @override
-  Widget build(BuildContext context) {
-    return Scaffold(
-      backgroundColor: Colors.transparent,
-      appBar: AppBar(
-        title: const Text('Мои Программы'),
-        backgroundColor: Colors.transparent,
-        elevation: 0,
-        automaticallyImplyLeading: false,
-        actions: [
-          IconButton(
-            icon: const Icon(Icons.add, color: Color(0xFFCCFF00)),
-            onPressed: () {
-               Navigator.of(context).push(MaterialPageRoute(builder: (context) => const CreateWorkoutScreen()));
-            },
-          )
-        ],
-      ),
-      body: StreamBuilder<QuerySnapshot>(
-        stream: DatabaseService().getUserWorkouts(),
-        builder: (context, snapshot) {
-           if (snapshot.connectionState == ConnectionState.waiting) {
-            return const Center(child: CircularProgressIndicator(color: Color(0xFFCCFF00)));
-          }
-          if (!snapshot.hasData || snapshot.data!.docs.isEmpty) {
-             return Center(child: Text("Нет программ", style: TextStyle(color: Colors.white.withOpacity(0.5))));
-          }
-
-          final docs = snapshot.data!.docs;
-
-          return ListView.builder(
-            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-            itemCount: docs.length,
-            itemBuilder: (context, index) {
-              final doc = docs[index];
-              final workout = _convertDocToWorkout(doc);
-
-              return PremiumGlassCard(
-                onTap: () => Navigator.of(context).push(MaterialPageRoute(builder: (context) => WorkoutSessionScreen(workout: workout))),
-                child: Row(
-                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                  children: [
-                    Expanded(
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Text(workout.name, style: Theme.of(context).textTheme.titleLarge),
-                          Text("${workout.exercises.length} упражнений", style: const TextStyle(color: Color(0xFF8E8E93))),
-                        ],
-                      ),
-                    ),
-
-                    // --- МЕНЮ В СПИСКЕ ---
-                    PopupMenuButton<String>(
-                      icon: const Icon(Icons.more_vert, color: Colors.white),
-                      color: const Color(0xFF1C1C1E),
-                      onSelected: (value) {
-                        if (value == 'edit') {
-                          // ПЕРЕДАЕМ ВЕСЬ ДОКУМЕНТ
-                          Navigator.push(context, MaterialPageRoute(builder: (_) => CreateWorkoutScreen(
-                            existingWorkout: doc,
-                          )));
-                        } else if (value == 'delete') {
-                          DatabaseService().deleteWorkout(doc.id);
-                        }
-                      },
-                      itemBuilder: (context) => [
-                        const PopupMenuItem(
-                          value: 'edit',
-                          child: Row(children: [Icon(Icons.edit, color: Colors.blue, size: 20), SizedBox(width: 12), Text("Редактировать", style: TextStyle(color: Colors.white))]),
-                        ),
-                        const PopupMenuItem(
-                          value: 'delete',
-                          child: Row(children: [Icon(Icons.delete, color: Colors.red, size: 20), SizedBox(width: 12), Text("Удалить", style: TextStyle(color: Colors.white))]),
-                        ),
-                      ],
-                    ),
-                  ],
-                ),
-              );
-            },
-          );
-        }
-      ),
-    );
-  }
-}
+class _WorkoutCard extends StatelessWidget { final Workout workout; final String docId; const _WorkoutCard({required this.workout, required this.docId}); void _confirmDelete(BuildContext context) { showDialog(context: context, builder: (ctx) => AlertDialog(backgroundColor: const Color(0xFF1C1C1E), title: const Text("Удалить?", style: TextStyle(color: Colors.white)), actions: [TextButton(onPressed: () => Navigator.pop(ctx), child: const Text("Нет")), TextButton(onPressed: () async { Navigator.pop(ctx); await DatabaseService().deleteWorkout(docId); }, child: const Text("Да", style: TextStyle(color: Colors.red)))])); } @override Widget build(BuildContext context) { return GestureDetector(onTap: () => Navigator.push(context, MaterialPageRoute(builder: (context) => WorkoutSessionScreen(workout: workout))), child: PremiumGlassCard(child: Row(children: [Container(width: 50, height: 50, decoration: BoxDecoration(color: const Color(0xFFCCFF00).withOpacity(0.1), borderRadius: BorderRadius.circular(12)), child: const Icon(Icons.bolt, color: Color(0xFFCCFF00))), const SizedBox(width: 16), Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [Text(workout.name, style: const TextStyle(color: Colors.white, fontSize: 18, fontWeight: FontWeight.bold)), const SizedBox(height: 4), Text("${workout.exercises.length} упражнений", style: const TextStyle(color: Colors.grey, fontSize: 12))])), Container(padding: const EdgeInsets.all(8), decoration: BoxDecoration(color: const Color(0xFFCCFF00), shape: BoxShape.circle, boxShadow: [BoxShadow(color: const Color(0xFFCCFF00).withOpacity(0.4), blurRadius: 10, spreadRadius: 1)]), child: const Icon(Icons.play_arrow, color: Colors.black, size: 20)), const SizedBox(width: 8), Theme(data: Theme.of(context).copyWith(cardColor: const Color(0xFF1C1C1E), iconTheme: const IconThemeData(color: Colors.grey)), child: PopupMenuButton<String>(onSelected: (value) { if (value == 'edit') { Navigator.push(context, MaterialPageRoute(builder: (context) => CreateWorkoutScreen(existingWorkout: workout, docId: docId))); } else if (value == 'delete') { _confirmDelete(context); } }, itemBuilder: (BuildContext context) => <PopupMenuEntry<String>>[const PopupMenuItem<String>(value: 'edit', child: Row(children: [Icon(Icons.edit, size: 18), SizedBox(width: 8), Text("Редактировать", style: TextStyle(color: Colors.white))])), const PopupMenuItem<String>(value: 'delete', child: Row(children: [Icon(Icons.delete, size: 18, color: Colors.red), SizedBox(width: 8), Text("Удалить", style: TextStyle(color: Colors.red))]))], icon: const Icon(Icons.more_vert)))]))); } }

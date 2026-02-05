@@ -15,25 +15,86 @@ class _ExerciseSelectionScreenState extends State<ExerciseSelectionScreen> {
   final List<Exercise> _selected = [];
   String _selectedFilter = 'Все'; // Текущий фильтр
 
-  // 1. СТРУКТУРИРОВАННЫЙ СПИСОК (КАТЕГОРИИ)
+  // 1. РАСШИРЕННАЯ БАЗА УПРАЖНЕНИЙ
   final List<Map<String, String>> _defaultExercises = [
+    // ГРУДЬ
     {'name': 'Жим штанги лежа', 'group': 'Грудь'},
-    {'name': 'Жим гантелей', 'group': 'Грудь'},
+    {'name': 'Жим гантелей наклонный', 'group': 'Грудь'},
+    {'name': 'Жим штанги наклонный', 'group': 'Грудь'},
+    {'name': 'Разводка гантелей', 'group': 'Грудь'},
     {'name': 'Сведение в кроссовере', 'group': 'Грудь'},
     {'name': 'Отжимания на брусьях', 'group': 'Грудь'},
+    {'name': 'Жим в хамере', 'group': 'Грудь'},
+    {'name': 'Отжимания от пола', 'group': 'Грудь'},
+    {'name': 'Пек-дек (Бабочка)', 'group': 'Грудь'},
+    {'name': 'Пуловер', 'group': 'Грудь'},
+    {'name': 'Жим Смита', 'group': 'Грудь'},
+
+    // СПИНА
     {'name': 'Подтягивания', 'group': 'Спина'},
-    {'name': 'Тяга штанги в наклоне', 'group': 'Спина'},
     {'name': 'Тяга верхнего блока', 'group': 'Спина'},
-    {'name': 'Приседания', 'group': 'Ноги'},
+    {'name': 'Тяга штанги в наклоне', 'group': 'Спина'},
+    {'name': 'Тяга гантели одной рукой', 'group': 'Спина'},
+    {'name': 'Тяга нижнего блока', 'group': 'Спина'},
+    {'name': 'Гиперэкстензия', 'group': 'Спина'},
+    {'name': 'Становая тяга', 'group': 'Спина'},
+    {'name': 'Тяга Т-грифа', 'group': 'Спина'},
+    {'name': 'Пуловер в блоке', 'group': 'Спина'},
+    {'name': 'Шраги со штангой', 'group': 'Спина'},
+    {'name': 'Шраги с гантелями', 'group': 'Спина'},
+
+    // НОГИ
+    {'name': 'Приседания со штангой', 'group': 'Ноги'},
     {'name': 'Жим ногами', 'group': 'Ноги'},
     {'name': 'Разгибание ног', 'group': 'Ноги'},
-    {'name': 'Бицепс со штангой', 'group': 'Руки'},
-    {'name': 'Французский жим', 'group': 'Руки'},
-    {'name': 'Молотки', 'group': 'Руки'},
+    {'name': 'Сгибание ног лежа', 'group': 'Ноги'},
+    {'name': 'Выпады с гантелями', 'group': 'Ноги'},
+    {'name': 'Румынская тяга', 'group': 'Ноги'},
+    {'name': 'Подъем на носки стоя', 'group': 'Ноги'},
+    {'name': 'Гакк-приседания', 'group': 'Ноги'},
+    {'name': 'Болгарские выпады', 'group': 'Ноги'},
+    {'name': 'Ягодичный мост', 'group': 'Ноги'},
+
+    // ПЛЕЧИ
     {'name': 'Армейский жим', 'group': 'Плечи'},
-    {'name': 'Махи в стороны', 'group': 'Плечи'},
+    {'name': 'Жим гантелей сидя', 'group': 'Плечи'},
+    {'name': 'Махи гантелями в стороны', 'group': 'Плечи'},
+    {'name': 'Махи в наклоне', 'group': 'Плечи'},
+    {'name': 'Тяга штанги к подбородку', 'group': 'Плечи'},
+    {'name': 'Подъем рук перед собой', 'group': 'Плечи'},
+    {'name': 'Обратная бабочка', 'group': 'Плечи'},
+    {'name': 'Жим Арнольда', 'group': 'Плечи'},
+    {'name': 'Жим в тренажере', 'group': 'Плечи'},
+    {'name': 'Отведение руки на блоке', 'group': 'Плечи'},
+
+    // РУКИ
+    {'name': 'Подъем штанги на бицепс', 'group': 'Руки'},
+    {'name': 'Молотки', 'group': 'Руки'},
+    {'name': 'Концентрированный подъем', 'group': 'Руки'},
+    {'name': 'Французский жим', 'group': 'Руки'},
+    {'name': 'Разгибание на блоке (канаты)', 'group': 'Руки'},
+    {'name': 'Отжимания узким хватом', 'group': 'Руки'},
+    {'name': 'Сгибание на скамье Скотта', 'group': 'Руки'},
+    {'name': 'Разгибание гантели из-за головы', 'group': 'Руки'},
+    {'name': 'Разгибание одной рукой на блоке', 'group': 'Руки'},
+    {'name': 'Бицепс на нижнем блоке', 'group': 'Руки'},
+
+    // ПРЕСС
     {'name': 'Скручивания', 'group': 'Пресс'},
+    {'name': 'Подъем ног в висе', 'group': 'Пресс'},
+    {'name': 'Планка', 'group': 'Пресс'},
+    {'name': 'Русские скручивания', 'group': 'Пресс'},
+    {'name': 'Ролик для пресса', 'group': 'Пресс'},
+    {'name': 'Вакуум', 'group': 'Пресс'},
+    {'name': 'Велосипед', 'group': 'Пресс'},
+    {'name': 'Молитва (на блоке)', 'group': 'Пресс'},
+
+    // КАРДИО
     {'name': 'Бег', 'group': 'Кардио'},
+    {'name': 'Эллипс', 'group': 'Кардио'},
+    {'name': 'Велотренажер', 'group': 'Кардио'},
+    {'name': 'Скакалка', 'group': 'Кардио'},
+    {'name': 'Гребля', 'group': 'Кардио'},
   ];
 
   final List<String> _filterOptions = ['Все', 'Грудь', 'Спина', 'Ноги', 'Руки', 'Плечи', 'Пресс', 'Кардио', 'Общее'];
@@ -113,7 +174,7 @@ class _ExerciseSelectionScreenState extends State<ExerciseSelectionScreen> {
       ),
       body: Column(
         children: [
-          // 2. ФИЛЬТРЫ (ЧИПЫ)
+          // ФИЛЬТРЫ (ЧИПЫ)
           SizedBox(
             height: 60,
             child: ListView.separated(
@@ -147,7 +208,7 @@ class _ExerciseSelectionScreenState extends State<ExerciseSelectionScreen> {
               builder: (context, snapshot) {
                 List<Exercise> allExercises = [];
 
-                // А) Стандартные
+                // А) Стандартные (из большого списка)
                 for (var item in _defaultExercises) {
                   allExercises.add(Exercise(
                     id: "default_${item['name']}", 
@@ -156,7 +217,7 @@ class _ExerciseSelectionScreenState extends State<ExerciseSelectionScreen> {
                   ));
                 }
 
-                // Б) Пользовательские
+                // Б) Пользовательские (из Firebase)
                 if (snapshot.hasData) {
                   final docs = snapshot.data!.docs;
                   for (var doc in docs) {
@@ -174,7 +235,7 @@ class _ExerciseSelectionScreenState extends State<ExerciseSelectionScreen> {
                   allExercises = allExercises.where((e) => e.muscleGroup == _selectedFilter).toList();
                 }
 
-                // Г) Сортировка
+                // Г) Сортировка по алфавиту
                 allExercises.sort((a, b) => a.title.compareTo(b.title));
 
                 return ListView.builder(

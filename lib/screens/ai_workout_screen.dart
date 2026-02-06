@@ -15,6 +15,7 @@ class AIWorkoutScreen extends StatefulWidget {
 class _AIWorkoutScreenState extends State<AIWorkoutScreen> {
   String _goal = 'Набор массы';
   String _level = 'Новичок';
+  String _equipment = 'Gym'; // <-- НОВОЕ: Место тренировки
   double _daysPerWeek = 3;
   
   bool _isLoading = false;
@@ -22,6 +23,11 @@ class _AIWorkoutScreenState extends State<AIWorkoutScreen> {
 
   final List<String> _goals = ['Набор массы', 'Похудение', 'Сила', 'Рельеф'];
   final List<String> _levels = ['Новичок', 'Средний', 'Опытный'];
+  // Варианты для UI
+  final Map<String, String> _equipmentOptions = {
+    'Gym': 'В зале (Gym)',
+    'Home': 'Дома (Home)'
+  };
 
   Future<void> _generate() async {
     setState(() {
@@ -45,6 +51,7 @@ class _AIWorkoutScreenState extends State<AIWorkoutScreen> {
         bodyFat: (userData['bodyFat'] ?? 0).toDouble(),
         experience: userData['experience'] ?? "Нет стажа",
         daysPerWeek: _daysPerWeek.toInt(),
+        equipment: _equipment, // <-- Передаем место тренировки
       );
       
       setState(() {
@@ -57,19 +64,14 @@ class _AIWorkoutScreenState extends State<AIWorkoutScreen> {
     }
   }
 
-  // Обновленный метод сохранения (Тренировки + Питание)
   Future<void> _saveAllWorkouts() async {
     if (_aiResult == null) return;
-    
     setState(() => _isLoading = true);
-    
     try {
-      // 1. Сохраняем тренировки
       final schedule = _aiResult!['schedule'] as List<dynamic>;
       for (var day in schedule) {
         String dayName = day['dayName'];
         List<dynamic> exercises = day['exercises'];
-
         List<String> exerciseNames = [];
         Map<String, String> targets = {};
 
@@ -83,15 +85,12 @@ class _AIWorkoutScreenState extends State<AIWorkoutScreen> {
         await DatabaseService().saveUserWorkout("AI: $dayName", exerciseNames, targets);
       }
 
-      // 2. Сохраняем питание (НОВОЕ)
       if (_aiResult!['nutrition'] != null) {
         await DatabaseService().saveNutritionPlan(_aiResult!['nutrition']);
       }
 
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text("Программа и питание сохранены!"), backgroundColor: Color(0xFFCCFF00))
-        );
+        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("Программа и питание сохранены!"), backgroundColor: Color(0xFFCCFF00)));
         Navigator.pop(context);
       }
     } catch (e) {
@@ -115,6 +114,7 @@ class _AIWorkoutScreenState extends State<AIWorkoutScreen> {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
+            // ПАНЕЛЬ НАСТРОЕК
             PremiumGlassCard(
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
@@ -124,6 +124,23 @@ class _AIWorkoutScreenState extends State<AIWorkoutScreen> {
                   _buildDropdown("Уровень", _level, _levels, (v) => setState(() => _level = v!)),
                   const SizedBox(height: 16),
                   
+                  // ВЫБОР ОБОРУДОВАНИЯ (НОВОЕ)
+                  const Text("Место тренировок:", style: TextStyle(color: Colors.grey, fontSize: 12)),
+                  const SizedBox(height: 8),
+                  DropdownButtonFormField<String>(
+                    value: _equipment,
+                    items: _equipmentOptions.entries.map((e) => DropdownMenuItem(value: e.key, child: Text(e.value))).toList(),
+                    onChanged: (v) => setState(() => _equipment = v!),
+                    dropdownColor: const Color(0xFF2C2C2E),
+                    style: const TextStyle(color: Colors.white),
+                    decoration: InputDecoration(
+                      filled: true, fillColor: Colors.black.withOpacity(0.3),
+                      border: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: BorderSide.none),
+                      contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                    ),
+                  ),
+
+                  const SizedBox(height: 16),
                   const Text("Дней в неделю:", style: TextStyle(color: Colors.grey, fontSize: 12)),
                   Row(
                     children: [
@@ -147,18 +164,13 @@ class _AIWorkoutScreenState extends State<AIWorkoutScreen> {
             const SizedBox(height: 24),
 
             if (_isLoading)
-              const Center(child: Column(
-                children: [
-                  CircularProgressIndicator(color: Color(0xFFCCFF00)),
-                  SizedBox(height: 16),
-                  Text("Анализирую биометрию...", style: TextStyle(color: Colors.grey))
-                ],
-              ))
+              const Center(child: Column(children: [CircularProgressIndicator(color: Color(0xFFCCFF00)), SizedBox(height: 16), Text("Анализирую биометрию...", style: TextStyle(color: Colors.grey))]))
             else if (_aiResult == null)
               NeonActionButton(text: "СОСТАВИТЬ ПРОГРАММУ", onTap: _generate, isFullWidth: true),
 
             const SizedBox(height: 32),
 
+            // РЕЗУЛЬТАТЫ
             if (_aiResult != null && !_isLoading) ...[
               _buildNutritionCard(_aiResult!['nutrition']),
               const SizedBox(height: 24),
@@ -173,11 +185,7 @@ class _AIWorkoutScreenState extends State<AIWorkoutScreen> {
                   final day = _aiResult!['schedule'][index];
                   return Container(
                     margin: const EdgeInsets.only(bottom: 12),
-                    decoration: BoxDecoration(
-                      color: const Color(0xFF1C1C1E),
-                      borderRadius: BorderRadius.circular(12),
-                      border: Border.all(color: Colors.white10),
-                    ),
+                    decoration: BoxDecoration(color: const Color(0xFF1C1C1E), borderRadius: BorderRadius.circular(12), border: Border.all(color: Colors.white10)),
                     child: Theme(
                       data: Theme.of(context).copyWith(dividerColor: Colors.transparent),
                       child: ExpansionTile(
@@ -197,8 +205,7 @@ class _AIWorkoutScreenState extends State<AIWorkoutScreen> {
                                     children: [
                                       Text(ex['name'], style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
                                       Text("${ex['sets']} x ${ex['reps']}", style: const TextStyle(color: Colors.grey, fontSize: 12)),
-                                      if (ex['comment'] != null)
-                                        Text(ex['comment'], style: TextStyle(color: Colors.grey[600], fontSize: 11, fontStyle: FontStyle.italic)),
+                                      if (ex['comment'] != null) Text(ex['comment'], style: TextStyle(color: Colors.grey[600], fontSize: 11, fontStyle: FontStyle.italic)),
                                     ],
                                   ),
                                 )
@@ -236,18 +243,16 @@ class _AIWorkoutScreenState extends State<AIWorkoutScreen> {
           Row(
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
-              const Text("ПЛАН ПИТАНИЯ", style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, letterSpacing: 1.2)),
-              const Icon(Icons.restaurant, color: Color(0xFFCCFF00)),
+              // ОБНОВЛЕННЫЙ ЗАГОЛОВОК
+              const Text("ПИТАНИЕ И АКТИВНОСТЬ", style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, letterSpacing: 1.2)),
+              const Icon(Icons.local_fire_department, color: Color(0xFFCCFF00)),
             ],
           ),
           const SizedBox(height: 16),
           
-          // ИСПРАВЛЕНИЕ: Используем Wrap вместо Row для переноса строк
           Center(
             child: Wrap(
-              spacing: 20, // Отступ по горизонтали
-              runSpacing: 20, // Отступ по вертикали (если перенесется)
-              alignment: WrapAlignment.center,
+              spacing: 20, runSpacing: 20, alignment: WrapAlignment.center,
               children: [
                 _buildMacro("КАЛОРИИ", nutrition['calories'].toString()),
                 _buildMacro("БЕЛОК", nutrition['protein'].toString()),
@@ -257,8 +262,22 @@ class _AIWorkoutScreenState extends State<AIWorkoutScreen> {
             ),
           ),
           
-          const SizedBox(height: 12),
-          Text(nutrition['advice'], style: const TextStyle(color: Colors.grey, fontSize: 12, fontStyle: FontStyle.italic)),
+          const SizedBox(height: 16),
+          // НОВЫЙ БЛОК СОВЕТА С ИКОНКОЙ
+          Container(
+            padding: const EdgeInsets.all(12),
+            decoration: BoxDecoration(color: Colors.black26, borderRadius: BorderRadius.circular(12)),
+            child: Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const Icon(Icons.directions_walk, color: Color(0xFFCCFF00), size: 20), // Иконка шагов
+                const SizedBox(width: 10),
+                Expanded(
+                  child: Text(nutrition['advice'], style: const TextStyle(color: Colors.white70, fontSize: 13, height: 1.4)),
+                ),
+              ],
+            ),
+          )
         ],
       ),
     );

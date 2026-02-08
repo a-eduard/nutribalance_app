@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import '../services/ai_service.dart';
+import '../services/database_service.dart';
 
 class AIChatScreen extends StatefulWidget {
   const AIChatScreen({super.key});
@@ -12,41 +13,26 @@ class AIChatScreen extends StatefulWidget {
 
 class _AIChatScreenState extends State<AIChatScreen> {
   final TextEditingController _controller = TextEditingController();
-  final List<Map<String, String>> _messages = [];
-  bool _isLoading = false;
+  final ScrollController _scrollController = ScrollController(); // Для авто-скролла вниз
+  bool _isTyping = false;
   String _fullUserContext = "";
 
   @override
   void initState() {
     super.initState();
     _loadFullUserContext();
-    
-    // НОВОЕ ПРИВЕТСТВИЕ ДИЕТОЛОГА
-    _messages.add({
-      'role': 'ai',
-      'text': 'Привет! Я твой персональный диетолог. Я изучил твой профиль и готов составить план питания. Хочешь, я рассчитаю твои КБЖУ или составлю меню на завтра?'
-    });
   }
 
-  // СБОР ПОЛНОГО ДОСЬЕ
   Future<void> _loadFullUserContext() async {
     final uid = FirebaseAuth.instance.currentUser?.uid;
     if (uid != null) {
       final doc = await FirebaseFirestore.instance.collection('users').doc(uid).get();
       if (doc.exists) {
         final d = doc.data()!;
-        
-        // Формируем подробный контекст
-        // Если каких-то полей нет, ставим прочерк или дефолт
         _fullUserContext = """
-          Имя: ${d['name'] ?? 'Не указано'},
-          Пол: ${d['gender'] == 'male' ? 'Мужчина' : 'Женщина'},
-          Возраст: ${d['age'] ?? 25} лет,
-          Вес: ${d['weight'] ?? 70} кг,
-          Рост: ${d['height'] ?? 175} см,
-          Процент жира: ${d['bodyFat'] ?? 20}%,
-          Стаж тренировок: ${d['experience'] ?? 'Новичок'},
-          Цель: ${d['goal'] ?? 'Улучшение формы (по умолчанию)'}
+          Имя: ${d['name']}, Пол: ${d['gender']}, Возраст: ${d['age']}, 
+          Вес: ${d['weight']}кг, Рост: ${d['height']}см, Жир: ${d['bodyFat']}%, 
+          Цель: ${d['goal'] ?? 'Быть в форме'}
         """;
       }
     }
@@ -56,27 +42,51 @@ class _AIChatScreenState extends State<AIChatScreen> {
     final text = _controller.text.trim();
     if (text.isEmpty) return;
 
-    setState(() {
-      _messages.add({'role': 'user', 'text': text});
-      _isLoading = true;
-      _controller.clear();
-    });
+    _controller.clear();
+    setState(() => _isTyping = true);
 
     try {
-      final response = await AIService().sendChatMessage(text, _fullUserContext);
-      if (mounted) {
-        setState(() {
-          _messages.add({'role': 'ai', 'text': response});
-        });
+      // 1. Сохраняем вопрос пользователя в базу
+      await DatabaseService().saveChatMessage(text, 'user');
+      _scrollToBottom();
+
+      // 2. Ждем ответа ИИ
+      final responseMap = await AIService().chatWithDietologist(
+        userMessage: text, 
+        userContext: _fullUserContext
+      );
+      
+      final String aiText = responseMap['text'] ?? "Ошибка: Пустой ответ";
+      final bool isPlan = responseMap['is_plan'] == true;
+
+      // Если это план - сохраняем КБЖУ в профиль
+      if (isPlan && responseMap['nutrition'] != null) {
+        await DatabaseService().saveNutritionPlan(responseMap['nutrition']);
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text("✅ Рацион сохранен в Профиль!"), backgroundColor: Color(0xFFCCFF00))
+          );
+        }
       }
+
+      // 3. Сохраняем ответ ИИ в базу
+      await DatabaseService().saveChatMessage(aiText, 'ai');
+      _scrollToBottom();
+
     } catch (e) {
-      if (mounted) {
-        setState(() {
-          _messages.add({'role': 'ai', 'text': 'Ошибка связи. Попробуй позже.'});
-        });
-      }
+      if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text("Ошибка: $e")));
     } finally {
-      if (mounted) setState(() => _isLoading = false);
+      if (mounted) setState(() => _isTyping = false);
+    }
+  }
+
+  void _scrollToBottom() {
+    if (_scrollController.hasClients) {
+      _scrollController.animateTo(
+        _scrollController.position.maxScrollExtent + 100,
+        duration: const Duration(milliseconds: 300),
+        curve: Curves.easeOut,
+      );
     }
   }
 
@@ -85,60 +95,98 @@ class _AIChatScreenState extends State<AIChatScreen> {
     return Scaffold(
       backgroundColor: const Color(0xFF0F0F0F),
       appBar: AppBar(
-        title: const Text("Личный Диетолог"),
+        title: const Text("AI Диетолог Pro"), 
         backgroundColor: const Color(0xFF1C1C1E),
-        leading: const BackButton(color: Colors.white),
+        iconTheme: const IconThemeData(color: Colors.white),
+        actions: [
+          IconButton(
+            icon: const Icon(Icons.delete_outline, color: Colors.red),
+            onPressed: () {
+               // Кнопка очистки истории
+               DatabaseService().clearChatHistory();
+            },
+          )
+        ],
       ),
       body: Column(
         children: [
+          // СПИСОК СООБЩЕНИЙ ИЗ FIREBASE
           Expanded(
-            child: ListView.builder(
-              padding: const EdgeInsets.all(16),
-              itemCount: _messages.length,
-              itemBuilder: (context, index) {
-                final msg = _messages[index];
-                final isUser = msg['role'] == 'user';
-                return Align(
-                  alignment: isUser ? Alignment.centerRight : Alignment.centerLeft,
-                  child: Container(
-                    margin: const EdgeInsets.symmetric(vertical: 4),
-                    padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-                    // Ограничение ширины сообщения (80% экрана)
-                    constraints: BoxConstraints(maxWidth: MediaQuery.of(context).size.width * 0.8),
-                    decoration: BoxDecoration(
-                      color: isUser ? const Color(0xFFCCFF00) : const Color(0xFF2C2C2E),
-                      borderRadius: BorderRadius.only(
-                        topLeft: const Radius.circular(16),
-                        topRight: const Radius.circular(16),
-                        bottomLeft: isUser ? const Radius.circular(16) : Radius.zero,
-                        bottomRight: isUser ? Radius.zero : const Radius.circular(16),
+            child: StreamBuilder<QuerySnapshot>(
+              stream: DatabaseService().getChatMessages(),
+              builder: (context, snapshot) {
+                if (!snapshot.hasData) {
+                  return const Center(child: CircularProgressIndicator(color: Color(0xFFCCFF00)));
+                }
+
+                final docs = snapshot.data!.docs;
+                if (docs.isEmpty) {
+                  return const Center(
+                    child: Padding(
+                      padding: EdgeInsets.all(30.0),
+                      child: Text(
+                        "Я изучил твой профиль.\nПопроси меня составить рацион на завтра.", 
+                        textAlign: TextAlign.center,
+                        style: TextStyle(color: Colors.grey),
                       ),
                     ),
-                    // Используем обычный Text, он сам переносит строки (multiline)
-                    child: Text(
-                      msg['text']!,
-                      style: TextStyle(
-                        color: isUser ? Colors.black : Colors.white,
-                        fontSize: 15,
-                        height: 1.4, // Межстрочный интервал для читаемости меню
+                  );
+                }
+
+                // Автоскролл вниз при открытии
+                WidgetsBinding.instance.addPostFrameCallback((_) => _scrollToBottom());
+
+                return ListView.builder(
+                  controller: _scrollController,
+                  padding: const EdgeInsets.all(16),
+                  itemCount: docs.length,
+                  itemBuilder: (context, index) {
+                    final data = docs[index].data() as Map<String, dynamic>;
+                    final isUser = data['role'] == 'user';
+                    final text = data['text'] ?? '';
+
+                    return Align(
+                      alignment: isUser ? Alignment.centerRight : Alignment.centerLeft,
+                      child: Container(
+                        margin: const EdgeInsets.symmetric(vertical: 4),
+                        padding: const EdgeInsets.all(12),
+                        constraints: BoxConstraints(maxWidth: MediaQuery.of(context).size.width * 0.85),
+                        decoration: BoxDecoration(
+                          color: isUser ? const Color(0xFFCCFF00) : const Color(0xFF2C2C2E),
+                          borderRadius: BorderRadius.only(
+                            topLeft: const Radius.circular(12),
+                            topRight: const Radius.circular(12),
+                            bottomLeft: isUser ? const Radius.circular(12) : Radius.zero,
+                            bottomRight: isUser ? Radius.zero : const Radius.circular(12),
+                          ),
+                        ),
+                        child: Text(
+                          text, 
+                          style: TextStyle(
+                            color: isUser ? Colors.black : Colors.white, 
+                            fontSize: 15,
+                            height: 1.3 // Улучшаем читаемость
+                          )
+                        ),
                       ),
-                    ),
-                  ),
+                    );
+                  },
                 );
               },
             ),
           ),
           
-          // Индикатор загрузки
-          if (_isLoading)
-            const Padding(
-              padding: EdgeInsets.all(8.0),
-              child: Text("Диетолог составляет ответ...", style: TextStyle(color: Colors.grey, fontSize: 12)),
+          // ИНДИКАТОР ПЕЧАТИ
+          if (_isTyping)
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+              alignment: Alignment.centerLeft,
+              child: const Text("Диетолог составляет план...", style: TextStyle(color: Color(0xFFCCFF00), fontSize: 12, fontStyle: FontStyle.italic)),
             ),
-            
-          // Поле ввода
+
+          // ПОЛЕ ВВОДА
           Container(
-            padding: const EdgeInsets.all(16),
+            padding: const EdgeInsets.all(12),
             color: const Color(0xFF1C1C1E),
             child: Row(
               children: [
@@ -146,20 +194,16 @@ class _AIChatScreenState extends State<AIChatScreen> {
                   child: TextField(
                     controller: _controller,
                     style: const TextStyle(color: Colors.white),
-                    // Разрешаем многострочный ввод для пользователя тоже
                     minLines: 1,
                     maxLines: 4,
                     decoration: InputDecoration(
-                      hintText: "Напиши мне рацион на завтра...",
+                      hintText: "Рацион для сушки...",
                       hintStyle: const TextStyle(color: Colors.grey),
                       filled: true,
                       fillColor: const Color(0xFF0F0F0F),
                       border: OutlineInputBorder(borderRadius: BorderRadius.circular(24), borderSide: BorderSide.none),
-                      contentPadding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
+                      contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
                     ),
-                    // Отправка по кнопке на клавиатуре (только если 1 строка, иначе Enter делает перенос)
-                    textInputAction: TextInputAction.send,
-                    onSubmitted: (_) => _sendMessage(),
                   ),
                 ),
                 const SizedBox(width: 8),
@@ -167,7 +211,7 @@ class _AIChatScreenState extends State<AIChatScreen> {
                   backgroundColor: const Color(0xFFCCFF00),
                   child: IconButton(
                     icon: const Icon(Icons.send, color: Colors.black),
-                    onPressed: _sendMessage,
+                    onPressed: _isTyping ? null : _sendMessage, // Блокируем пока думает
                   ),
                 ),
               ],

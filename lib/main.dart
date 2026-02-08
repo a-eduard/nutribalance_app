@@ -2,34 +2,19 @@ import 'package:flutter/material.dart';
 import 'package:firebase_core/firebase_core.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
-import 'package:flutter/foundation.dart'; // Для kIsWeb
-import 'package:intl/date_symbol_data_local.dart'; // <--- ОБЯЗАТЕЛЬНО ДЛЯ ДАТ
+import 'package:flutter/foundation.dart'; 
+import 'package:intl/date_symbol_data_local.dart'; 
 
-// Импорты ваших экранов
+// --- ИСПРАВЛЕННЫЕ ИМПОРТЫ (Файлы лежат в корне lib) ---
+import 'firebase_options.dart'; 
 import 'auth_screen.dart';       
 import 'dashboard_screen.dart';   
-import 'screens/onboarding_screen.dart';
+import 'screens/onboarding_screen.dart'; // Только этот в папке screens
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
-
-  // Инициализация Firebase
-  await Firebase.initializeApp(
-    options: kIsWeb
-        ? const FirebaseOptions(
-          apiKey: "AIzaSyDEQkDTSjNikxsxjMLKCYdJ4BSOTEoCO_4",
-          appId: "1:830594518730:web:b1e384f2e830b4323e2e33",
-          messagingSenderId: "830594518730",
-          projectId: "gym-tracker-9925c",
-          storageBucket: "gym-tracker-9925c.firebasestorage.app",
-          authDomain: "gym-tracker-9925c.firebaseapp.com"  
-          )
-        : null, 
-  );
-
-  // ИСПРАВЛЕНИЕ: Инициализируем форматирование дат для русского языка
+  await Firebase.initializeApp(options: DefaultFirebaseOptions.currentPlatform);
   await initializeDateFormatting('ru', null);
-
   runApp(const MyApp());
 }
 
@@ -40,12 +25,19 @@ class MyApp extends StatelessWidget {
   Widget build(BuildContext context) {
     return MaterialApp(
       debugShowCheckedModeBanner: false,
-      title: 'Gym Tracker',
+      title: 'Tonna Gym Tracker',
       theme: ThemeData(
         brightness: Brightness.dark,
-        scaffoldBackgroundColor: const Color(0xFF0F0F0F),
+        scaffoldBackgroundColor: const Color(0xFF000000),
         primaryColor: const Color(0xFFCCFF00),
+        colorScheme: const ColorScheme.dark(
+          primary: Color(0xFFCCFF00),
+          secondary: Color(0xFFCCFF00),
+          surface: Color(0xFF1C1C1E),
+          onSurface: Colors.white,
+        ),
         useMaterial3: true,
+        fontFamily: 'Roboto', 
       ),
       home: const AuthWrapper(),
     );
@@ -61,32 +53,23 @@ class AuthWrapper extends StatelessWidget {
       stream: FirebaseAuth.instance.authStateChanges(),
       builder: (context, snapshot) {
         if (snapshot.connectionState == ConnectionState.waiting) {
-          return const Scaffold(backgroundColor: Color(0xFF0F0F0F), body: Center(child: CircularProgressIndicator(color: Color(0xFFCCFF00))));
+          return const Scaffold(backgroundColor: Color(0xFF000000), body: Center(child: CircularProgressIndicator(color: Color(0xFFCCFF00))));
         }
-
-        if (!snapshot.hasData) {
-          return const AuthScreen();
-        }
-
-        final uid = snapshot.data!.uid;
+        if (!snapshot.hasData) return const AuthScreen();
 
         return FutureBuilder<DocumentSnapshot>(
-          future: FirebaseFirestore.instance.collection('users').doc(uid).get(),
+          future: FirebaseFirestore.instance.collection('users').doc(snapshot.data!.uid).get(),
           builder: (context, userSnapshot) {
             if (userSnapshot.connectionState == ConnectionState.waiting) {
-              return const Scaffold(backgroundColor: Color(0xFF0F0F0F), body: Center(child: CircularProgressIndicator(color: Color(0xFFCCFF00))));
+              return const Scaffold(backgroundColor: Color(0xFF000000), body: Center(child: CircularProgressIndicator(color: Color(0xFFCCFF00))));
             }
-
-            if (!userSnapshot.hasData || !userSnapshot.data!.exists) {
-              return const OnboardingScreen();
+            if (userSnapshot.hasData && userSnapshot.data!.exists) {
+              final userData = userSnapshot.data!.data() as Map<String, dynamic>?;
+              if (userData != null && userData.containsKey('name') && (userData['name'] as String).isNotEmpty) {
+                return const DashboardScreen();
+              }
             }
-            
-            final userData = userSnapshot.data!.data() as Map<String, dynamic>;
-            if (userData['name'] == null || (userData['name'] as String).isEmpty) {
-              return const OnboardingScreen();
-            }
-
-            return const DashboardScreen();
+            return const OnboardingScreen();
           },
         );
       },

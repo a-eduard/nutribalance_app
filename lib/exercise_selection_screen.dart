@@ -123,7 +123,7 @@ class _ExerciseSelectionScreenState extends State<ExerciseSelectionScreen> {
                   ),
                   const SizedBox(height: 16),
                   DropdownButtonFormField<String>(
-                    value: _filterOptions.contains(selectedGroup) ? selectedGroup : 'Общее',
+                    initialValue: _filterOptions.contains(selectedGroup) ? selectedGroup : 'Общее',
                     dropdownColor: const Color(0xFF2C2C2E),
                     style: const TextStyle(color: Colors.white),
                     items: _filterOptions.where((e) => e != 'Все').map((g) => DropdownMenuItem(value: g, child: Text(g))).toList(),
@@ -133,13 +133,16 @@ class _ExerciseSelectionScreenState extends State<ExerciseSelectionScreen> {
                 ],
               ),
               actions: [
-                if (isEditing) TextButton(onPressed: () async { await DatabaseService().deleteExercise(docId!); Navigator.pop(context); }, child: const Text("УДАЛИТЬ", style: TextStyle(color: Colors.red))),
+                if (isEditing) TextButton(onPressed: () async { await DatabaseService().deleteExercise(docId); Navigator.pop(context); }, child: const Text("УДАЛИТЬ", style: TextStyle(color: Colors.red))),
                 TextButton(onPressed: () => Navigator.pop(context), child: const Text("ОТМЕНА", style: TextStyle(color: Colors.grey))),
                 TextButton(
                   onPressed: () async {
                     if (nameController.text.trim().isEmpty) return;
-                    if (isEditing) await DatabaseService().updateExercise(docId!, nameController.text.trim(), selectedGroup);
-                    else await DatabaseService().addCustomExercise(nameController.text.trim(), selectedGroup);
+                    if (isEditing) {
+                      await DatabaseService().updateExercise(docId, nameController.text.trim(), selectedGroup);
+                    } else {
+                      await DatabaseService().addCustomExercise(nameController.text.trim(), selectedGroup);
+                    }
                     Navigator.pop(context);
                   },
                   child: const Text("СОХРАНИТЬ", style: TextStyle(color: Color(0xFFCCFF00))),
@@ -255,8 +258,11 @@ class _ExerciseSelectionScreenState extends State<ExerciseSelectionScreen> {
                           : null,
                         onTap: () {
                           setState(() {
-                            if (isSelected) _selected.removeWhere((e) => e.title == exercise.title);
-                            else _selected.add(exercise);
+                            if (isSelected) {
+                              _selected.removeWhere((e) => e.title == exercise.title);
+                            } else {
+                              _selected.add(exercise);
+                            }
                           });
                         },
                         child: PremiumGlassCard(

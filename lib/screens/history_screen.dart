@@ -2,10 +2,37 @@ import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:intl/intl.dart';
-import '../ui_widgets.dart'; // Для PremiumGlassCard
+import '../ui_widgets.dart'; 
+import '../workout_session_screen.dart'; 
+import '../services/database_service.dart'; // Не забудь этот импорт!
 
 class HistoryScreen extends StatelessWidget {
   const HistoryScreen({super.key});
+
+  // Метод для показа диалога подтверждения
+  void _confirmDelete(BuildContext context, String docId) {
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: const Color(0xFF1C1C1E),
+        title: const Text("Удалить запись?", style: TextStyle(color: Colors.white)),
+        content: const Text("Эту тренировку нельзя будет восстановить.", style: TextStyle(color: Colors.grey)),
+        actions: [
+          TextButton(
+            child: const Text("Отмена", style: TextStyle(color: Colors.grey)),
+            onPressed: () => Navigator.pop(ctx),
+          ),
+          TextButton(
+            child: const Text("Удалить", style: TextStyle(color: Colors.red, fontWeight: FontWeight.bold)),
+            onPressed: () async {
+              Navigator.pop(ctx); // Закрываем окно
+              await DatabaseService().deleteHistoryItem(docId); // Удаляем
+            },
+          ),
+        ],
+      ),
+    );
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -15,9 +42,9 @@ class HistoryScreen extends StatelessWidget {
     return Scaffold(
       backgroundColor: const Color(0xFF0F0F0F),
       appBar: AppBar(
-        title: const Text("История тренировок"),
-        backgroundColor: Colors.transparent,
-        automaticallyImplyLeading: false, // Убираем стрелку назад, т.к. это таб
+        title: const Text("История"), 
+        backgroundColor: Colors.transparent, 
+        automaticallyImplyLeading: false
       ),
       body: StreamBuilder<QuerySnapshot>(
         stream: FirebaseFirestore.instance
@@ -30,34 +57,23 @@ class HistoryScreen extends StatelessWidget {
           if (snapshot.connectionState == ConnectionState.waiting) {
             return const Center(child: CircularProgressIndicator(color: Color(0xFFCCFF00)));
           }
-
           if (!snapshot.hasData || snapshot.data!.docs.isEmpty) {
-            return Center(
-              child: Column(
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: [
-                  Icon(Icons.history, size: 64, color: Colors.white.withOpacity(0.1)),
-                  const SizedBox(height: 16),
-                  const Text("История пуста 🌑", style: TextStyle(color: Colors.grey)),
-                ],
-              ),
-            );
+            return const Center(child: Text("История пуста 🌑", style: TextStyle(color: Colors.grey)));
           }
 
           final docs = snapshot.data!.docs;
-
           return ListView.builder(
             padding: const EdgeInsets.all(16),
             itemCount: docs.length,
             itemBuilder: (context, index) {
-              final data = docs[index].data() as Map<String, dynamic>;
+              final doc = docs[index];
+              final data = doc.data() as Map<String, dynamic>;
               final name = data['workoutName'] ?? "Тренировка";
               final tonnage = data['tonnage'] ?? 0;
               final timestamp = data['completedAt'] as Timestamp?;
               final dateStr = timestamp != null 
-                  ? DateFormat('dd.MM.yyyy HH:mm').format(timestamp.toDate()) 
-                  : "Неизвестно";
-              final exercises = data['exercises'] as List<dynamic>? ?? [];
+                  ? DateFormat('dd.MM HH:mm').format(timestamp.toDate()) 
+                  : "";
 
               return Padding(
                 padding: const EdgeInsets.only(bottom: 12),
@@ -65,33 +81,51 @@ class HistoryScreen extends StatelessWidget {
                   child: Theme(
                     data: Theme.of(context).copyWith(dividerColor: Colors.transparent),
                     child: ExpansionTile(
+                      title: Text(name, style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
+                      subtitle: Text(dateStr, style: const TextStyle(color: Colors.grey)),
                       iconColor: const Color(0xFFCCFF00),
-                      collapsedIconColor: Colors.grey,
-                      title: Text(name, style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 18)),
-                      subtitle: Text(dateStr, style: const TextStyle(color: Colors.grey, fontSize: 12)),
-                      trailing: Column(
-                        mainAxisAlignment: MainAxisAlignment.center,
+                      collapsedIconColor: Colors.white,
+                      
+                      // --- ПРАВАЯ ЧАСТЬ: ТОННАЖ + РЕДАКТИРОВАТЬ + УДАЛИТЬ ---
+                      trailing: Row(
+                        mainAxisSize: MainAxisSize.min,
                         children: [
-                          Text("${(tonnage / 1000).toStringAsFixed(1)} т", style: const TextStyle(color: Color(0xFFCCFF00), fontWeight: FontWeight.bold)),
-                          const Text("ТОННАЖ", style: TextStyle(color: Colors.grey, fontSize: 8)),
+                          Text(
+                            "${(tonnage / 1000).toStringAsFixed(1)} т", 
+                            style: const TextStyle(color: Color(0xFFCCFF00), fontWeight: FontWeight.bold)
+                          ),
+                          const SizedBox(width: 8),
+                          // Кнопка Edit
+                          IconButton(
+                            icon: const Icon(Icons.edit, color: Colors.white54, size: 20),
+                            onPressed: () {
+                              Navigator.push(
+                                context,
+                                MaterialPageRoute(
+                                  builder: (context) => WorkoutSessionScreen(
+                                    workoutTitle: name,
+                                    existingDocId: doc.id,
+                                    existingData: data,
+                                  ),
+                                ),
+                              );
+                            },
+                          ),
+                          // Кнопка Delete
+                          IconButton(
+                            icon: const Icon(Icons.delete_outline, color: Colors.red, size: 20),
+                            onPressed: () => _confirmDelete(context, doc.id),
+                          ),
                         ],
                       ),
-                      children: exercises.map<Widget>((ex) {
-                        final sets = ex['sets'] as List<dynamic>? ?? [];
-                        // Собираем строку типа "100x10, 100x10"
-                        String setDetails = sets.map((s) => "${s['weight']}x${s['reps']}").join(", ");
-                        
-                        return Padding(
-                          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-                          child: Row(
-                            children: [
-                              const Icon(Icons.check, size: 14, color: Colors.grey),
-                              const SizedBox(width: 8),
-                              Expanded(
-                                child: Text("${ex['name']}:", style: const TextStyle(color: Colors.white70)),
-                              ),
-                              Text(setDetails, style: const TextStyle(color: Color(0xFFCCFF00), fontSize: 12)),
-                            ],
+                      
+                      children: (data['exercises'] as List? ?? []).map<Widget>((ex) {
+                        return ListTile(
+                          dense: true,
+                          title: Text(ex['name'], style: const TextStyle(color: Colors.white70)),
+                          trailing: Text(
+                            "${(ex['sets'] as List).length} подх.", 
+                            style: const TextStyle(color: Color(0xFFCCFF00))
                           ),
                         );
                       }).toList(),

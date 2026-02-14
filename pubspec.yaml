@@ -12,7 +12,7 @@ dependencies:
   # Иконки и Шрифты
   cupertino_icons: ^1.0.8
   google_fonts: ^6.2.1
-  
+    
   # Локализация
   flutter_localizations:
     sdk: flutter

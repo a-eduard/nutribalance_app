@@ -1,32 +1,59 @@
 import 'package:flutter/material.dart';
-import 'services/database_service.dart'; // Путь к сервису
-import 'ui_widgets.dart'; // Лежит рядом в корне
+import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:firebase_auth/firebase_auth.dart';
+import 'services/database_service.dart';
+import 'ui_widgets.dart';
 
+// Модель сета
 class WorkoutSet {
   final TextEditingController weightController = TextEditingController();
   final TextEditingController repsController = TextEditingController();
   bool isCompleted = false;
-  void dispose() { weightController.dispose(); repsController.dispose(); }
+  
+  void dispose() {
+    weightController.dispose();
+    repsController.dispose();
+  }
 }
 
+// Модель упражнения
 class SessionExercise {
   final String name;
   final List<WorkoutSet> sets;
-  SessionExercise({required this.name, required this.sets});
+  final TextEditingController noteController = TextEditingController();
+
+  SessionExercise({required this.name, required this.sets, String? initialNote}) {
+    if (initialNote != null) {
+      noteController.text = initialNote;
+    }
+  }
+
+  void dispose() {
+    noteController.dispose();
+    for (var s in sets) {
+      s.dispose();
+    }
+  }
 }
 
 class WorkoutSessionScreen extends StatefulWidget {
   final String workoutTitle;
-  final List<String> initialExercises; 
+  final List<String> initialExercises;
+  final String? workoutId;
   final String? existingDocId;
-  final Map<String, dynamic>? existingData;
+  final Map<String, dynamic>? existingData; 
+  
+  // 1. ДОБАВЛЕНО ПОЛЕ ДЛЯ ЗАДАНИЯ ОТ ТРЕНЕРА
+  final String? assignedWorkoutId;
 
   const WorkoutSessionScreen({
     super.key,
     required this.workoutTitle,
-    this.initialExercises = const [], 
+    this.initialExercises = const [],
+    this.workoutId, 
     this.existingDocId,
     this.existingData,
+    this.assignedWorkoutId, // Инициализируем в конструкторе
   });
 
   @override
@@ -36,78 +63,180 @@ class WorkoutSessionScreen extends StatefulWidget {
 class _WorkoutSessionScreenState extends State<WorkoutSessionScreen> {
   final List<SessionExercise> _sessionExercises = [];
   bool _isLoading = false;
+  bool _isLoadingHistory = true; 
 
   @override
   void initState() {
     super.initState();
-    _initializeData();
-  }
-
-  void _initializeData() {
-    // РЕДАКТИРОВАНИЕ
-    if (widget.existingData != null) {
-      final rawExercises = widget.existingData!['exercises'] as List<dynamic>;
-      for (var rawEx in rawExercises) {
-        final String name = rawEx['name'];
-        final List<dynamic> rawSets = rawEx['sets'];
-        final List<WorkoutSet> loadedSets = [];
-        
-        for (var s in rawSets) {
-          final ws = WorkoutSet();
-          ws.weightController.text = s['weight'].toString();
-          ws.repsController.text = s['reps'].toString();
-          ws.isCompleted = true; 
-          loadedSets.add(ws);
-        }
-        _sessionExercises.add(SessionExercise(name: name, sets: loadedSets));
-      }
-    } 
-    // НОВАЯ ТРЕНИРОВКА
-    else {
-      for (var name in widget.initialExercises) {
-        _sessionExercises.add(SessionExercise(name: name, sets: [WorkoutSet()]));
-      }
-    }
+    _initData();
   }
 
   @override
   void dispose() {
-    for (var ex in _sessionExercises) for (var s in ex.sets) s.dispose();
+    for (var ex in _sessionExercises) ex.dispose();
     super.dispose();
   }
 
-  void _addSet(SessionExercise exercise) => setState(() => exercise.sets.add(WorkoutSet()));
-  void _removeSet(SessionExercise exercise, int index) => setState(() { if (exercise.sets.length > 1) { exercise.sets[index].dispose(); exercise.sets.removeAt(index); } });
+  Future<void> _initData() async {
+    if (widget.existingData != null) {
+      _parseExistingData(widget.existingData!);
+      setState(() => _isLoadingHistory = false);
+    } else {
+      for (var name in widget.initialExercises) {
+        _sessionExercises.add(SessionExercise(name: name, sets: [WorkoutSet()]));
+      }
+      
+      if (widget.workoutId != null) {
+        await _loadHistory();
+      } else {
+        setState(() => _isLoadingHistory = false);
+      }
+    }
+  }
+
+  void _parseExistingData(Map<String, dynamic> data) {
+    try {
+      if (data['exercises'] == null) return;
+      final rawExercises = data['exercises'] as List<dynamic>;
+      
+      for (var rawEx in rawExercises) {
+        final String name = rawEx['name'] ?? "Упражнение";
+        final String note = rawEx['note'] ?? "";
+        
+        var loadedSets = <WorkoutSet>[];
+        if (rawEx['sets'] != null) {
+          final rawSets = rawEx['sets'] as List<dynamic>;
+          for (var setData in rawSets) {
+            var newSet = WorkoutSet();
+            newSet.weightController.text = (setData['weight'] ?? "").toString();
+            newSet.repsController.text = (setData['reps'] ?? "").toString();
+            loadedSets.add(newSet);
+          }
+        }
+        
+        if (loadedSets.isEmpty) loadedSets.add(WorkoutSet());
+
+        _sessionExercises.add(SessionExercise(
+          name: name, 
+          sets: loadedSets, 
+          initialNote: note
+        ));
+      }
+    } catch (e) {
+      print("Ошибка парсинга: $e");
+    }
+  }
+
+  Future<void> _loadHistory() async {
+    final lastData = await DatabaseService().getLastHistoryForWorkout(widget.workoutId!, widget.workoutTitle);
+    
+    if (lastData != null && mounted) {
+      final oldEx = lastData['exercises'] as List<dynamic>;
+      setState(() {
+        for (var current in _sessionExercises) {
+          final match = oldEx.firstWhere(
+            (o) => o['name'] == current.name, 
+            orElse: () => null
+          );
+          
+          if (match != null) {
+            current.noteController.text = match['note'] ?? "";
+            
+            List sets = match['sets'];
+            if (sets.isNotEmpty) {
+              current.sets.clear(); 
+              for (var s in sets) {
+                var ws = WorkoutSet();
+                ws.weightController.text = s['weight'].toString();
+                ws.repsController.text = s['reps'].toString();
+                current.sets.add(ws);
+              }
+            }
+          }
+        }
+        _isLoadingHistory = false;
+      });
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("Данные загружены"), backgroundColor: Color(0xFFCCFF00)));
+    } else {
+      if (mounted) setState(() => _isLoadingHistory = false);
+    }
+  }
 
   Future<void> _finishWorkout() async {
     setState(() => _isLoading = true);
-    int totalTonnage = 0;
+    
+    double totalTonnage = 0.0;
     List<Map<String, dynamic>> exercisesData = [];
 
     for (var ex in _sessionExercises) {
       List<Map<String, dynamic>> setsData = [];
       for (var s in ex.sets) {
-        if (s.weightController.text.isNotEmpty && s.repsController.text.isNotEmpty) {
-          int w = int.tryParse(s.weightController.text) ?? 0;
-          int r = int.tryParse(s.repsController.text) ?? 0;
+        String wText = s.weightController.text.replaceAll(',', '.').trim();
+        String rText = s.repsController.text.trim();
+
+        double w = double.tryParse(wText) ?? 0.0;
+        int r = int.tryParse(rText) ?? 0;
+
+        if (wText.isNotEmpty || rText.isNotEmpty) {
           totalTonnage += (w * r);
           setsData.add({'weight': w, 'reps': r});
         }
       }
-      if (setsData.isNotEmpty) exercisesData.add({'name': ex.name, 'sets': setsData});
+      
+      exercisesData.add({
+        'name': ex.name,
+        'note': ex.noteController.text.trim(),
+        'sets': setsData,
+      });
     }
 
     try {
-      if (widget.existingDocId != null) {
-        await DatabaseService().updateHistoryItem(widget.existingDocId!, {
-            'workoutName': widget.workoutTitle, 'tonnage': totalTonnage, 'duration': 60, 'exercises': exercisesData,
-        });
+      // СОХРАНЕНИЕ В ЛОКАЛЬНУЮ ИСТОРИЮ
+      if (widget.existingDocId != null && widget.assignedWorkoutId == null) {
+        // Если редактируем старую историю
+        await DatabaseService().updateHistoryItem(
+          widget.existingDocId!,
+          {
+            'workoutName': widget.workoutTitle,
+            'tonnage': totalTonnage.round(),
+            'exercises': exercisesData,
+          },
+        );
       } else {
-        await DatabaseService().saveWorkoutSession(widget.workoutTitle, totalTonnage, 60, exercisesData);
+        // Если это новая тренировка или тренировка по заданию тренера
+        await DatabaseService().saveWorkoutSession(
+          widget.workoutTitle,
+          totalTonnage.round(),
+          60,
+          exercisesData,
+          workoutId: widget.workoutId 
+        );
       }
+
+      // 2. --- НОВЫЙ КОД ДЛЯ ЗАДАНИЙ ОТ ТРЕНЕРА ---
+      if (widget.assignedWorkoutId != null) {
+        final uid = FirebaseAuth.instance.currentUser?.uid;
+        if (uid != null) {
+          try {
+            await FirebaseFirestore.instance
+                .collection('users')
+                .doc(uid)
+                .collection('assigned_workouts')
+                .doc(widget.assignedWorkoutId)
+                .update({
+              'isCompleted': true,
+              'completedAt': FieldValue.serverTimestamp(),
+            });
+          } catch (e) {
+            print("Ошибка при обновлении статуса задания: $e");
+          }
+        }
+      }
+      // ----------------------------------------
+
       if (mounted) Navigator.pop(context);
     } catch (e) {
-      if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text("Ошибка: $e")));
+      if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text("Ошибка: $e"), backgroundColor: Colors.red));
     } finally {
       if (mounted) setState(() => _isLoading = false);
     }
@@ -116,8 +245,19 @@ class _WorkoutSessionScreenState extends State<WorkoutSessionScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: const Color(0xFF0F0F0F),
-      appBar: AppBar(title: Text(widget.workoutTitle), backgroundColor: const Color(0xFF1C1C1E)),
+      backgroundColor: Colors.black,
+      appBar: AppBar(
+        title: Text(widget.workoutTitle, style: const TextStyle(fontWeight: FontWeight.bold, color: Colors.white)),
+        backgroundColor: const Color(0xFF1C1C1E),
+        iconTheme: const IconThemeData(color: Colors.white),
+        actions: [
+          if (_isLoadingHistory && widget.existingDocId == null && widget.assignedWorkoutId == null)
+             const Padding(
+               padding: EdgeInsets.only(right: 16.0),
+               child: Center(child: SizedBox(width: 20, height: 20, child: CircularProgressIndicator(color: Color(0xFFCCFF00), strokeWidth: 2))),
+             )
+        ],
+      ),
       body: SafeArea(
         child: Column(
           children: [
@@ -125,44 +265,106 @@ class _WorkoutSessionScreenState extends State<WorkoutSessionScreen> {
               child: ListView.builder(
                 padding: const EdgeInsets.all(16),
                 itemCount: _sessionExercises.length,
-                itemBuilder: (context, index) {
-                  final exercise = _sessionExercises[index];
-                  return Container(
-                    margin: const EdgeInsets.only(bottom: 16),
-                    decoration: BoxDecoration(color: const Color(0xFF1C1C1E), borderRadius: BorderRadius.circular(16)),
-                    child: Column(
-                      children: [
-                        Padding(
-                          padding: const EdgeInsets.all(16),
-                          child: Row(
-                            mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                            children: [
-                              Text(exercise.name, style: const TextStyle(color: Color(0xFFCCFF00), fontSize: 18, fontWeight: FontWeight.bold)),
-                              IconButton(icon: const Icon(Icons.add_circle, color: Color(0xFFCCFF00)), onPressed: () => _addSet(exercise))
-                            ],
-                          ),
-                        ),
-                        ...List.generate(exercise.sets.length, (i) => Row(
-                          children: [
-                            const SizedBox(width: 16),
-                            Text("${i + 1}", style: const TextStyle(color: Colors.grey)),
-                            const SizedBox(width: 16),
-                            Expanded(child: TextField(controller: exercise.sets[i].weightController, style: const TextStyle(color: Colors.white), decoration: const InputDecoration(hintText: "КГ", filled: true, fillColor: Colors.black))),
-                            const SizedBox(width: 8),
-                            Expanded(child: TextField(controller: exercise.sets[i].repsController, style: const TextStyle(color: Colors.white), decoration: const InputDecoration(hintText: "ПОВТ", filled: true, fillColor: Colors.black))),
-                            IconButton(icon: const Icon(Icons.remove_circle, color: Colors.red), onPressed: () => _removeSet(exercise, i))
-                          ],
-                        )).map((e) => Padding(padding: const EdgeInsets.only(bottom: 8), child: e)),
-                      ],
-                    ),
-                  );
-                },
+                itemBuilder: (context, index) => _buildCard(_sessionExercises[index]),
               ),
             ),
-            if (_isLoading) const CircularProgressIndicator(color: Color(0xFFCCFF00))
-            else NeonActionButton(text: widget.existingDocId != null ? "ОБНОВИТЬ" : "ЗАВЕРШИТЬ", onTap: _finishWorkout, isFullWidth: true)
+            Container(
+              padding: const EdgeInsets.all(20),
+              color: const Color(0xFF1C1C1E),
+              child: _isLoading 
+                ? const Center(child: CircularProgressIndicator(color: Color(0xFFCCFF00)))
+                : NeonActionButton(
+                    text: (widget.existingDocId != null && widget.assignedWorkoutId == null) ? "СОХРАНИТЬ ИЗМЕНЕНИЯ" : "ЗАВЕРШИТЬ ТРЕНИРОВКУ",
+                    onTap: _finishWorkout,
+                    isFullWidth: true,
+                  ),
+            ),
           ],
         ),
+      ),
+    );
+  }
+
+  Widget _buildCard(SessionExercise ex) {
+    return Container(
+      margin: const EdgeInsets.only(bottom: 20),
+      decoration: BoxDecoration(color: const Color(0xFF1C1C1E), borderRadius: BorderRadius.circular(16)),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Padding(
+            padding: const EdgeInsets.all(16),
+            child: Text(ex.name, style: const TextStyle(color: Color(0xFFCCFF00), fontSize: 18, fontWeight: FontWeight.bold)),
+          ),
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 0),
+            child: TextField(
+              controller: ex.noteController,
+              style: const TextStyle(color: Colors.white),
+              decoration: InputDecoration(
+                hintText: "Заметки...",
+                hintStyle: TextStyle(color: Colors.grey.withOpacity(0.5)),
+                filled: true, fillColor: Colors.black,
+                border: OutlineInputBorder(borderRadius: BorderRadius.circular(8), borderSide: BorderSide.none),
+                isDense: true,
+              ),
+            ),
+          ),
+          const SizedBox(height: 10),
+           Padding(
+             padding: const EdgeInsets.symmetric(horizontal: 16),
+             child: Row(
+               children: const [
+                 SizedBox(width: 30, child: Text("#", style: TextStyle(color: Colors.grey))), 
+                 Expanded(child: Center(child: Text("КГ", style: TextStyle(color: Colors.grey)))), 
+                 SizedBox(width: 10),
+                 Expanded(child: Center(child: Text("ПОВТ", style: TextStyle(color: Colors.grey)))),
+                 SizedBox(width: 40),
+               ],
+             ),
+           ),
+           const SizedBox(height: 5),
+          ...List.generate(ex.sets.length, (i) {
+             final s = ex.sets[i];
+             return Padding(
+               padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
+               child: Row(
+                 children: [
+                   SizedBox(width: 30, child: Text("${i+1}", style: const TextStyle(color: Colors.white))),
+                   Expanded(child: _input(s.weightController, true)),
+                   const SizedBox(width: 10),
+                   Expanded(child: _input(s.repsController, false)),
+                   IconButton(
+                     icon: const Icon(Icons.close, color: Colors.red),
+                     onPressed: () => setState(() => ex.sets.removeAt(i)),
+                   )
+                 ],
+               ),
+             );
+          }),
+          GestureDetector(
+            onTap: () => setState(() => ex.sets.add(WorkoutSet())),
+            child: Container(
+              padding: const EdgeInsets.all(16),
+              alignment: Alignment.center,
+              child: const Text("+ ДОБАВИТЬ ПОДХОД", style: TextStyle(color: Color(0xFFCCFF00), fontWeight: FontWeight.bold)),
+            ),
+          )
+        ],
+      ),
+    );
+  }
+
+  Widget _input(TextEditingController c, bool isDec) {
+    return Container(
+      height: 45,
+      decoration: BoxDecoration(color: Colors.black, borderRadius: BorderRadius.circular(8)),
+      child: TextField(
+        controller: c,
+        keyboardType: TextInputType.numberWithOptions(decimal: isDec),
+        style: const TextStyle(color: Colors.white, fontSize: 18, fontWeight: FontWeight.bold),
+        textAlign: TextAlign.center,
+        decoration: const InputDecoration(border: InputBorder.none, contentPadding: EdgeInsets.only(bottom: 5)),
       ),
     );
   }

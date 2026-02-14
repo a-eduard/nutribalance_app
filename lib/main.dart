@@ -2,19 +2,18 @@ import 'package:flutter/material.dart';
 import 'package:firebase_core/firebase_core.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
-import 'package:flutter/foundation.dart'; 
-import 'package:intl/date_symbol_data_local.dart'; 
+import 'package:flutter/foundation.dart';
+import 'package:intl/date_symbol_data_local.dart';
 
 // --- ИСПРАВЛЕННЫЕ ИМПОРТЫ (Файлы лежат в корне lib) ---
-import 'firebase_options.dart'; 
-import 'auth_screen.dart';       
-import 'dashboard_screen.dart';   
-import 'screens/onboarding_screen.dart'; // Только этот в папке screens
+import 'firebase_options.dart';
+import 'auth_screen.dart';
+import 'dashboard_screen.dart';
+import 'screens/onboarding_screen.dart';
+import 'screens/home_wrapper.dart'; // Только этот в папке screens
 
-void main() async {
+void main() {
   WidgetsFlutterBinding.ensureInitialized();
-  await Firebase.initializeApp(options: DefaultFirebaseOptions.currentPlatform);
-  await initializeDateFormatting('ru', null);
   runApp(const MyApp());
 }
 
@@ -25,53 +24,100 @@ class MyApp extends StatelessWidget {
   Widget build(BuildContext context) {
     return MaterialApp(
       debugShowCheckedModeBanner: false,
-      title: 'Tonna Gym Tracker',
+      title: 'Tonna Gym',
       theme: ThemeData(
         brightness: Brightness.dark,
-        scaffoldBackgroundColor: const Color(0xFF000000),
         primaryColor: const Color(0xFFCCFF00),
+        scaffoldBackgroundColor: Colors.black,
+        useMaterial3: true,
         colorScheme: const ColorScheme.dark(
           primary: Color(0xFFCCFF00),
           secondary: Color(0xFFCCFF00),
           surface: Color(0xFF1C1C1E),
-          onSurface: Colors.white,
         ),
-        useMaterial3: true,
-        fontFamily: 'Roboto', 
       ),
-      home: const AuthWrapper(),
+      home: const AppInitializer(),
     );
   }
 }
 
-class AuthWrapper extends StatelessWidget {
-  const AuthWrapper({super.key});
+class AppInitializer extends StatefulWidget {
+  const AppInitializer({super.key});
+
+  @override
+  State<AppInitializer> createState() => _AppInitializerState();
+}
+
+class _AppInitializerState extends State<AppInitializer> {
+  bool _isInitialized = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _initFirebase();
+  }
+
+  Future<void> _initFirebase() async {
+    try {
+      await Firebase.initializeApp(
+        options: DefaultFirebaseOptions.currentPlatform,
+      );
+      
+      print("--- FIREBASE INITIALIZED ---");
+      
+      // ПРОВЕРКА: Кто сейчас залогинен сразу после запуска?
+      User? currentUser = FirebaseAuth.instance.currentUser;
+      if (currentUser != null) {
+        print("--- ДИАГНОСТИКА: Пользователь НАЙДЕН: ${currentUser.email} (UID: ${currentUser.uid}) ---");
+      } else {
+        print("--- ДИАГНОСТИКА: Пользователь НЕ НАЙДЕН (null) ---");
+      }
+
+      if (mounted) {
+        setState(() {
+          _isInitialized = true;
+        });
+      }
+    } catch (e) {
+      print("--- ОШИБКА FIREBASE: $e ---");
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    if (!_isInitialized) {
+      return const Scaffold(
+        backgroundColor: Colors.black,
+        body: Center(child: CircularProgressIndicator(color: Color(0xFFCCFF00))),
+      );
+    }
+    return const AuthGate();
+  }
+}
+
+class AuthGate extends StatelessWidget {
+  const AuthGate({super.key});
 
   @override
   Widget build(BuildContext context) {
     return StreamBuilder<User?>(
       stream: FirebaseAuth.instance.authStateChanges(),
       builder: (context, snapshot) {
+        // Пока Firebase проверяет токен (работает под капотом)
         if (snapshot.connectionState == ConnectionState.waiting) {
-          return const Scaffold(backgroundColor: Color(0xFF000000), body: Center(child: CircularProgressIndicator(color: Color(0xFFCCFF00))));
+          return const Scaffold(
+            backgroundColor: Colors.black,
+            body: Center(child: CircularProgressIndicator(color: Color(0xFFCCFF00))),
+          );
         }
-        if (!snapshot.hasData) return const AuthScreen();
 
-        return FutureBuilder<DocumentSnapshot>(
-          future: FirebaseFirestore.instance.collection('users').doc(snapshot.data!.uid).get(),
-          builder: (context, userSnapshot) {
-            if (userSnapshot.connectionState == ConnectionState.waiting) {
-              return const Scaffold(backgroundColor: Color(0xFF000000), body: Center(child: CircularProgressIndicator(color: Color(0xFFCCFF00))));
-            }
-            if (userSnapshot.hasData && userSnapshot.data!.exists) {
-              final userData = userSnapshot.data!.data() as Map<String, dynamic>?;
-              if (userData != null && userData.containsKey('name') && (userData['name'] as String).isNotEmpty) {
-                return const DashboardScreen();
-              }
-            }
-            return const OnboardingScreen();
-          },
-        );
+        // Если пользователь авторизован — идем в ОБЕРТКУ (HomeWrapper)
+        if (snapshot.hasData) {
+          return const HomeWrapper(); 
+        }
+
+        // Если не авторизован — показываем экран входа
+        return const AuthScreen();
       },
     );
   }

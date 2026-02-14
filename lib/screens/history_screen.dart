@@ -1,134 +1,138 @@
 import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
-import 'package:firebase_auth/firebase_auth.dart';
-import 'package:intl/intl.dart';
-import '../ui_widgets.dart'; 
-import '../workout_session_screen.dart'; 
-import '../services/database_service.dart'; // Не забудь этот импорт!
+import '../services/database_service.dart';
+import '../workout_session_screen.dart';
 
 class HistoryScreen extends StatelessWidget {
   const HistoryScreen({super.key});
 
-  // Метод для показа диалога подтверждения
-  void _confirmDelete(BuildContext context, String docId) {
-    showDialog(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        backgroundColor: const Color(0xFF1C1C1E),
-        title: const Text("Удалить запись?", style: TextStyle(color: Colors.white)),
-        content: const Text("Эту тренировку нельзя будет восстановить.", style: TextStyle(color: Colors.grey)),
-        actions: [
-          TextButton(
-            child: const Text("Отмена", style: TextStyle(color: Colors.grey)),
-            onPressed: () => Navigator.pop(ctx),
-          ),
-          TextButton(
-            child: const Text("Удалить", style: TextStyle(color: Colors.red, fontWeight: FontWeight.bold)),
-            onPressed: () async {
-              Navigator.pop(ctx); // Закрываем окно
-              await DatabaseService().deleteHistoryItem(docId); // Удаляем
-            },
-          ),
-        ],
-      ),
-    );
-  }
-
   @override
   Widget build(BuildContext context) {
-    final uid = FirebaseAuth.instance.currentUser?.uid;
-    if (uid == null) return const Center(child: Text("Нет доступа"));
-
     return Scaffold(
-      backgroundColor: const Color(0xFF0F0F0F),
+      backgroundColor: const Color(0xFF000000),
       appBar: AppBar(
-        title: const Text("История"), 
-        backgroundColor: Colors.transparent, 
-        automaticallyImplyLeading: false
+        title: const Text("ИСТОРИЯ", style: TextStyle(fontWeight: FontWeight.bold, color: Colors.white)),
+        backgroundColor: const Color(0xFF1C1C1E),
+        automaticallyImplyLeading: false,
+        centerTitle: true,
       ),
       body: StreamBuilder<QuerySnapshot>(
-        stream: FirebaseFirestore.instance
-            .collection('users')
-            .doc(uid)
-            .collection('history')
-            .orderBy('completedAt', descending: true)
-            .snapshots(),
+        stream: DatabaseService().getUserHistory(),
         builder: (context, snapshot) {
           if (snapshot.connectionState == ConnectionState.waiting) {
             return const Center(child: CircularProgressIndicator(color: Color(0xFFCCFF00)));
           }
+
           if (!snapshot.hasData || snapshot.data!.docs.isEmpty) {
-            return const Center(child: Text("История пуста 🌑", style: TextStyle(color: Colors.grey)));
+            return Center(
+              child: Column(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  Icon(Icons.history, size: 60, color: Colors.grey.withOpacity(0.3)),
+                  const SizedBox(height: 16),
+                  const Text("История пуста", style: TextStyle(color: Colors.grey)),
+                ],
+              ),
+            );
           }
 
-          final docs = snapshot.data!.docs;
           return ListView.builder(
             padding: const EdgeInsets.all(16),
-            itemCount: docs.length,
+            itemCount: snapshot.data!.docs.length,
             itemBuilder: (context, index) {
-              final doc = docs[index];
+              final doc = snapshot.data!.docs[index];
               final data = doc.data() as Map<String, dynamic>;
+              
               final name = data['workoutName'] ?? "Тренировка";
               final tonnage = data['tonnage'] ?? 0;
-              final timestamp = data['completedAt'] as Timestamp?;
+              final timestamp = data['date'] as Timestamp?;
               final dateStr = timestamp != null 
-                  ? DateFormat('dd.MM HH:mm').format(timestamp.toDate()) 
-                  : "";
+                  ? "${timestamp.toDate().day.toString().padLeft(2,'0')}.${timestamp.toDate().month.toString().padLeft(2,'0')}.${timestamp.toDate().year}" 
+                  : "Неизвестно";
 
-              return Padding(
-                padding: const EdgeInsets.only(bottom: 12),
-                child: PremiumGlassCard(
-                  child: Theme(
-                    data: Theme.of(context).copyWith(dividerColor: Colors.transparent),
-                    child: ExpansionTile(
-                      title: Text(name, style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
-                      subtitle: Text(dateStr, style: const TextStyle(color: Colors.grey)),
-                      iconColor: const Color(0xFFCCFF00),
-                      collapsedIconColor: Colors.white,
-                      
-                      // --- ПРАВАЯ ЧАСТЬ: ТОННАЖ + РЕДАКТИРОВАТЬ + УДАЛИТЬ ---
-                      trailing: Row(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          Text(
-                            "${(tonnage / 1000).toStringAsFixed(1)} т", 
-                            style: const TextStyle(color: Color(0xFFCCFF00), fontWeight: FontWeight.bold)
+              return Dismissible(
+                key: Key(doc.id),
+                direction: DismissDirection.endToStart,
+                // ТРЕБОВАНИЕ: Подтверждение удаления
+                confirmDismiss: (direction) async {
+                  return await showDialog(
+                    context: context,
+                    builder: (BuildContext context) {
+                      return AlertDialog(
+                        backgroundColor: const Color(0xFF1C1C1E),
+                        title: const Text("Удалить тренировку?", style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
+                        content: const Text("Это действие нельзя отменить.", style: TextStyle(color: Colors.grey)),
+                        actions: <Widget>[
+                          TextButton(
+                            onPressed: () => Navigator.of(context).pop(false),
+                            child: const Text("ОТМЕНА", style: TextStyle(color: Colors.white)),
                           ),
-                          const SizedBox(width: 8),
-                          // Кнопка Edit
-                          IconButton(
-                            icon: const Icon(Icons.edit, color: Colors.white54, size: 20),
-                            onPressed: () {
-                              Navigator.push(
-                                context,
-                                MaterialPageRoute(
-                                  builder: (context) => WorkoutSessionScreen(
-                                    workoutTitle: name,
-                                    existingDocId: doc.id,
-                                    existingData: data,
-                                  ),
-                                ),
-                              );
-                            },
-                          ),
-                          // Кнопка Delete
-                          IconButton(
-                            icon: const Icon(Icons.delete_outline, color: Colors.red, size: 20),
-                            onPressed: () => _confirmDelete(context, doc.id),
+                          TextButton(
+                            onPressed: () => Navigator.of(context).pop(true),
+                            child: const Text("УДАЛИТЬ", style: TextStyle(color: Colors.red, fontWeight: FontWeight.bold)),
                           ),
                         ],
+                      );
+                    },
+                  );
+                },
+                background: Container(
+                  alignment: Alignment.centerRight,
+                  padding: const EdgeInsets.only(right: 20),
+                  margin: const EdgeInsets.only(bottom: 12),
+                  decoration: BoxDecoration(color: Colors.red.withOpacity(0.9), borderRadius: BorderRadius.circular(16)),
+                  child: const Icon(Icons.delete_forever, color: Colors.white, size: 30),
+                ),
+                onDismissed: (_) {
+                  DatabaseService().deleteHistoryItem(doc.id);
+                },
+                child: GestureDetector(
+                  onTap: () {
+                    Navigator.push(
+                      context,
+                      MaterialPageRoute(
+                        builder: (_) => WorkoutSessionScreen(
+                          workoutTitle: name,
+                          existingDocId: doc.id,   
+                          existingData: data,      
+                        ),
                       ),
-                      
-                      children: (data['exercises'] as List? ?? []).map<Widget>((ex) {
-                        return ListTile(
-                          dense: true,
-                          title: Text(ex['name'], style: const TextStyle(color: Colors.white70)),
-                          trailing: Text(
-                            "${(ex['sets'] as List).length} подх.", 
-                            style: const TextStyle(color: Color(0xFFCCFF00))
-                          ),
-                        );
-                      }).toList(),
+                    );
+                  },
+                  child: Container(
+                    margin: const EdgeInsets.only(bottom: 12),
+                    padding: const EdgeInsets.all(16),
+                    decoration: BoxDecoration(
+                      color: const Color(0xFF1C1C1E),
+                      borderRadius: BorderRadius.circular(16),
+                      border: Border.all(color: Colors.white.withOpacity(0.05)),
+                    ),
+                    child: Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                      children: [
+                        Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(name, style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 16)),
+                            const SizedBox(height: 6),
+                            Row(
+                              children: [
+                                const Icon(Icons.calendar_today, size: 12, color: Colors.grey),
+                                const SizedBox(width: 4),
+                                Text(dateStr, style: const TextStyle(color: Colors.grey, fontSize: 12)),
+                              ],
+                            ),
+                          ],
+                        ),
+                        Column(
+                          crossAxisAlignment: CrossAxisAlignment.end,
+                          children: [
+                            Text("${(tonnage / 1000).toStringAsFixed(1)} т", 
+                                style: const TextStyle(color: Color(0xFFCCFF00), fontWeight: FontWeight.bold, fontSize: 20)),
+                            const Text("ОБЪЕМ", style: TextStyle(color: Colors.grey, fontSize: 9, fontWeight: FontWeight.bold)),
+                          ],
+                        ),
+                      ],
                     ),
                   ),
                 ),

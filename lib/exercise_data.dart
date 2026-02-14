@@ -1,23 +1,59 @@
-class Exercise {
-  final String id;
-  final String title;
-  final String muscleGroup;
+class ExerciseData {
+  static final Map<String, List<String>> library = {
+    'Грудь': [
+      'Жим штанги лежа',
+      'Жим гантелей на наклонной',
+      'Сведение в кроссовере',
+      'Отжимания на брусьях',
+      'Разводка гантелей',
+      'Жим в хаммере',
+      'Пуловер'
+    ],
+    'Спина': [
+      'Подтягивания',
+      'Тяга штанги в наклоне',
+      'Тяга верхнего блока',
+      'Гиперэкстензия',
+      'Тяга гантели одной рукой',
+      'Тяга нижнего блока',
+      'Шраги'
+    ],
+    'Ноги': [
+      'Приседания со штангой',
+      'Жим ногами',
+      'Выпады',
+      'Разгибание ног',
+      'Сгибание ног',
+      'Мертвая тяга',
+      'Подъемы на икры'
+    ],
+    'Руки': [
+      'Подъем штанги на бицепс',
+      'Молотки',
+      'Французский жим',
+      'Разгибание на блоке (трицепс)',
+      'Концентрированный подъем',
+      'Жим узким хватом'
+    ],
+    'Плечи': [
+      'Жим армейский',
+      'Жим гантелей сидя',
+      'Махи гантелями в стороны',
+      'Махи в наклоне (задняя дельта)',
+      'Протяжка штанги'
+    ],
+    'Пресс': [
+      'Скручивания',
+      'Подъем ног в висе',
+      'Планка',
+      'Русский твист',
+      'Молитва (на блоке)'
+    ],
+  };
 
-  Exercise({
-    required this.id,
-    required this.title,
-    required this.muscleGroup,
-  });
-}
-
-class Workout {
-  final String name;
-  final List<Exercise> exercises;
-  final Map<String, String> targets; // Цели упражнений
-
-  Workout({
-    required this.name,
-    required this.exercises,
-    this.targets = const {}, 
-  });
+  static List<String> get allExercises {
+    List<String> all = [];
+    library.values.forEach((list) => all.addAll(list));
+    return all;
+  }
 }

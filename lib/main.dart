@@ -1,20 +1,38 @@
 import 'package:flutter/material.dart';
 import 'package:firebase_core/firebase_core.dart';
-import 'package:firebase_auth/firebase_auth.dart';
-import 'package:cloud_firestore/cloud_firestore.dart';
-import 'package:flutter/foundation.dart';
-import 'package:intl/date_symbol_data_local.dart';
+import 'package:firebase_messaging/firebase_messaging.dart';
+import 'package:easy_localization/easy_localization.dart';
 
-// --- ИСПРАВЛЕННЫЕ ИМПОРТЫ (Файлы лежат в корне lib) ---
-import 'firebase_options.dart';
-import 'auth_screen.dart';
-import 'dashboard_screen.dart';
-import 'screens/onboarding_screen.dart';
-import 'screens/home_wrapper.dart'; // Только этот в папке screens
+// Импортируем обертку (путь должен быть верным)
+import 'screens/home_wrapper.dart';
 
-void main() {
+// Обработчик фоновых пушей (обязательно вне класса)
+@pragma('vm:entry-point')
+Future<void> _firebaseMessagingBackgroundHandler(RemoteMessage message) async {
+  await Firebase.initializeApp();
+  debugPrint("Handling a background message: ${message.messageId}");
+}
+
+void main() async {
   WidgetsFlutterBinding.ensureInitialized();
-  runApp(const MyApp());
+  
+  // Инициализация Firebase
+  await Firebase.initializeApp();
+  
+  // Регистрация фонового обработчика
+  FirebaseMessaging.onBackgroundMessage(_firebaseMessagingBackgroundHandler);
+  
+  // Инициализация локализации
+  await EasyLocalization.ensureInitialized();
+
+  runApp(
+    EasyLocalization(
+      supportedLocales: const [Locale('ru'), Locale('en')],
+      path: 'assets/translations',
+      fallbackLocale: const Locale('ru'),
+      child: const MyApp(),
+    ),
+  );
 }
 
 class MyApp extends StatelessWidget {
@@ -23,102 +41,26 @@ class MyApp extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
+      title: 'TONNA GYM',
       debugShowCheckedModeBanner: false,
-      title: 'Tonna Gym',
-      theme: ThemeData(
-        brightness: Brightness.dark,
-        primaryColor: const Color(0xFFCCFF00),
+      
+      // Настройки локализации
+      localizationsDelegates: context.localizationDelegates,
+      supportedLocales: context.supportedLocales,
+      locale: context.locale,
+      
+      theme: ThemeData.dark().copyWith(
         scaffoldBackgroundColor: Colors.black,
-        useMaterial3: true,
-        colorScheme: const ColorScheme.dark(
-          primary: Color(0xFFCCFF00),
-          secondary: Color(0xFFCCFF00),
-          surface: Color(0xFF1C1C1E),
+        // DESIGN FIX: Новый акцентный цвет #9CD600
+        primaryColor: const Color(0xFF9CD600), 
+        colorScheme: ColorScheme.dark(
+          primary: const Color(0xFF9CD600),
+          secondary: const Color(0xFF9CD600),
         ),
       ),
-      home: const AppInitializer(),
-    );
-  }
-}
-
-class AppInitializer extends StatefulWidget {
-  const AppInitializer({super.key});
-
-  @override
-  State<AppInitializer> createState() => _AppInitializerState();
-}
-
-class _AppInitializerState extends State<AppInitializer> {
-  bool _isInitialized = false;
-
-  @override
-  void initState() {
-    super.initState();
-    _initFirebase();
-  }
-
-  Future<void> _initFirebase() async {
-    try {
-      await Firebase.initializeApp(
-        options: DefaultFirebaseOptions.currentPlatform,
-      );
       
-      print("--- FIREBASE INITIALIZED ---");
-      
-      // ПРОВЕРКА: Кто сейчас залогинен сразу после запуска?
-      User? currentUser = FirebaseAuth.instance.currentUser;
-      if (currentUser != null) {
-        print("--- ДИАГНОСТИКА: Пользователь НАЙДЕН: ${currentUser.email} (UID: ${currentUser.uid}) ---");
-      } else {
-        print("--- ДИАГНОСТИКА: Пользователь НЕ НАЙДЕН (null) ---");
-      }
-
-      if (mounted) {
-        setState(() {
-          _isInitialized = true;
-        });
-      }
-    } catch (e) {
-      print("--- ОШИБКА FIREBASE: $e ---");
-    }
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    if (!_isInitialized) {
-      return const Scaffold(
-        backgroundColor: Colors.black,
-        body: Center(child: CircularProgressIndicator(color: Color(0xFFCCFF00))),
-      );
-    }
-    return const AuthGate();
-  }
-}
-
-class AuthGate extends StatelessWidget {
-  const AuthGate({super.key});
-
-  @override
-  Widget build(BuildContext context) {
-    return StreamBuilder<User?>(
-      stream: FirebaseAuth.instance.authStateChanges(),
-      builder: (context, snapshot) {
-        // Пока Firebase проверяет токен (работает под капотом)
-        if (snapshot.connectionState == ConnectionState.waiting) {
-          return const Scaffold(
-            backgroundColor: Colors.black,
-            body: Center(child: CircularProgressIndicator(color: Color(0xFFCCFF00))),
-          );
-        }
-
-        // Если пользователь авторизован — идем в ОБЕРТКУ (HomeWrapper)
-        if (snapshot.hasData) {
-          return const HomeWrapper(); 
-        }
-
-        // Если не авторизован — показываем экран входа
-        return const AuthScreen();
-      },
+      // Точка входа — наш исправленный HomeWrapper
+      home: const HomeWrapper(),
     );
   }
 }

@@ -23,8 +23,9 @@ class ActivityChart extends StatelessWidget {
       // Считаем совпадения в истории
       int count = 0;
       for (var session in history) {
-        if (session['completedAt'] != null) {
-          final sessionDate = (session['completedAt'] as Timestamp).toDate();
+        // Используем поле 'date', так как мы исправили это на Этапе 1
+        if (session['date'] != null) {
+          final sessionDate = (session['date'] as Timestamp).toDate();
           if (sessionDate.year == date.year && 
               sessionDate.month == date.month && 
               sessionDate.day == date.day) {
@@ -35,18 +36,21 @@ class ActivityChart extends StatelessWidget {
       weeklyCounts[6 - i] = count;
     }
 
+    // Новый акцентный цвет (Lime Green)
+    const primaryColor = Color(0xFF9CD600);
+
     return AspectRatio(
       aspectRatio: 1.7,
       child: BarChart(
         BarChartData(
           barTouchData: BarTouchData(
             touchTooltipData: BarTouchTooltipData(
-              // ИСПРАВЛЕНИЕ: Используем tooltipBgColor вместо getTooltipColor
-              tooltipBgColor: const Color(0xFF1C1C1E),
+              // ИСПРАВЛЕНИЕ: Заменили tooltipBgColor на getTooltipColor
+              getTooltipColor: (group) => const Color(0xFF1C1C1E),
               getTooltipItem: (group, groupIndex, rod, rodIndex) {
                 return BarTooltipItem(
                   '${rod.toY.round()} трен.',
-                  const TextStyle(color: Color(0xFFCCFF00), fontWeight: FontWeight.bold),
+                  const TextStyle(color: primaryColor, fontWeight: FontWeight.bold),
                 );
               },
             ),
@@ -78,10 +82,9 @@ class ActivityChart extends StatelessWidget {
               barRods: [
                 BarChartRodData(
                   toY: weeklyCounts[index].toDouble(),
-                  color: weeklyCounts[index] > 0 ? const Color(0xFFCCFF00) : const Color(0xFF2C2C2E),
+                  color: weeklyCounts[index] > 0 ? primaryColor : const Color(0xFF2C2C2E),
                   width: 12,
                   borderRadius: BorderRadius.circular(4),
-                  // Если backDrawRodData тоже вызовет ошибку, просто удалите этот блок backDrawRodData
                   backDrawRodData: BackgroundBarChartRodData(
                     show: true,
                     toY: 3, 

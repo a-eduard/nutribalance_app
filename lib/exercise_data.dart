@@ -1,53 +1,53 @@
 class ExerciseData {
   static final Map<String, List<String>> library = {
-    'Грудь': [
-      'Жим штанги лежа',
-      'Жим гантелей на наклонной',
-      'Сведение в кроссовере',
-      'Отжимания на брусьях',
-      'Разводка гантелей',
-      'Жим в хаммере',
-      'Пуловер'
+    'category_chest': [
+      'ex_bench_press',
+      'ex_incline_press',
+      'ex_crossover',
+      'ex_dips',
+      'ex_flyes',
+      'ex_hammer_press',
+      'ex_pullover'
     ],
-    'Спина': [
-      'Подтягивания',
-      'Тяга штанги в наклоне',
-      'Тяга верхнего блока',
-      'Гиперэкстензия',
-      'Тяга гантели одной рукой',
-      'Тяга нижнего блока',
-      'Шраги'
+    'category_back': [
+      'ex_pullups',
+      'ex_barbell_row',
+      'ex_lat_pulldown',
+      'ex_hyperextension',
+      'ex_dumbbell_row',
+      'ex_cable_row',
+      'ex_shrugs'
     ],
-    'Ноги': [
-      'Приседания со штангой',
-      'Жим ногами',
-      'Выпады',
-      'Разгибание ног',
-      'Сгибание ног',
-      'Мертвая тяга',
-      'Подъемы на икры'
+    'category_legs': [
+      'ex_squats',
+      'ex_leg_press',
+      'ex_lunges',
+      'ex_leg_extension',
+      'ex_leg_curl',
+      'ex_deadlift',
+      'ex_calf_raises'
     ],
-    'Руки': [
-      'Подъем штанги на бицепс',
-      'Молотки',
-      'Французский жим',
-      'Разгибание на блоке (трицепс)',
-      'Концентрированный подъем',
-      'Жим узким хватом'
+    'category_arms': [
+      'ex_bicep_curl',
+      'ex_hammer_curls',
+      'ex_skull_crushers',
+      'ex_tricep_pushdown',
+      'ex_concentration_curl',
+      'ex_close_grip_bench'
     ],
-    'Плечи': [
-      'Жим армейский',
-      'Жим гантелей сидя',
-      'Махи гантелями в стороны',
-      'Махи в наклоне (задняя дельта)',
-      'Протяжка штанги'
+    'category_shoulders': [
+      'ex_military_press',
+      'ex_seated_dumbbell_press',
+      'ex_lateral_raises',
+      'ex_reverse_flyes',
+      'ex_upright_row'
     ],
-    'Пресс': [
-      'Скручивания',
-      'Подъем ног в висе',
-      'Планка',
-      'Русский твист',
-      'Молитва (на блоке)'
+    'category_core': [
+      'ex_crunches',
+      'ex_hanging_leg_raises',
+      'ex_plank',
+      'ex_russian_twist',
+      'ex_cable_crunch'
     ],
   };
 

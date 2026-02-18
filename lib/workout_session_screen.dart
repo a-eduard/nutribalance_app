@@ -1,10 +1,10 @@
 import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
-import 'services/database_service.dart';
-import 'ui_widgets.dart';
+import 'package:easy_localization/easy_localization.dart';
+import '../services/database_service.dart';
+import '../ui_widgets.dart';
 
-// Модель сета
 class WorkoutSet {
   final TextEditingController weightController = TextEditingController();
   final TextEditingController repsController = TextEditingController();
@@ -16,7 +16,6 @@ class WorkoutSet {
   }
 }
 
-// Модель упражнения
 class SessionExercise {
   final String name;
   final List<WorkoutSet> sets;
@@ -42,8 +41,6 @@ class WorkoutSessionScreen extends StatefulWidget {
   final String? workoutId;
   final String? existingDocId;
   final Map<String, dynamic>? existingData; 
-  
-  // 1. ДОБАВЛЕНО ПОЛЕ ДЛЯ ЗАДАНИЯ ОТ ТРЕНЕРА
   final String? assignedWorkoutId;
 
   const WorkoutSessionScreen({
@@ -53,7 +50,7 @@ class WorkoutSessionScreen extends StatefulWidget {
     this.workoutId, 
     this.existingDocId,
     this.existingData,
-    this.assignedWorkoutId, // Инициализируем в конструкторе
+    this.assignedWorkoutId,
   });
 
   @override
@@ -85,7 +82,6 @@ class _WorkoutSessionScreenState extends State<WorkoutSessionScreen> {
       for (var name in widget.initialExercises) {
         _sessionExercises.add(SessionExercise(name: name, sets: [WorkoutSet()]));
       }
-      
       if (widget.workoutId != null) {
         await _loadHistory();
       } else {
@@ -98,11 +94,9 @@ class _WorkoutSessionScreenState extends State<WorkoutSessionScreen> {
     try {
       if (data['exercises'] == null) return;
       final rawExercises = data['exercises'] as List<dynamic>;
-      
       for (var rawEx in rawExercises) {
         final String name = rawEx['name'] ?? "Упражнение";
         final String note = rawEx['note'] ?? "";
-        
         var loadedSets = <WorkoutSet>[];
         if (rawEx['sets'] != null) {
           final rawSets = rawEx['sets'] as List<dynamic>;
@@ -113,35 +107,23 @@ class _WorkoutSessionScreenState extends State<WorkoutSessionScreen> {
             loadedSets.add(newSet);
           }
         }
-        
         if (loadedSets.isEmpty) loadedSets.add(WorkoutSet());
-
-        _sessionExercises.add(SessionExercise(
-          name: name, 
-          sets: loadedSets, 
-          initialNote: note
-        ));
+        _sessionExercises.add(SessionExercise(name: name, sets: loadedSets, initialNote: note));
       }
     } catch (e) {
-      print("Ошибка парсинга: $e");
+      debugPrint("Ошибка парсинга: $e");
     }
   }
 
   Future<void> _loadHistory() async {
     final lastData = await DatabaseService().getLastHistoryForWorkout(widget.workoutId!, widget.workoutTitle);
-    
     if (lastData != null && mounted) {
       final oldEx = lastData['exercises'] as List<dynamic>;
       setState(() {
         for (var current in _sessionExercises) {
-          final match = oldEx.firstWhere(
-            (o) => o['name'] == current.name, 
-            orElse: () => null
-          );
-          
+          final match = oldEx.firstWhere((o) => o['name'] == current.name, orElse: () => null);
           if (match != null) {
             current.noteController.text = match['note'] ?? "";
-            
             List sets = match['sets'];
             if (sets.isNotEmpty) {
               current.sets.clear(); 
@@ -156,7 +138,6 @@ class _WorkoutSessionScreenState extends State<WorkoutSessionScreen> {
         }
         _isLoadingHistory = false;
       });
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("Данные загружены"), backgroundColor: Color(0xFFCCFF00)));
     } else {
       if (mounted) setState(() => _isLoadingHistory = false);
     }
@@ -178,65 +159,44 @@ class _WorkoutSessionScreenState extends State<WorkoutSessionScreen> {
         int r = int.tryParse(rText) ?? 0;
 
         if (wText.isNotEmpty || rText.isNotEmpty) {
-          totalTonnage += (w * r);
+          totalTonnage += (w * r); // Считаем объем поднятого веса
           setsData.add({'weight': w, 'reps': r});
         }
       }
-      
-      exercisesData.add({
-        'name': ex.name,
-        'note': ex.noteController.text.trim(),
-        'sets': setsData,
-      });
+      exercisesData.add({'name': ex.name, 'note': ex.noteController.text.trim(), 'sets': setsData});
     }
 
     try {
-      // СОХРАНЕНИЕ В ЛОКАЛЬНУЮ ИСТОРИЮ
+      final uid = FirebaseAuth.instance.currentUser?.uid;
+      
       if (widget.existingDocId != null && widget.assignedWorkoutId == null) {
-        // Если редактируем старую историю
         await DatabaseService().updateHistoryItem(
           widget.existingDocId!,
-          {
-            'workoutName': widget.workoutTitle,
-            'tonnage': totalTonnage.round(),
-            'exercises': exercisesData,
-          },
+          {'workoutName': widget.workoutTitle, 'tonnage': totalTonnage.round(), 'exercises': exercisesData},
         );
       } else {
-        // Если это новая тренировка или тренировка по заданию тренера
         await DatabaseService().saveWorkoutSession(
-          widget.workoutTitle,
-          totalTonnage.round(),
-          60,
-          exercisesData,
-          workoutId: widget.workoutId 
+          widget.workoutTitle, totalTonnage.round(), 60, exercisesData, workoutId: widget.workoutId 
         );
       }
 
-      // 2. --- НОВЫЙ КОД ДЛЯ ЗАДАНИЙ ОТ ТРЕНЕРА ---
-      if (widget.assignedWorkoutId != null) {
-        final uid = FirebaseAuth.instance.currentUser?.uid;
-        if (uid != null) {
-          try {
-            await FirebaseFirestore.instance
-                .collection('users')
-                .doc(uid)
-                .collection('assigned_workouts')
-                .doc(widget.assignedWorkoutId)
-                .update({
-              'isCompleted': true,
-              'completedAt': FieldValue.serverTimestamp(),
-            });
-          } catch (e) {
-            print("Ошибка при обновлении статуса задания: $e");
-          }
+      if (uid != null) {
+        // --- 1. ПРИБАВЛЯЕМ ОБЪЕМ К ОБЩЕМУ ТОННАЖУ В ПРОФИЛЕ ПОЛЬЗОВАТЕЛЯ ---
+        await FirebaseFirestore.instance.collection('users').doc(uid).set({
+          'totalVolumeKg': FieldValue.increment(totalTonnage)
+        }, SetOptions(merge: true));
+
+        // --- 2. ЗАКРЫВАЕМ НАЗНАЧЕННУЮ ТРЕНИРОВКУ (ЕСЛИ БЫЛА) ---
+        if (widget.assignedWorkoutId != null) {
+          await FirebaseFirestore.instance
+              .collection('users').doc(uid).collection('assigned_workouts').doc(widget.assignedWorkoutId)
+              .update({'isCompleted': true, 'completedAt': FieldValue.serverTimestamp()});
         }
       }
-      // ----------------------------------------
 
       if (mounted) Navigator.pop(context);
     } catch (e) {
-      if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text("Ошибка: $e"), backgroundColor: Colors.red));
+      if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text("${'error_occurred'.tr()}: $e"), backgroundColor: Colors.red));
     } finally {
       if (mounted) setState(() => _isLoading = false);
     }
@@ -250,13 +210,6 @@ class _WorkoutSessionScreenState extends State<WorkoutSessionScreen> {
         title: Text(widget.workoutTitle, style: const TextStyle(fontWeight: FontWeight.bold, color: Colors.white)),
         backgroundColor: const Color(0xFF1C1C1E),
         iconTheme: const IconThemeData(color: Colors.white),
-        actions: [
-          if (_isLoadingHistory && widget.existingDocId == null && widget.assignedWorkoutId == null)
-             const Padding(
-               padding: EdgeInsets.only(right: 16.0),
-               child: Center(child: SizedBox(width: 20, height: 20, child: CircularProgressIndicator(color: Color(0xFFCCFF00), strokeWidth: 2))),
-             )
-        ],
       ),
       body: SafeArea(
         child: Column(
@@ -274,7 +227,7 @@ class _WorkoutSessionScreenState extends State<WorkoutSessionScreen> {
               child: _isLoading 
                 ? const Center(child: CircularProgressIndicator(color: Color(0xFFCCFF00)))
                 : NeonActionButton(
-                    text: (widget.existingDocId != null && widget.assignedWorkoutId == null) ? "СОХРАНИТЬ ИЗМЕНЕНИЯ" : "ЗАВЕРШИТЬ ТРЕНИРОВКУ",
+                    text: (widget.existingDocId != null && widget.assignedWorkoutId == null) ? 'save_changes'.tr() : 'finish_workout'.tr(),
                     onTap: _finishWorkout,
                     isFullWidth: true,
                   ),
@@ -294,15 +247,15 @@ class _WorkoutSessionScreenState extends State<WorkoutSessionScreen> {
         children: [
           Padding(
             padding: const EdgeInsets.all(16),
-            child: Text(ex.name, style: const TextStyle(color: Color(0xFFCCFF00), fontSize: 18, fontWeight: FontWeight.bold)),
+            child: Text(ex.name.tr(), style: const TextStyle(color: Color(0xFFCCFF00), fontSize: 18, fontWeight: FontWeight.bold)),
           ),
           Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 0),
+            padding: const EdgeInsets.symmetric(horizontal: 16),
             child: TextField(
               controller: ex.noteController,
               style: const TextStyle(color: Colors.white),
               decoration: InputDecoration(
-                hintText: "Заметки...",
+                hintText: 'notes_hint'.tr(),
                 hintStyle: TextStyle(color: Colors.grey.withOpacity(0.5)),
                 filled: true, fillColor: Colors.black,
                 border: OutlineInputBorder(borderRadius: BorderRadius.circular(8), borderSide: BorderSide.none),
@@ -311,19 +264,19 @@ class _WorkoutSessionScreenState extends State<WorkoutSessionScreen> {
             ),
           ),
           const SizedBox(height: 10),
-           Padding(
-             padding: const EdgeInsets.symmetric(horizontal: 16),
-             child: Row(
-               children: const [
-                 SizedBox(width: 30, child: Text("#", style: TextStyle(color: Colors.grey))), 
-                 Expanded(child: Center(child: Text("КГ", style: TextStyle(color: Colors.grey)))), 
-                 SizedBox(width: 10),
-                 Expanded(child: Center(child: Text("ПОВТ", style: TextStyle(color: Colors.grey)))),
-                 SizedBox(width: 40),
-               ],
-             ),
-           ),
-           const SizedBox(height: 5),
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 16),
+            child: Row(
+              children: [
+                const SizedBox(width: 30, child: Text("#", style: TextStyle(color: Colors.grey))), 
+                Expanded(child: Center(child: Text('kg'.tr(), style: const TextStyle(color: Colors.grey)))), 
+                const SizedBox(width: 10),
+                Expanded(child: Center(child: Text('reps_short'.tr(), style: const TextStyle(color: Colors.grey)))),
+                const SizedBox(width: 40),
+              ],
+            ),
+          ),
+          const SizedBox(height: 5),
           ...List.generate(ex.sets.length, (i) {
              final s = ex.sets[i];
              return Padding(
@@ -334,10 +287,7 @@ class _WorkoutSessionScreenState extends State<WorkoutSessionScreen> {
                    Expanded(child: _input(s.weightController, true)),
                    const SizedBox(width: 10),
                    Expanded(child: _input(s.repsController, false)),
-                   IconButton(
-                     icon: const Icon(Icons.close, color: Colors.red),
-                     onPressed: () => setState(() => ex.sets.removeAt(i)),
-                   )
+                   IconButton(icon: const Icon(Icons.close, color: Colors.red), onPressed: () => setState(() => ex.sets.removeAt(i)))
                  ],
                ),
              );
@@ -347,7 +297,7 @@ class _WorkoutSessionScreenState extends State<WorkoutSessionScreen> {
             child: Container(
               padding: const EdgeInsets.all(16),
               alignment: Alignment.center,
-              child: const Text("+ ДОБАВИТЬ ПОДХОД", style: TextStyle(color: Color(0xFFCCFF00), fontWeight: FontWeight.bold)),
+              child: Text('add_set'.tr(), style: const TextStyle(color: Color(0xFFCCFF00), fontWeight: FontWeight.bold)),
             ),
           )
         ],

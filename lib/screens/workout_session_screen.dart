@@ -1,8 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:easy_localization/easy_localization.dart'; // ЛОКАЛИЗАЦИЯ
-import 'services/database_service.dart';
-import 'ui_widgets.dart'; 
-import 'exercise_selection_screen.dart'; 
+import '../services/database_service.dart';
+import '../ui_widgets.dart'; 
+import '../exercise_selection_screen.dart'; // Прямой импорт (как у тебя сейчас)
 
 class WorkoutExerciseItem {
   String name;
@@ -44,6 +44,7 @@ class _CreateWorkoutScreenState extends State<CreateWorkoutScreen> {
   }
 
   Future<void> _openLibrary() async {
+    // Получаем СПИСОК строк
     final result = await Navigator.push(
       context,
       MaterialPageRoute(builder: (context) => const ExerciseSelectionScreen()),
@@ -52,7 +53,10 @@ class _CreateWorkoutScreenState extends State<CreateWorkoutScreen> {
     if (result != null && result is List<String>) {
       setState(() {
         for (var name in result) {
+          // Проверяем дубликаты, если не хотим добавлять одно и то же дважды
+          // if (!_exercises.any((e) => e.name == name)) { 
             _exercises.add(WorkoutExerciseItem(name: name));
+          // }
         }
       });
     }
@@ -188,8 +192,7 @@ class _CreateWorkoutScreenState extends State<CreateWorkoutScreen> {
                         Row(
                           mainAxisAlignment: MainAxisAlignment.spaceBetween,
                           children: [
-                            // ТУТ ТОЖЕ ДОБАВЛЕН ПЕРЕВОД УПРАЖНЕНИЯ
-                            Expanded(child: Text("${index + 1}. ${_exercises[index].name.tr()}", style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 16))),
+                            Expanded(child: Text("${index + 1}. ${_exercises[index].name}", style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 16))),
                             Row(
                               children: [
                                 const Icon(Icons.drag_handle, color: Colors.grey, size: 20),
@@ -209,7 +212,7 @@ class _CreateWorkoutScreenState extends State<CreateWorkoutScreen> {
                           style: const TextStyle(color: Color(0xFFCCFF00), fontSize: 14),
                           decoration: InputDecoration(
                             hintText: 'comment_optional'.tr(),
-                            hintStyle: TextStyle(color: Colors.white.withValues(alpha: 0.2)), 
+                            hintStyle: TextStyle(color: Colors.white.withValues(alpha: 0.2)),
                             isDense: true,
                             contentPadding: const EdgeInsets.symmetric(horizontal: 0, vertical: 8),
                             enabledBorder: const UnderlineInputBorder(borderSide: BorderSide(color: Colors.white10)),

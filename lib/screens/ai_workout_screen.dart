@@ -13,6 +13,9 @@ class AIWorkoutScreen extends StatefulWidget {
 }
 
 class _AIWorkoutScreenState extends State<AIWorkoutScreen> {
+  // DESIGN FIX: Новый цвет #9CD600
+  static const Color _accentColor = Color(0xFF9CD600);
+
   String _goal = 'Набор массы';
   String _level = 'Новичок';
   String _equipment = 'Gym'; 
@@ -32,7 +35,6 @@ class _AIWorkoutScreenState extends State<AIWorkoutScreen> {
       final doc = await FirebaseFirestore.instance.collection('users').doc(uid).get();
       final userData = doc.data() ?? {};
 
-      // ИСПРАВЛЕННЫЙ ВЫЗОВ МЕТОДА
       final result = await AIService().generateWorkout(
         goal: _goal,
         level: _level,
@@ -57,7 +59,9 @@ class _AIWorkoutScreenState extends State<AIWorkoutScreen> {
     if (_aiResult == null) return;
     setState(() => _isLoading = true);
     try {
-      final schedule = _aiResult!['schedule'] as List<dynamic>;
+      // CRASH FIX: Безопасное получение списка с дефолтным пустым списком
+      final schedule = _aiResult?['schedule'] as List<dynamic>? ?? [];
+      
       for (var day in schedule) {
         String dayName = day['dayName'];
         List<dynamic> exercises = day['exercises'];
@@ -72,7 +76,7 @@ class _AIWorkoutScreenState extends State<AIWorkoutScreen> {
         await DatabaseService().saveUserWorkout("AI: $dayName", exerciseNames, targets);
       }
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("Программа сохранена!"), backgroundColor: Color(0xFFCCFF00)));
+        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("Программа сохранена!"), backgroundColor: _accentColor));
         Navigator.pop(context);
       }
     } catch (e) {
@@ -84,6 +88,9 @@ class _AIWorkoutScreenState extends State<AIWorkoutScreen> {
 
   @override
   Widget build(BuildContext context) {
+    // CRASH FIX: Выносим безопасное получение расписания
+    final scheduleList = (_aiResult?['schedule'] as List<dynamic>?) ?? [];
+
     return Scaffold(
       backgroundColor: const Color(0xFF0F0F0F),
       appBar: AppBar(title: const Text("AI Тренер"), backgroundColor: Colors.transparent, iconTheme: const IconThemeData(color: Colors.white)),
@@ -118,29 +125,30 @@ class _AIWorkoutScreenState extends State<AIWorkoutScreen> {
                     style: const TextStyle(color: Colors.white),
                   ),
                   const SizedBox(height: 16),
-                  Slider(value: _daysPerWeek, min: 1, max: 7, divisions: 6, onChanged: (v) => setState(() => _daysPerWeek = v), activeColor: const Color(0xFFCCFF00)),
+                  Slider(value: _daysPerWeek, min: 1, max: 7, divisions: 6, onChanged: (v) => setState(() => _daysPerWeek = v), activeColor: _accentColor),
                   Text("Дней в неделю: ${_daysPerWeek.toInt()}", style: const TextStyle(color: Colors.white)),
                 ],
               ),
             ),
             const SizedBox(height: 24),
-            if (_isLoading) const CircularProgressIndicator(color: Color(0xFFCCFF00))
+            if (_isLoading) const CircularProgressIndicator(color: _accentColor)
             else if (_aiResult == null) NeonActionButton(text: "СОСТАВИТЬ ПРОГРАММУ", onTap: _generate, isFullWidth: true),
             
+            // Проверка на наличие данных перед рендерингом списка
             if (_aiResult != null && !_isLoading) ...[
               const SizedBox(height: 20),
               ListView.builder(
                 shrinkWrap: true,
                 physics: const NeverScrollableScrollPhysics(),
-                itemCount: (_aiResult!['schedule'] as List).length,
+                itemCount: scheduleList.length,
                 itemBuilder: (context, index) {
-                  final day = _aiResult!['schedule'][index];
+                  final day = scheduleList[index];
                   return Card(
                     color: const Color(0xFF1C1C1E),
                     child: ExpansionTile(
-                      title: Text(day['dayName'], style: const TextStyle(color: Color(0xFFCCFF00))),
+                      title: Text(day['dayName'], style: const TextStyle(color: _accentColor)),
                       collapsedIconColor: Colors.white,
-                      iconColor: const Color(0xFFCCFF00),
+                      iconColor: _accentColor,
                       children: (day['exercises'] as List).map<Widget>((ex) => ListTile(title: Text(ex['name'], style: const TextStyle(color: Colors.white)), subtitle: Text("${ex['sets']}x${ex['reps']}", style: const TextStyle(color: Colors.grey)))).toList(),
                     ),
                   );

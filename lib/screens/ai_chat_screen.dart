@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:easy_localization/easy_localization.dart'; // Локализация
 import '../services/ai_service.dart';
 import '../services/database_service.dart';
 
@@ -13,8 +14,8 @@ class AIChatScreen extends StatefulWidget {
 
 class _AIChatScreenState extends State<AIChatScreen> {
   final TextEditingController _controller = TextEditingController();
-  final ScrollController _scrollController = ScrollController(); // Для авто-скролла вниз
-  bool _isTyping = false;
+  final ScrollController _scrollController = ScrollController();
+  bool _isTyping = false; // ИНДИКАТОР ЗАГРУЗКИ
   String _fullUserContext = "";
 
   @override
@@ -43,14 +44,12 @@ class _AIChatScreenState extends State<AIChatScreen> {
     if (text.isEmpty) return;
 
     _controller.clear();
-    setState(() => _isTyping = true);
+    setState(() => _isTyping = true); // ВКЛЮЧАЕМ ЛОАДЕР
 
     try {
-      // 1. Сохраняем вопрос пользователя в базу
       await DatabaseService().saveChatMessage(text, 'user');
       _scrollToBottom();
 
-      // 2. Ждем ответа ИИ
       final responseMap = await AIService().chatWithDietologist(
         userMessage: text, 
         userContext: _fullUserContext
@@ -59,24 +58,22 @@ class _AIChatScreenState extends State<AIChatScreen> {
       final String aiText = responseMap['text'] ?? "Ошибка: Пустой ответ";
       final bool isPlan = responseMap['is_plan'] == true;
 
-      // Если это план - сохраняем КБЖУ в профиль
       if (isPlan && responseMap['nutrition'] != null) {
         await DatabaseService().saveNutritionPlan(responseMap['nutrition']);
         if (mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(content: Text("✅ Рацион сохранен в Профиль!"), backgroundColor: Color(0xFFCCFF00))
+            const SnackBar(content: Text("✅ Рацион сохранен в Профиль!"), backgroundColor: Color(0xFF9CD600))
           );
         }
       }
 
-      // 3. Сохраняем ответ ИИ в базу
       await DatabaseService().saveChatMessage(aiText, 'ai');
       _scrollToBottom();
 
     } catch (e) {
       if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text("Ошибка: $e")));
     } finally {
-      if (mounted) setState(() => _isTyping = false);
+      if (mounted) setState(() => _isTyping = false); // ВЫКЛЮЧАЕМ ЛОАДЕР
     }
   }
 
@@ -95,28 +92,24 @@ class _AIChatScreenState extends State<AIChatScreen> {
     return Scaffold(
       backgroundColor: const Color(0xFF0F0F0F),
       appBar: AppBar(
-        title: const Text("AI Диетолог Pro"), 
+        title: Text("ai_chat".tr()), // Локализация
         backgroundColor: const Color(0xFF1C1C1E),
         iconTheme: const IconThemeData(color: Colors.white),
         actions: [
           IconButton(
             icon: const Icon(Icons.delete_outline, color: Colors.red),
-            onPressed: () {
-               // Кнопка очистки истории
-               DatabaseService().clearChatHistory();
-            },
+            onPressed: () => DatabaseService().clearChatHistory(),
           )
         ],
       ),
       body: Column(
         children: [
-          // СПИСОК СООБЩЕНИЙ ИЗ FIREBASE
           Expanded(
             child: StreamBuilder<QuerySnapshot>(
               stream: DatabaseService().getChatMessages(),
               builder: (context, snapshot) {
                 if (!snapshot.hasData) {
-                  return const Center(child: CircularProgressIndicator(color: Color(0xFFCCFF00)));
+                  return const Center(child: CircularProgressIndicator(color: Color(0xFF9CD600)));
                 }
 
                 final docs = snapshot.data!.docs;
@@ -125,7 +118,7 @@ class _AIChatScreenState extends State<AIChatScreen> {
                     child: Padding(
                       padding: EdgeInsets.all(30.0),
                       child: Text(
-                        "Я изучил твой профиль.\nПопроси меня составить рацион на завтра.", 
+                        "Я изучил твой профиль.\nПопроси меня составить рацион.", 
                         textAlign: TextAlign.center,
                         style: TextStyle(color: Colors.grey),
                       ),
@@ -133,7 +126,6 @@ class _AIChatScreenState extends State<AIChatScreen> {
                   );
                 }
 
-                // Автоскролл вниз при открытии
                 WidgetsBinding.instance.addPostFrameCallback((_) => _scrollToBottom());
 
                 return ListView.builder(
@@ -152,7 +144,7 @@ class _AIChatScreenState extends State<AIChatScreen> {
                         padding: const EdgeInsets.all(12),
                         constraints: BoxConstraints(maxWidth: MediaQuery.of(context).size.width * 0.85),
                         decoration: BoxDecoration(
-                          color: isUser ? const Color(0xFFCCFF00) : const Color(0xFF2C2C2E),
+                          color: isUser ? const Color(0xFF9CD600) : const Color(0xFF2C2C2E),
                           borderRadius: BorderRadius.only(
                             topLeft: const Radius.circular(12),
                             topRight: const Radius.circular(12),
@@ -165,7 +157,7 @@ class _AIChatScreenState extends State<AIChatScreen> {
                           style: TextStyle(
                             color: isUser ? Colors.black : Colors.white, 
                             fontSize: 15,
-                            height: 1.3 // Улучшаем читаемость
+                            height: 1.3 
                           )
                         ),
                       ),
@@ -176,15 +168,13 @@ class _AIChatScreenState extends State<AIChatScreen> {
             ),
           ),
           
-          // ИНДИКАТОР ПЕЧАТИ
           if (_isTyping)
             Container(
               padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
               alignment: Alignment.centerLeft,
-              child: const Text("Диетолог составляет план...", style: TextStyle(color: Color(0xFFCCFF00), fontSize: 12, fontStyle: FontStyle.italic)),
+              child: const Text("Печатает...", style: TextStyle(color: Color(0xFF9CD600), fontSize: 12, fontStyle: FontStyle.italic)),
             ),
 
-          // ПОЛЕ ВВОДА
           Container(
             padding: const EdgeInsets.all(12),
             color: const Color(0xFF1C1C1E),
@@ -197,7 +187,7 @@ class _AIChatScreenState extends State<AIChatScreen> {
                     minLines: 1,
                     maxLines: 4,
                     decoration: InputDecoration(
-                      hintText: "Рацион для сушки...",
+                      hintText: "Сообщение...",
                       hintStyle: const TextStyle(color: Colors.grey),
                       filled: true,
                       fillColor: const Color(0xFF0F0F0F),
@@ -207,12 +197,15 @@ class _AIChatScreenState extends State<AIChatScreen> {
                   ),
                 ),
                 const SizedBox(width: 8),
+                // КНОПКА С ЛОАДЕРОМ
                 CircleAvatar(
-                  backgroundColor: const Color(0xFFCCFF00),
-                  child: IconButton(
-                    icon: const Icon(Icons.send, color: Colors.black),
-                    onPressed: _isTyping ? null : _sendMessage, // Блокируем пока думает
-                  ),
+                  backgroundColor: const Color(0xFF9CD600),
+                  child: _isTyping 
+                    ? const Padding(padding: EdgeInsets.all(10), child: CircularProgressIndicator(color: Colors.black, strokeWidth: 2))
+                    : IconButton(
+                        icon: const Icon(Icons.send, color: Colors.black),
+                        onPressed: _sendMessage,
+                      ),
                 ),
               ],
             ),

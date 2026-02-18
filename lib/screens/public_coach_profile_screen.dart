@@ -1,9 +1,10 @@
 import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:easy_localization/easy_localization.dart'; // ЛОКАЛИЗАЦИЯ
 
-import '../services/coach_service.dart'; // Путь к модели Coach
-import '../services/database_service.dart'; // Путь к сервису базы данных
+import '../models/coach.dart';
+import '../services/database_service.dart';
 
 class PublicCoachProfileScreen extends StatefulWidget {
   final Coach coach;
@@ -16,7 +17,6 @@ class PublicCoachProfileScreen extends StatefulWidget {
 
 class _PublicCoachProfileScreenState extends State<PublicCoachProfileScreen> {
 
-  // МЕТОД ПОКАЗА ДИАЛОГА ОЦЕНКИ
   void _showRatingDialog(BuildContext context) {
     int selectedStars = 0;
 
@@ -28,11 +28,11 @@ class _PublicCoachProfileScreenState extends State<PublicCoachProfileScreen> {
             return AlertDialog(
               backgroundColor: const Color(0xFF1C1C1E),
               shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-              title: const Text("ОЦЕНИТЕ ТРЕНЕРА", style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 16)),
+              title: Text('rate_coach_title'.tr(), style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 16)),
               content: Column(
                 mainAxisSize: MainAxisSize.min,
                 children: [
-                  const Text("Пожалуйста, поставьте оценку от 1 до 5 звезд.", style: TextStyle(color: Colors.grey, fontSize: 14)),
+                  Text('rate_coach_desc'.tr(), style: const TextStyle(color: Colors.grey, fontSize: 14)),
                   const SizedBox(height: 16),
                   Row(
                     mainAxisAlignment: MainAxisAlignment.center,
@@ -54,7 +54,7 @@ class _PublicCoachProfileScreenState extends State<PublicCoachProfileScreen> {
               actions: [
                 TextButton(
                   onPressed: () => Navigator.pop(ctx),
-                  child: const Text("ОТМЕНА", style: TextStyle(color: Colors.grey)),
+                  child: Text('cancel'.tr(), style: const TextStyle(color: Colors.grey)),
                 ),
                 TextButton(
                   onPressed: () async {
@@ -62,7 +62,7 @@ class _PublicCoachProfileScreenState extends State<PublicCoachProfileScreen> {
                     Navigator.pop(ctx);
                     await _submitRating(selectedStars);
                   },
-                  child: const Text("ОТПРАВИТЬ", style: TextStyle(color: Color(0xFFCCFF00), fontWeight: FontWeight.bold)),
+                  child: Text('send'.tr(), style: const TextStyle(color: Color(0xFFCCFF00), fontWeight: FontWeight.bold)),
                 ),
               ],
             );
@@ -72,7 +72,6 @@ class _PublicCoachProfileScreenState extends State<PublicCoachProfileScreen> {
     );
   }
 
-  // ТРАНЗАКЦИЯ В FIRESTORE
   Future<void> _submitRating(int selectedStars) async {
     final coachRef = FirebaseFirestore.instance.collection('coaches').doc(widget.coach.id);
 
@@ -84,7 +83,6 @@ class _PublicCoachProfileScreenState extends State<PublicCoachProfileScreen> {
         double currentRating = (snapshot.data()?['rating'] ?? 5.0).toDouble();
         int count = snapshot.data()?['ratingCount'] ?? 0;
 
-        // Высчитываем новое среднее значение
         double newRating = ((currentRating * count) + selectedStars) / (count + 1);
 
         transaction.update(coachRef, {
@@ -95,16 +93,16 @@ class _PublicCoachProfileScreenState extends State<PublicCoachProfileScreen> {
 
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text("Спасибо за оценку!", style: TextStyle(color: Colors.black, fontWeight: FontWeight.bold)),
-            backgroundColor: Color(0xFFCCFF00),
+          SnackBar(
+            content: Text('rating_thanks'.tr(), style: const TextStyle(color: Colors.black, fontWeight: FontWeight.bold)),
+            backgroundColor: const Color(0xFFCCFF00),
             behavior: SnackBarBehavior.floating,
           )
         );
       }
     } catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text("Ошибка: $e"), backgroundColor: Colors.red));
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text("${'error_msg'.tr()}: $e"), backgroundColor: Colors.red));
       }
     }
   }
@@ -113,7 +111,7 @@ class _PublicCoachProfileScreenState extends State<PublicCoachProfileScreen> {
   Widget build(BuildContext context) {
     return Scaffold(
       backgroundColor: Colors.black,
-      extendBodyBehindAppBar: true, // ВАЖНО: AppBar поверх контента
+      extendBodyBehindAppBar: true,
       appBar: AppBar(
         backgroundColor: Colors.transparent,
         elevation: 0,
@@ -123,7 +121,6 @@ class _PublicCoachProfileScreenState extends State<PublicCoachProfileScreen> {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            // ВЕРХНИЙ БЛОК: ФОТОГРАФИЯ
             Container(
               width: double.infinity,
               height: 350,
@@ -138,7 +135,6 @@ class _PublicCoachProfileScreenState extends State<PublicCoachProfileScreen> {
               ),
               child: (widget.coach.photoUrl.isEmpty)
                   ? const Icon(Icons.person, size: 100, color: Colors.grey)
-                  // Градиент для плавного перехода фото в черный фон
                   : Container(
                       decoration: BoxDecoration(
                         gradient: LinearGradient(
@@ -153,8 +149,6 @@ class _PublicCoachProfileScreenState extends State<PublicCoachProfileScreen> {
                       ),
                     ),
             ),
-
-            // ИНФОРМАЦИОННЫЙ БЛОК
             Padding(
               padding: const EdgeInsets.all(20.0),
               child: Column(
@@ -170,8 +164,6 @@ class _PublicCoachProfileScreenState extends State<PublicCoachProfileScreen> {
                     style: const TextStyle(color: Colors.grey, fontSize: 12, fontWeight: FontWeight.bold, letterSpacing: 1.5),
                   ),
                   const SizedBox(height: 16),
-
-                  // РЕЙТИНГ
                   Row(
                     children: [
                       const Icon(Icons.star, color: Color(0xFFCCFF00), size: 24),
@@ -182,31 +174,26 @@ class _PublicCoachProfileScreenState extends State<PublicCoachProfileScreen> {
                       ),
                       const SizedBox(width: 8),
                       Text(
-                        "(${widget.coach.ratingCount} оценок)",
+                        "(${widget.coach.ratingCount} ${'ratings_count'.tr()})",
                         style: const TextStyle(color: Colors.grey, fontSize: 14),
                       ),
                     ],
                   ),
-                  
                   const SizedBox(height: 32),
-                  const Text("О СЕБЕ", style: TextStyle(color: Colors.grey, fontSize: 12, fontWeight: FontWeight.bold, letterSpacing: 1.0)),
+                  Text('about_me'.tr(), style: const TextStyle(color: Colors.grey, fontSize: 12, fontWeight: FontWeight.bold, letterSpacing: 1.0)),
                   const SizedBox(height: 12),
                   Text(
-                    widget.coach.bio.isEmpty ? "Тренер пока не добавил информацию о себе." : widget.coach.bio,
+                    widget.coach.bio.isEmpty ? 'coach_no_bio'.tr() : widget.coach.bio,
                     style: const TextStyle(color: Colors.white, fontSize: 16, height: 1.5),
                   ),
-                  
                   const SizedBox(height: 32),
-                  const Text("СТОИМОСТЬ", style: TextStyle(color: Colors.grey, fontSize: 12, fontWeight: FontWeight.bold, letterSpacing: 1.0)),
+                  Text('price'.tr(), style: const TextStyle(color: Colors.grey, fontSize: 12, fontWeight: FontWeight.bold, letterSpacing: 1.0)),
                   const SizedBox(height: 8),
                   Text(
                     widget.coach.price,
                     style: const TextStyle(color: Color(0xFFCCFF00), fontSize: 28, fontWeight: FontWeight.bold),
                   ),
-                  
                   const SizedBox(height: 40),
-
-                  // КНОПКИ ВНИЗУ
                   SizedBox(
                     width: double.infinity,
                     height: 56,
@@ -215,9 +202,9 @@ class _PublicCoachProfileScreenState extends State<PublicCoachProfileScreen> {
                         await DatabaseService().connectWithCoach(widget.coach.id);
                         if (context.mounted) {
                           ScaffoldMessenger.of(context).showSnackBar(
-                            const SnackBar(
-                              content: Text("Заявка успешно отправлена тренеру!", style: TextStyle(color: Colors.black, fontWeight: FontWeight.bold)),
-                              backgroundColor: Color(0xFFCCFF00),
+                            SnackBar(
+                              content: Text('request_sent'.tr(), style: const TextStyle(color: Colors.black, fontWeight: FontWeight.bold)),
+                              backgroundColor: const Color(0xFFCCFF00),
                               behavior: SnackBarBehavior.floating,
                             )
                           );
@@ -228,7 +215,7 @@ class _PublicCoachProfileScreenState extends State<PublicCoachProfileScreen> {
                         foregroundColor: Colors.black,
                         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
                       ),
-                      child: const Text("НАЧАТЬ РАБОТУ", style: TextStyle(fontWeight: FontWeight.w900, fontSize: 16, letterSpacing: 1.0)),
+                      child: Text('start_work'.tr(), style: const TextStyle(fontWeight: FontWeight.w900, fontSize: 16, letterSpacing: 1.0)),
                     ),
                   ),
                   const SizedBox(height: 12),
@@ -242,7 +229,7 @@ class _PublicCoachProfileScreenState extends State<PublicCoachProfileScreen> {
                         backgroundColor: const Color(0xFF1C1C1E),
                         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
                       ),
-                      child: const Text("ОЦЕНИТЬ ТРЕНЕРА", style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 14, letterSpacing: 1.0)),
+                      child: Text('rate_coach'.tr(), style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 14, letterSpacing: 1.0)),
                     ),
                   ),
                   const SizedBox(height: 20),

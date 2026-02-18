@@ -1,8 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
-import '../ui_widgets.dart'; // Убедись, что путь к виджетам верный
-import '../dashboard_screen.dart';
+import 'ui_widgets.dart'; // Убедись, что путь к виджетам верный
+import 'screens/dashboard_screen.dart';
 
 class OnboardingScreen extends StatefulWidget {
   const OnboardingScreen({super.key});

@@ -1,26 +1,96 @@
 import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
-import '../services/coach_service.dart';
+import 'package:easy_localization/easy_localization.dart';
+
+import '../services/push_notification_service.dart';
 
 class P2PChatScreen extends StatefulWidget {
   final String otherUserId;
   final String otherUserName;
 
-  const P2PChatScreen({super.key, required this.otherUserId, required this.otherUserName});
+  const P2PChatScreen({
+    super.key,
+    required this.otherUserId,
+    required this.otherUserName,
+  });
 
   @override
   State<P2PChatScreen> createState() => _P2PChatScreenState();
 }
 
 class _P2PChatScreenState extends State<P2PChatScreen> {
-  final TextEditingController _msgController = TextEditingController();
-  final String currentUserId = FirebaseAuth.instance.currentUser?.uid ?? '';
+  final TextEditingController _messageController = TextEditingController();
+  final ScrollController _scrollController = ScrollController();
+  final String _currentUserId = FirebaseAuth.instance.currentUser?.uid ?? '';
 
-  Future<void> _send() async {
-    if (_msgController.text.trim().isEmpty) return;
-    await CoachService().sendMessage(widget.otherUserId, _msgController.text);
-    _msgController.clear();
+  String get _chatRoomId {
+    List<String> ids = [_currentUserId, widget.otherUserId];
+    ids.sort(); // Сортируем для создания уникального и неизменного ID комнаты
+    return ids.join('_');
+  }
+
+  void _sendMessage() async {
+    final text = _messageController.text.trim();
+    if (text.isEmpty) return;
+
+    _messageController.clear();
+
+    try {
+      // 1. Сохраняем сообщение в базу
+      await FirebaseFirestore.instance
+          .collection('chats')
+          .doc(_chatRoomId)
+          .collection('messages')
+          .add({
+        'senderId': _currentUserId,
+        'receiverId': widget.otherUserId,
+        'text': text,
+        'timestamp': FieldValue.serverTimestamp(),
+      });
+
+      // Скроллим вниз
+      if (_scrollController.hasClients) {
+        _scrollController.animateTo(
+          0.0,
+          duration: const Duration(milliseconds: 300),
+          curve: Curves.easeOut,
+        );
+      }
+
+      // --- БЛОК ОТПРАВКИ PUSH-УВЕДОМЛЕНИЯ (ЧАТ) С ЛОГАМИ ---
+      try {
+        debugPrint('--- НАЧАЛО ОТПРАВКИ ПУША (ЧАТ) ---');
+        final receiverDoc = await FirebaseFirestore.instance.collection('users').doc(widget.otherUserId).get();
+        
+        if (receiverDoc.exists) {
+          debugPrint('FCM: Документ собеседника найден!');
+          if (receiverDoc.data()!.containsKey('fcmToken')) {
+            String receiverToken = receiverDoc.data()!['fcmToken'];
+            String senderName = FirebaseAuth.instance.currentUser?.displayName ?? 'Пользователь';
+            
+            debugPrint('FCM: Токен собеседника: $receiverToken');
+            PushNotificationService.sendPushMessage(
+              token: receiverToken,
+              title: 'Новое сообщение от $senderName',
+              body: text,
+            ).then((_) {
+              debugPrint('FCM: Пуш для чата отправлен на сервер!');
+            });
+          } else {
+            debugPrint('FCM ОШИБКА: У собеседника нет fcmToken');
+          }
+        } else {
+          debugPrint('FCM ОШИБКА: Документ собеседника не найден');
+        }
+      } catch (e) {
+        debugPrint('FCM: Ошибка отправки пуша из чата: $e');
+      }
+      // ------------------------------------------------------
+
+    } catch (e) {
+      debugPrint("Ошибка отправки сообщения: $e");
+    }
   }
 
   @override
@@ -28,48 +98,52 @@ class _P2PChatScreenState extends State<P2PChatScreen> {
     return Scaffold(
       backgroundColor: Colors.black,
       appBar: AppBar(
-        title: Text(widget.otherUserName.toUpperCase(), style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 16, letterSpacing: 1.0)),
-        centerTitle: true,
+        title: Text(widget.otherUserName, style: const TextStyle(fontWeight: FontWeight.bold)),
         backgroundColor: const Color(0xFF1C1C1E),
-        iconTheme: const IconThemeData(color: Colors.white),
+        leading: const BackButton(color: Colors.white),
       ),
       body: Column(
         children: [
           Expanded(
             child: StreamBuilder<QuerySnapshot>(
-              stream: CoachService().getChatMessages(widget.otherUserId),
+              stream: FirebaseFirestore.instance
+                  .collection('chats')
+                  .doc(_chatRoomId)
+                  .collection('messages')
+                  .orderBy('timestamp', descending: true)
+                  .snapshots(),
               builder: (context, snapshot) {
                 if (snapshot.connectionState == ConnectionState.waiting) {
                   return const Center(child: CircularProgressIndicator(color: Color(0xFFCCFF00)));
                 }
 
                 if (!snapshot.hasData || snapshot.data!.docs.isEmpty) {
-                  return const Center(child: Text("Напишите первое сообщение!", style: TextStyle(color: Colors.grey)));
+                  return Center(
+                    child: Text('Нет сообщений', style: TextStyle(color: Colors.white.withOpacity(0.3))),
+                  );
                 }
 
-                final messages = snapshot.data!.docs;
-
                 return ListView.builder(
-                  reverse: true, // Новые сообщения снизу
-                  padding: const EdgeInsets.all(16),
-                  itemCount: messages.length,
+                  controller: _scrollController,
+                  reverse: true,
+                  padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 20),
+                  itemCount: snapshot.data!.docs.length,
                   itemBuilder: (context, index) {
-                    final data = messages[index].data() as Map<String, dynamic>;
-                    final bool isMe = data['senderId'] == currentUserId;
-                    
+                    final data = snapshot.data!.docs[index].data() as Map<String, dynamic>;
+                    final isMe = data['senderId'] == _currentUserId;
+
                     return Align(
                       alignment: isMe ? Alignment.centerRight : Alignment.centerLeft,
                       child: Container(
-                        margin: const EdgeInsets.only(bottom: 8, top: 8),
+                        margin: const EdgeInsets.only(bottom: 12),
                         padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-                        constraints: BoxConstraints(maxWidth: MediaQuery.of(context).size.width * 0.75),
                         decoration: BoxDecoration(
                           color: isMe ? const Color(0xFFCCFF00) : const Color(0xFF1C1C1E),
                           borderRadius: BorderRadius.only(
                             topLeft: const Radius.circular(16),
                             topRight: const Radius.circular(16),
-                            bottomLeft: isMe ? const Radius.circular(16) : Radius.zero,
-                            bottomRight: isMe ? Radius.zero : const Radius.circular(16),
+                            bottomLeft: Radius.circular(isMe ? 16 : 0),
+                            bottomRight: Radius.circular(isMe ? 0 : 16),
                           ),
                         ),
                         child: Text(
@@ -77,7 +151,7 @@ class _P2PChatScreenState extends State<P2PChatScreen> {
                           style: TextStyle(
                             color: isMe ? Colors.black : Colors.white,
                             fontSize: 16,
-                            fontWeight: isMe ? FontWeight.w500 : FontWeight.normal,
+                            fontWeight: FontWeight.w500,
                           ),
                         ),
                       ),
@@ -88,49 +162,50 @@ class _P2PChatScreenState extends State<P2PChatScreen> {
             ),
           ),
           
-          // Поле ввода
+          // Поле ввода сообщения
           Container(
-            padding: const EdgeInsets.only(left: 16, right: 16, top: 12, bottom: 24),
+            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
             decoration: const BoxDecoration(
               color: Color(0xFF1C1C1E),
-              border: Border(top: BorderSide(color: Colors.black, width: 2)),
+              border: Border(top: BorderSide(color: Colors.white10)),
             ),
-            child: Row(
-              children: [
-                Expanded(
-                  child: Container(
-                    decoration: BoxDecoration(
-                      color: Colors.black,
-                      borderRadius: BorderRadius.circular(24),
-                      border: Border.all(color: Colors.white.withOpacity(0.1)),
-                    ),
-                    child: TextField(
-                      controller: _msgController,
-                      style: const TextStyle(color: Colors.white),
-                      decoration: const InputDecoration(
-                        hintText: "Сообщение...",
-                        hintStyle: TextStyle(color: Colors.grey),
-                        border: InputBorder.none,
-                        contentPadding: EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+            child: SafeArea(
+              child: Row(
+                children: [
+                  Expanded(
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 16),
+                      decoration: BoxDecoration(
+                        color: Colors.black,
+                        borderRadius: BorderRadius.circular(24),
+                      ),
+                      child: TextField(
+                        controller: _messageController,
+                        style: const TextStyle(color: Colors.white),
+                        decoration: InputDecoration(
+                          hintText: 'Введите сообщение...',
+                          hintStyle: TextStyle(color: Colors.white.withOpacity(0.3)),
+                          border: InputBorder.none,
+                        ),
                       ),
                     ),
                   ),
-                ),
-                const SizedBox(width: 12),
-                GestureDetector(
-                  onTap: _send,
-                  child: Container(
-                    padding: const EdgeInsets.all(12),
-                    decoration: const BoxDecoration(
-                      color: Color(0xFFCCFF00),
-                      shape: BoxShape.circle,
+                  const SizedBox(width: 12),
+                  GestureDetector(
+                    onTap: _sendMessage,
+                    child: Container(
+                      padding: const EdgeInsets.all(12),
+                      decoration: const BoxDecoration(
+                        color: Color(0xFFCCFF00),
+                        shape: BoxShape.circle,
+                      ),
+                      child: const Icon(Icons.send, color: Colors.black, size: 20),
                     ),
-                    child: const Icon(Icons.send, color: Colors.black, size: 24),
                   ),
-                ),
-              ],
+                ],
+              ),
             ),
-          )
+          ),
         ],
       ),
     );

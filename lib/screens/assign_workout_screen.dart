@@ -1,22 +1,20 @@
 import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:easy_localization/easy_localization.dart';
 
-class ExerciseInput {
-  final TextEditingController name = TextEditingController();
-  final TextEditingController sets = TextEditingController();
-  final TextEditingController reps = TextEditingController();
+import '../ui_widgets.dart'; 
+import '../exercise_selection_screen.dart';
+import '../services/push_notification_service.dart';
 
-  void dispose() {
-    name.dispose();
-    sets.dispose();
-    reps.dispose();
-  }
+class WorkoutExerciseItem {
+  String name;
+  String comment;
+  WorkoutExerciseItem({required this.name, this.comment = ''});
 }
 
 class AssignWorkoutScreen extends StatefulWidget {
   final String clientId;
   final String clientName;
-  // ДОБАВЛЕНЫ ПАРАМЕТРЫ ДЛЯ РЕДАКТИРОВАНИЯ
   final String? existingWorkoutId;
   final Map<String, dynamic>? existingWorkoutData;
 
@@ -34,93 +32,134 @@ class AssignWorkoutScreen extends StatefulWidget {
 
 class _AssignWorkoutScreenState extends State<AssignWorkoutScreen> {
   final TextEditingController _nameController = TextEditingController();
-  final List<ExerciseInput> _exercises = [];
+  List<WorkoutExerciseItem> _exercises = [];
   bool _isLoading = false;
 
   @override
   void initState() {
     super.initState();
-    // ЕСЛИ РЕЖИМ РЕДАКТИРОВАНИЯ - ЗАПОЛНЯЕМ ДАННЫЕ
     if (widget.existingWorkoutData != null) {
-      _nameController.text = widget.existingWorkoutData!['name'] ?? '';
-      final exList = widget.existingWorkoutData!['exercises'] as List<dynamic>? ?? [];
+      _nameController.text = widget.existingWorkoutData!['name'] ?? "";
+      final rawExercises = List<String>.from(widget.existingWorkoutData!['exercises'] ?? []);
+      final targets = Map<String, String>.from(widget.existingWorkoutData!['targets'] ?? {});
       
-      if (exList.isNotEmpty) {
-        for (var ex in exList) {
-          final ei = ExerciseInput();
-          ei.name.text = ex['name']?.toString() ?? '';
-          ei.sets.text = ex['targetSets']?.toString() ?? '';
-          ei.reps.text = ex['targetReps']?.toString() ?? '';
-          _exercises.add(ei);
+      _exercises = rawExercises.map((name) {
+        String comment = "";
+        if (targets.containsKey(name)) {
+          final parts = targets[name]!.split('|');
+          if (parts.length > 1) comment = parts[1];
         }
-      } else {
-        _exercises.add(ExerciseInput());
-      }
-    } else {
-      // НОВАЯ ПРОГРАММА
-      _exercises.add(ExerciseInput());
+        return WorkoutExerciseItem(name: name, comment: comment);
+      }).toList();
     }
   }
 
   @override
   void dispose() {
     _nameController.dispose();
-    for (var ex in _exercises) {
-      ex.dispose();
-    }
     super.dispose();
   }
 
-  Future<void> _sendWorkout() async {
+  Future<void> _openLibrary() async {
+    final result = await Navigator.push(
+      context,
+      MaterialPageRoute(builder: (context) => const ExerciseSelectionScreen()),
+    );
+
+    if (result != null && result is List<String>) {
+      setState(() {
+        for (var name in result) {
+          _exercises.add(WorkoutExerciseItem(name: name));
+        }
+      });
+    }
+  }
+
+  void _removeExercise(int index) {
+    setState(() => _exercises.removeAt(index));
+  }
+
+  Future<void> _saveAssignedWorkout() async {
+    if (_nameController.text.trim().isEmpty || _exercises.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('fill_name_and_exercises'.tr()), backgroundColor: Colors.red),
+      );
+      return;
+    }
+
     setState(() => _isLoading = true);
 
     try {
-      final exercisesData = _exercises.map((e) => {
-        'name': e.name.text.trim(),
-        'targetSets': e.sets.text.trim(),
-        'targetReps': e.reps.text.trim(),
-      }).toList();
+      List<String> namesList = _exercises.map((e) => e.name).toList();
+      Map<String, String> targets = {};
+      
+      for (var ex in _exercises) {
+        String val = "0x0"; 
+        if (ex.comment.isNotEmpty) {
+          val += "|${ex.comment}";
+        }
+        targets[ex.name] = val;
+      }
 
-      final docData = {
-        'name': _nameController.text.trim().isEmpty ? 'Тренировка от тренера' : _nameController.text.trim(),
-        'exercises': exercisesData,
+      final dataToSave = {
+        'name': _nameController.text.trim(),
+        'exercises': namesList,
+        'targets': targets,
+        'date': Timestamp.now(),
         'isCompleted': false,
       };
 
       if (widget.existingWorkoutId != null) {
-        // РЕДАКТИРОВАНИЕ
+        // ОБНОВЛЕНИЕ СУЩЕСТВУЮЩЕЙ
         await FirebaseFirestore.instance
             .collection('users')
             .doc(widget.clientId)
             .collection('assigned_workouts')
             .doc(widget.existingWorkoutId)
-            .update(docData);
+            .update(dataToSave);
+            
+        if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('updated_successfully'.tr()), backgroundColor: const Color(0xFFCCFF00)));
       } else {
-        // НОВАЯ
-        docData['date'] = FieldValue.serverTimestamp(); // Дату ставим только при создании
+        // СОЗДАНИЕ НОВОЙ
         await FirebaseFirestore.instance
             .collection('users')
             .doc(widget.clientId)
             .collection('assigned_workouts')
-            .add(docData);
+            .add(dataToSave);
+            
+        // --- БЛОК ОТПРАВКИ PUSH-УВЕДОМЛЕНИЯ КЛИЕНТУ С ЛОГАМИ ---
+        try {
+          debugPrint('--- НАЧАЛО ОТПРАВКИ ПУША (ТРЕНИРОВКА) ---');
+          final clientDoc = await FirebaseFirestore.instance.collection('users').doc(widget.clientId).get();
+          
+          if (clientDoc.exists) {
+            debugPrint('FCM: Документ клиента найден!');
+            if (clientDoc.data()!.containsKey('fcmToken')) {
+              String clientToken = clientDoc.data()!['fcmToken'];
+              debugPrint('FCM: Токен найден: $clientToken. Отправляем запрос на сервер...');
+              
+              PushNotificationService.sendPushMessage(
+                token: clientToken,
+                title: 'Новая тренировка! 🏋️',
+                body: 'Тренер назначил вам новую программу. Заходите в приложение!',
+              ).then((_) {
+                debugPrint('FCM: Запрос на сервер отправлен успешно!');
+              });
+            } else {
+              debugPrint('FCM ОШИБКА: У клиента нет поля fcmToken в базе!');
+            }
+          } else {
+            debugPrint('FCM ОШИБКА: Документ клиента не найден в базе!');
+          }
+        } catch (e) {
+          debugPrint('FCM КРИТИЧЕСКАЯ ОШИБКА отправки уведомления: $e');
+        }
+        // ----------------------------------------------
       }
 
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text("Программа успешно сохранена!", style: TextStyle(color: Colors.black, fontWeight: FontWeight.bold)),
-            backgroundColor: Color(0xFFCCFF00),
-            behavior: SnackBarBehavior.floating,
-          ),
-        );
-        Navigator.pop(context);
-      }
+      if (mounted) Navigator.pop(context); 
     } catch (e) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text("Ошибка: $e"), backgroundColor: Colors.red),
-        );
-      }
+      if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text("${'error_occurred'.tr()}: $e"), backgroundColor: Colors.red));
     } finally {
       if (mounted) setState(() => _isLoading = false);
     }
@@ -129,142 +168,144 @@ class _AssignWorkoutScreenState extends State<AssignWorkoutScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: Colors.black,
+      backgroundColor: const Color(0xFF000000),
       appBar: AppBar(
         title: Text(
-          widget.existingWorkoutId != null ? "РЕДАКТИРОВАНИЕ" : "ПРОГРАММА ДЛЯ ${widget.clientName.toUpperCase()}", 
-          style: const TextStyle(color: Colors.white, fontSize: 14, fontWeight: FontWeight.bold, letterSpacing: 1.0)
+          widget.existingWorkoutId != null ? 'edit_program'.tr() : 'new_program'.tr(),
+          style: const TextStyle(fontWeight: FontWeight.bold)
         ),
-        centerTitle: true,
-        backgroundColor: Colors.black,
-        elevation: 0,
-        iconTheme: const IconThemeData(color: Colors.white),
+        backgroundColor: const Color(0xFF1C1C1E),
+        leading: const BackButton(color: Colors.white),
       ),
-      body: Column(
-        children: [
-          Expanded(
-            child: ListView(
-              padding: const EdgeInsets.all(16.0),
-              children: [
-                const Text("НАЗВАНИЕ ПРОГРАММЫ", style: TextStyle(color: Colors.grey, fontSize: 11, fontWeight: FontWeight.bold, letterSpacing: 1.0)),
-                const SizedBox(height: 8),
-                _buildTextField(_nameController, "Например: День ног", Icons.fitness_center),
-                
-                const SizedBox(height: 32),
-                const Text("УПРАЖНЕНИЯ", style: TextStyle(color: Colors.grey, fontSize: 11, fontWeight: FontWeight.bold, letterSpacing: 1.0)),
-                const SizedBox(height: 12),
-                
-                ...List.generate(_exercises.length, (index) {
-                  return _buildExerciseCard(_exercises[index], index);
-                }),
+      body: SingleChildScrollView(
+        padding: const EdgeInsets.all(24),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              "КЛИЕНТ: ${widget.clientName.toUpperCase()}", 
+              style: const TextStyle(color: Colors.white, fontSize: 14, fontWeight: FontWeight.bold, letterSpacing: 1.0)
+            ),
+            const SizedBox(height: 24),
 
-                const SizedBox(height: 16),
-                
-                Center(
-                  child: TextButton.icon(
-                    onPressed: () => setState(() => _exercises.add(ExerciseInput())),
-                    icon: const Icon(Icons.add, color: Color(0xFFCCFF00)),
-                    label: const Text("ДОБАВИТЬ УПРАЖНЕНИЕ", style: TextStyle(color: Color(0xFFCCFF00), fontWeight: FontWeight.bold, letterSpacing: 1.0)),
-                  ),
-                ),
-                const SizedBox(height: 20),
-              ],
-            ),
-          ),
-          
-          Container(
-            padding: const EdgeInsets.all(20),
-            decoration: const BoxDecoration(
-              color: Color(0xFF1C1C1E),
-              border: Border(top: BorderSide(color: Colors.black, width: 2)),
-            ),
-            child: SizedBox(
-              width: double.infinity,
-              height: 56,
-              child: ElevatedButton(
-                onPressed: _isLoading ? null : _sendWorkout,
-                style: ElevatedButton.styleFrom(
-                  backgroundColor: const Color(0xFFCCFF00),
-                  foregroundColor: Colors.black,
-                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-                  elevation: 0,
-                ),
-                child: _isLoading
-                    ? const CircularProgressIndicator(color: Colors.black)
-                    : Text(
-                        widget.existingWorkoutId != null ? "СОХРАНИТЬ ПРОГРАММУ" : "ОТПРАВИТЬ КЛИЕНТУ", 
-                        style: const TextStyle(fontWeight: FontWeight.w900, fontSize: 16, letterSpacing: 1.0)
-                      ),
+            Text('program_name'.tr(), style: const TextStyle(color: Color(0xFFCCFF00), fontSize: 12, fontWeight: FontWeight.bold)),
+            const SizedBox(height: 8),
+            TextField(
+              controller: _nameController,
+              keyboardType: TextInputType.text,
+              textCapitalization: TextCapitalization.sentences,
+              style: const TextStyle(color: Colors.white, fontSize: 18, fontWeight: FontWeight.bold),
+              decoration: InputDecoration(
+                hintText: 'program_name_hint'.tr(),
+                hintStyle: TextStyle(color: Colors.white.withOpacity(0.3)), 
+                filled: true,
+                fillColor: const Color(0xFF1C1C1E),
+                border: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: BorderSide.none),
               ),
             ),
-          ),
-        ],
-      ),
-    );
-  }
 
-  Widget _buildExerciseCard(ExerciseInput exercise, int index) {
-    return Container(
-      margin: const EdgeInsets.only(bottom: 16),
-      padding: const EdgeInsets.all(16),
-      decoration: BoxDecoration(
-        color: const Color(0xFF1C1C1E),
-        borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: Colors.white.withOpacity(0.05)),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
-            children: [
-              Text("УПРАЖНЕНИЕ ${index + 1}", style: const TextStyle(color: Color(0xFFCCFF00), fontSize: 12, fontWeight: FontWeight.bold)),
-              if (_exercises.length > 1) 
+            const SizedBox(height: 32),
+            Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
+                Text('exercises'.tr(), style: const TextStyle(color: Color(0xFFCCFF00), fontSize: 12, fontWeight: FontWeight.bold)),
                 GestureDetector(
-                  onTap: () {
-                    setState(() {
-                      _exercises[index].dispose();
-                      _exercises.removeAt(index);
-                    });
-                  },
-                  child: const Icon(Icons.close, color: Colors.grey, size: 20),
+                  onTap: _openLibrary,
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+                    decoration: BoxDecoration(color: const Color(0xFFCCFF00), borderRadius: BorderRadius.circular(8)),
+                    child: Row(
+                      children: [
+                        const Icon(Icons.list, color: Colors.black, size: 18),
+                        const SizedBox(width: 8),
+                        Text('open_database'.tr(), style: const TextStyle(color: Colors.black, fontWeight: FontWeight.bold, fontSize: 14)),
+                      ],
+                    ),
+                  ),
                 ),
-            ],
-          ),
-          const SizedBox(height: 12),
-          _buildTextField(exercise.name, "Название упражнения", null),
-          const SizedBox(height: 12),
-          Row(
-            children: [
-              Expanded(child: _buildTextField(exercise.sets, "Подходы", null, isNumber: true)),
-              const SizedBox(width: 12),
-              Expanded(child: _buildTextField(exercise.reps, "Повторения", null, isNumber: true)),
-            ],
-          ),
-        ],
-      ),
-    );
-  }
+              ],
+            ),
+            const SizedBox(height: 16),
 
-  Widget _buildTextField(TextEditingController controller, String hint, IconData? icon, {bool isNumber = false}) {
-    return Container(
-      decoration: BoxDecoration(
-        color: Colors.black, 
-        borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: Colors.white.withOpacity(0.1)),
-      ),
-      child: TextField(
-        controller: controller,
-        keyboardType: isNumber ? TextInputType.number : TextInputType.text,
-        style: const TextStyle(color: Colors.white, fontSize: 16),
-        cursorColor: const Color(0xFFCCFF00),
-        decoration: InputDecoration(
-          prefixIcon: icon != null ? Icon(icon, color: Colors.grey, size: 20) : null,
-          hintText: hint,
-          hintStyle: TextStyle(color: Colors.grey.withOpacity(0.5)),
-          border: InputBorder.none,
-          contentPadding: EdgeInsets.symmetric(horizontal: 16, vertical: icon != null ? 14 : 16),
-          isDense: true,
+            if (_exercises.isEmpty)
+              Container(
+                 width: double.infinity,
+                 padding: const EdgeInsets.all(40),
+                 child: Center(
+                   child: Text('list_empty'.tr(), style: TextStyle(color: Colors.white.withOpacity(0.2))), 
+                 ),
+              )
+            else
+              ReorderableListView.builder(
+                shrinkWrap: true,
+                physics: const NeverScrollableScrollPhysics(),
+                itemCount: _exercises.length,
+                onReorder: (oldIndex, newIndex) {
+                  setState(() {
+                    if (newIndex > oldIndex) newIndex -= 1;
+                    final item = _exercises.removeAt(oldIndex);
+                    _exercises.insert(newIndex, item);
+                  });
+                },
+                itemBuilder: (context, index) {
+                  return Container(
+                    key: ValueKey(_exercises[index]),
+                    margin: const EdgeInsets.only(bottom: 12),
+                    padding: const EdgeInsets.all(16),
+                    decoration: BoxDecoration(
+                      color: const Color(0xFF1C1C1E),
+                      borderRadius: BorderRadius.circular(12),
+                      border: Border.all(color: Colors.white10),
+                    ),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Row(
+                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                          children: [
+                            Expanded(child: Text("${index + 1}. ${_exercises[index].name.tr()}", style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 16))),
+                            Row(
+                              children: [
+                                const Icon(Icons.drag_handle, color: Colors.grey, size: 20),
+                                const SizedBox(width: 12),
+                                GestureDetector(
+                                  onTap: () => _removeExercise(index),
+                                  child: const Icon(Icons.close, color: Colors.red, size: 20),
+                                ),
+                              ],
+                            )
+                          ],
+                        ),
+                        const SizedBox(height: 8),
+                        TextField(
+                          controller: TextEditingController(text: _exercises[index].comment),
+                          onChanged: (val) => _exercises[index].comment = val,
+                          style: const TextStyle(color: Color(0xFFCCFF00), fontSize: 14),
+                          decoration: InputDecoration(
+                            hintText: 'comment_optional'.tr(),
+                            hintStyle: TextStyle(color: Colors.white.withOpacity(0.2)), 
+                            isDense: true,
+                            contentPadding: const EdgeInsets.symmetric(horizontal: 0, vertical: 8),
+                            enabledBorder: const UnderlineInputBorder(borderSide: BorderSide(color: Colors.white10)),
+                            focusedBorder: const UnderlineInputBorder(borderSide: BorderSide(color: Color(0xFFCCFF00))),
+                          ),
+                        ),
+                      ],
+                    ),
+                  );
+                },
+              ),
+
+            const SizedBox(height: 40),
+            _isLoading 
+                ? const Center(child: CircularProgressIndicator(color: Color(0xFFCCFF00)))
+                : NeonActionButton(
+                    text: widget.existingWorkoutId != null ? 'save_changes'.tr() : 'create_program'.tr(), 
+                    onTap: _saveAssignedWorkout, 
+                    isFullWidth: true
+                  ),
+            const SizedBox(height: 40),
+          ],
         ),
       ),
     );

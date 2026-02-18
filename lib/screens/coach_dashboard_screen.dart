@@ -1,8 +1,10 @@
 import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:easy_localization/easy_localization.dart'; // ЛОКАЛИЗАЦИЯ
+
 import 'client_details_screen.dart'; 
-import 'coach_profile_settings.dart'; // НОВЫЙ ИМПОРТ
+import 'coach_profile_settings.dart'; 
 
 class CoachDashboardScreen extends StatefulWidget {
   const CoachDashboardScreen({super.key});
@@ -19,8 +21,8 @@ class _CoachDashboardScreenState extends State<CoachDashboardScreen> {
     final user = FirebaseAuth.instance.currentUser;
     if (user == null) return const Scaffold(backgroundColor: Colors.black);
 
-    // Заголовки в зависимости от выбранной вкладки
-    final String appBarTitle = _currentIndex == 0 ? "МОИ КЛИЕНТЫ" : "ПРОФИЛЬ В МАРКЕТПЛЕЙСЕ";
+    // ПЕРЕВОД ЗАГОЛОВКА
+    final String appBarTitle = _currentIndex == 0 ? 'my_clients'.tr() : 'marketplace_profile'.tr();
 
     return Scaffold(
       backgroundColor: Colors.black,
@@ -33,10 +35,9 @@ class _CoachDashboardScreenState extends State<CoachDashboardScreen> {
         backgroundColor: Colors.black,
         elevation: 0,
         actions: [
-          // Отладка: смена роли
           IconButton(
             icon: const Icon(Icons.swap_horiz, color: Colors.grey),
-            tooltip: 'Стать клиентом',
+            tooltip: 'become_client'.tr(),
             onPressed: () async {
               final uid = FirebaseAuth.instance.currentUser?.uid;
               if (uid != null) {
@@ -47,22 +48,20 @@ class _CoachDashboardScreenState extends State<CoachDashboardScreen> {
               }
             },
           ),
-          // Кнопка выхода
           IconButton(
             icon: const Icon(Icons.logout, color: Colors.redAccent),
-            tooltip: 'Выйти',
+            tooltip: 'logout'.tr(),
             onPressed: () async {
               await FirebaseAuth.instance.signOut();
             },
           ),
         ],
       ),
-      // Используем IndexedStack, чтобы сохранять состояние экранов при переключении
       body: IndexedStack(
         index: _currentIndex,
         children: [
           _buildClientsList(user.uid),
-          const CoachProfileSettings(), // Наш новый экран профиля тренера
+          const CoachProfileSettings(),
         ],
       ),
       bottomNavigationBar: Container(
@@ -76,14 +75,14 @@ class _CoachDashboardScreenState extends State<CoachDashboardScreen> {
           currentIndex: _currentIndex,
           onTap: (index) => setState(() => _currentIndex = index),
           type: BottomNavigationBarType.fixed,
-          items: const [
+          items: [
             BottomNavigationBarItem(
-              icon: Icon(Icons.people), 
-              label: "Клиенты"
+              icon: const Icon(Icons.people), 
+              label: 'clients_tab'.tr()
             ),
             BottomNavigationBarItem(
-              icon: Icon(Icons.person_outline), 
-              label: "Мой профиль"
+              icon: const Icon(Icons.person_outline), 
+              label: 'my_profile_tab'.tr()
             ),
           ],
         ),
@@ -91,7 +90,6 @@ class _CoachDashboardScreenState extends State<CoachDashboardScreen> {
     );
   }
 
-  // Вынес старый код списка клиентов в отдельный метод для чистоты кода
   Widget _buildClientsList(String uid) {
     return StreamBuilder<QuerySnapshot>(
       stream: FirebaseFirestore.instance
@@ -100,7 +98,7 @@ class _CoachDashboardScreenState extends State<CoachDashboardScreen> {
           .snapshots(),
       builder: (context, snapshot) {
         if (snapshot.hasError) {
-          return Center(child: Text("Ошибка: ${snapshot.error}", style: const TextStyle(color: Colors.red)));
+          return Center(child: Text("${'error_msg'.tr()}: ${snapshot.error}", style: const TextStyle(color: Colors.red)));
         }
         if (snapshot.connectionState == ConnectionState.waiting) {
           return const Center(child: CircularProgressIndicator(color: Color(0xFFCCFF00)));
@@ -113,9 +111,9 @@ class _CoachDashboardScreenState extends State<CoachDashboardScreen> {
               children: [
                 Icon(Icons.people_outline, size: 60, color: Colors.grey.withOpacity(0.3)),
                 const SizedBox(height: 16),
-                const Text("У вас пока нет клиентов", style: TextStyle(color: Colors.white, fontSize: 16)),
+                Text('no_clients'.tr(), style: const TextStyle(color: Colors.white, fontSize: 16)),
                 const SizedBox(height: 8),
-                const Text("Ваш профиль отображается в маркетплейсе", style: TextStyle(color: Colors.grey, fontSize: 12)),
+                Text('profile_in_marketplace'.tr(), style: const TextStyle(color: Colors.grey, fontSize: 12)),
               ],
             ),
           );
@@ -131,7 +129,7 @@ class _CoachDashboardScreenState extends State<CoachDashboardScreen> {
             final data = doc.data() as Map<String, dynamic>;
             
             final clientId = doc.id;
-            final clientName = data['name']?.toString() ?? 'Клиент';
+            final clientName = data['name']?.toString() ?? 'client_default'.tr();
             
             return GestureDetector(
               onTap: () {

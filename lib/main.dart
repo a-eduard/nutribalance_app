@@ -3,31 +3,36 @@ import 'package:firebase_core/firebase_core.dart';
 import 'package:firebase_messaging/firebase_messaging.dart';
 import 'package:easy_localization/easy_localization.dart';
 
-// Импортируем обертку (путь должен быть верным)
-import 'screens/home_wrapper.dart';
+// Импорт сгенерированных опций Firebase
+import 'firebase_options.dart';
 
-// Обработчик фоновых пушей (обязательно вне класса)
+// Импорты экранов
+import 'screens/home_wrapper.dart';
+import 'paywall_screen.dart'; 
+
 @pragma('vm:entry-point')
 Future<void> _firebaseMessagingBackgroundHandler(RemoteMessage message) async {
-  await Firebase.initializeApp();
+  await Firebase.initializeApp(
+    options: DefaultFirebaseOptions.currentPlatform,
+  );
   debugPrint("Handling a background message: ${message.messageId}");
 }
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
   
-  // Инициализация Firebase
-  await Firebase.initializeApp();
+  // ФИКС: Инициализация с правильными платформенными ключами!
+  await Firebase.initializeApp(
+    options: DefaultFirebaseOptions.currentPlatform,
+  );
   
-  // Регистрация фонового обработчика
   FirebaseMessaging.onBackgroundMessage(_firebaseMessagingBackgroundHandler);
   
-  // Инициализация локализации
   await EasyLocalization.ensureInitialized();
 
   runApp(
     EasyLocalization(
-      supportedLocales: const [Locale('ru'), Locale('en')],
+      supportedLocales: const [Locale('ru')], 
       path: 'assets/translations',
       fallbackLocale: const Locale('ru'),
       child: const MyApp(),
@@ -41,25 +46,26 @@ class MyApp extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
-      title: 'TONNA GYM',
+      title: 'Tonna AI',
       debugShowCheckedModeBanner: false,
       
-      // Настройки локализации
       localizationsDelegates: context.localizationDelegates,
       supportedLocales: context.supportedLocales,
       locale: context.locale,
       
       theme: ThemeData.dark().copyWith(
         scaffoldBackgroundColor: Colors.black,
-        // DESIGN FIX: Новый акцентный цвет #9CD600
         primaryColor: const Color(0xFF9CD600), 
-        colorScheme: ColorScheme.dark(
-          primary: const Color(0xFF9CD600),
-          secondary: const Color(0xFF9CD600),
+        colorScheme: const ColorScheme.dark(
+          primary: Color(0xFF9CD600),
+          secondary: Color(0xFF9CD600),
         ),
       ),
       
-      // Точка входа — наш исправленный HomeWrapper
+      routes: {
+        '/paywall': (context) => const PaywallScreen(), 
+      },
+      
       home: const HomeWrapper(),
     );
   }

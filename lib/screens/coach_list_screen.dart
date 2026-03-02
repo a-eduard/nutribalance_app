@@ -2,10 +2,11 @@ import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:easy_localization/easy_localization.dart';
+import 'package:cached_network_image/cached_network_image.dart';
 
 import '../widgets/base_background.dart'; 
 import 'p2p_chat_screen.dart';
-import 'coach_profile_screen.dart';
+import 'coach_profile_screen.dart'; // <--- ИСПРАВЛЕННЫЙ ИМПОРТ
 
 class CoachListScreen extends StatefulWidget {
   const CoachListScreen({super.key});
@@ -88,7 +89,6 @@ class _CoachListScreenState extends State<CoachListScreen> {
                     );
                   }
 
-                  // ОПТИМИЗИРОВАННЫЙ СПИСОК
                   return ListView.builder(
                     padding: const EdgeInsets.all(16),
                     itemCount: filteredCoaches.length,
@@ -137,9 +137,16 @@ class CoachCard extends StatelessWidget {
 
     return GestureDetector(
       onTap: () {
+        // ИСПРАВЛЕННЫЙ РОУТИНГ НА ПРЯМОЙ ВЫЗОВ ЭКРАНА
         final Map<String, dynamic> coachDataToPass = Map.from(data);
         coachDataToPass['id'] = coachId;
-        Navigator.push(context, MaterialPageRoute(builder: (context) => CoachProfileScreen(coachData: coachDataToPass)));
+        
+        Navigator.push(
+          context, 
+          MaterialPageRoute(
+            builder: (context) => CoachProfileScreen(coachData: coachDataToPass),
+          ),
+        );
       },
       child: Container(
         margin: const EdgeInsets.only(bottom: 16),
@@ -154,7 +161,12 @@ class CoachCard extends StatelessWidget {
               child: ClipOval(
                 child: photoUrl.isNotEmpty
                     ? (photoUrl.startsWith('http') 
-                        ? Image.network(photoUrl, fit: BoxFit.cover, errorBuilder: (c, e, s) => const Icon(Icons.person, size: 40, color: Colors.grey))
+                        ? CachedNetworkImage(
+                            imageUrl: photoUrl, 
+                            fit: BoxFit.cover, 
+                            placeholder: (context, url) => const CircularProgressIndicator(color: Color(0xFF9CD600)),
+                            errorWidget: (context, url, error) => const Icon(Icons.person, size: 40, color: Colors.grey),
+                          )
                         : Image.memory(base64Decode(photoUrl), fit: BoxFit.cover, errorBuilder: (c, e, s) => const Icon(Icons.person, size: 40, color: Colors.grey)))
                     : const Icon(Icons.person, size: 40, color: Colors.grey),
               ),

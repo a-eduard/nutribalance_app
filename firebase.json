@@ -1,1 +1,37 @@
-{"flutter":{"platforms":{"android":{"default":{"projectId":"gym-tracker-9925c","appId":"1:830594518730:android:83575990bf418cbd3e2e33","fileOutput":"android/app/google-services.json"}},"dart":{"lib/firebase_options.dart":{"projectId":"gym-tracker-9925c","configurations":{"android":"1:830594518730:android:83575990bf418cbd3e2e33","ios":"1:830594518730:ios:11adc1d95be376203e2e33","macos":"1:830594518730:ios:11adc1d95be376203e2e33","web":"1:830594518730:web:b1e384f2e830b4323e2e33","windows":"1:830594518730:web:ef72dfe538085da73e2e33"}}}}}}
+{
+  "flutter": {
+    "platforms": {
+      "android": {
+        "default": {
+          "projectId": "gym-tracker-9925c",
+          "appId": "1:830594518730:android:83575990bf418cbd3e2e33",
+          "fileOutput": "android/app/google-services.json"
+        }
+      },
+      "dart": {
+        "lib/firebase_options.dart": {
+          "projectId": "gym-tracker-9925c",
+          "configurations": {
+            "android": "1:830594518730:android:83575990bf418cbd3e2e33",
+            "ios": "1:830594518730:ios:11adc1d95be376203e2e33",
+            "macos": "1:830594518730:ios:11adc1d95be376203e2e33",
+            "web": "1:830594518730:web:b1e384f2e830b4323e2e33",
+            "windows": "1:830594518730:web:ef72dfe538085da73e2e33"
+          }
+        }
+      }
+    }
+  },
+  "functions": [
+  {
+    "source": "functions",
+    "codebase": "default",
+    "ignore": [
+      "node_modules",
+      ".git",
+      "firebase-debug.log",
+      "firebase-debug.*.log"
+    ]
+  }
+ ]
+}

@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:easy_localization/easy_localization.dart'; // ЛОКАЛИЗАЦИЯ
 
 class WorkoutSuccessScreen extends StatelessWidget {
   final int durationMinutes;
@@ -24,7 +25,6 @@ class WorkoutSuccessScreen extends StatelessWidget {
             children: [
               const Spacer(),
               
-              // 1. TROPHY ICON
               Container(
                 padding: const EdgeInsets.all(30),
                 decoration: BoxDecoration(
@@ -43,11 +43,10 @@ class WorkoutSuccessScreen extends StatelessWidget {
               
               const SizedBox(height: 32),
               
-              const Text(
-                "ТРЕНИРОВКА ЗАВЕРШЕНА!",
+              Text(
+                "workout_completed".tr(),
                 textAlign: TextAlign.center,
-                style: TextStyle(
-                  // fontFamily: 'Manrope', // Если шрифт подключен
+                style: const TextStyle(
                   fontWeight: FontWeight.w900,
                   fontSize: 24,
                   color: Colors.white,
@@ -56,33 +55,31 @@ class WorkoutSuccessScreen extends StatelessWidget {
               ),
               const SizedBox(height: 8),
               Text(
-                "Ты стал сильнее, чем вчера.",
+                "stronger_than_yesterday".tr(),
                 style: TextStyle(color: Colors.white.withOpacity(0.5), fontSize: 16),
               ),
 
               const SizedBox(height: 48),
 
-              // 2. STATS ROW
               Row(
                 mainAxisAlignment: MainAxisAlignment.spaceBetween,
                 children: [
-                  _buildStatItem("$durationMinutes", "Мин", "ВРЕМЯ"),
-                  _buildStatItem("$tonnage", "кг", "ТОННАЖ"),
-                  _buildStatItem("$exercisesCount", "", "УПРАЖНЕНИЙ"),
+                  _buildStatItem("$durationMinutes", "min_short".tr(), "time_upper".tr()),
+                  _buildStatItem("$tonnage", "kg".tr(), "tonnage_upper".tr()),
+                  _buildStatItem("$exercisesCount", "", "exercises_upper".tr()),
                 ],
               ),
 
               const Spacer(),
 
-              // 3. ACTION BUTTONS
               OutlinedButton.icon(
                 onPressed: () {
                   ScaffoldMessenger.of(context).showSnackBar(
-                    const SnackBar(content: Text("Результат скопирован! (Имитация)")),
+                    SnackBar(content: Text("result_copied".tr())),
                   );
                 },
                 icon: const Icon(Icons.share, color: Colors.white),
-                label: const Text("ПОДЕЛИТЬСЯ", style: TextStyle(color: Colors.white)),
+                label: Text("share".tr(), style: const TextStyle(color: Colors.white)),
                 style: OutlinedButton.styleFrom(
                   minimumSize: const Size(double.infinity, 56),
                   side: BorderSide(color: Colors.white.withOpacity(0.2)),
@@ -104,7 +101,6 @@ class WorkoutSuccessScreen extends StatelessWidget {
                 ),
                 child: ElevatedButton(
                   onPressed: () {
-                    // Возврат на главную (очищаем стек до первого экрана)
                     Navigator.of(context).popUntil((route) => route.isFirst);
                   },
                   style: ElevatedButton.styleFrom(
@@ -112,9 +108,9 @@ class WorkoutSuccessScreen extends StatelessWidget {
                     shadowColor: Colors.transparent,
                     shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
                   ),
-                  child: const Text(
-                    "ДОМОЙ",
-                    style: TextStyle(color: Colors.black, fontWeight: FontWeight.w900, fontSize: 16, letterSpacing: 1.0),
+                  child: Text(
+                    "home".tr(),
+                    style: const TextStyle(color: Colors.black, fontWeight: FontWeight.w900, fontSize: 16, letterSpacing: 1.0),
                   ),
                 ),
               ),
@@ -139,8 +135,7 @@ class WorkoutSuccessScreen extends StatelessWidget {
               style: const TextStyle(
                 color: Colors.white, 
                 fontSize: 32, 
-                fontWeight: FontWeight.w900, // Очень жирный для цифр
-                // fontFamily: 'Manrope',
+                fontWeight: FontWeight.w900, 
               ),
             ),
             if (unit.isNotEmpty) ...[

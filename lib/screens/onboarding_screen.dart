@@ -1,8 +1,10 @@
 import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
-import 'ui_widgets.dart'; // Убедись, что путь к виджетам верный
-import 'screens/dashboard_screen.dart';
+import 'package:easy_localization/easy_localization.dart'; // ЛОКАЛИЗАЦИЯ
+import '../ui_widgets.dart'; 
+import 'dashboard_screen.dart';
+import 'home_wrapper.dart';
 
 class OnboardingScreen extends StatefulWidget {
   const OnboardingScreen({super.key});
@@ -16,7 +18,7 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
   final TextEditingController _weightController = TextEditingController();
   final TextEditingController _ageController = TextEditingController();
   
-  String _selectedGender = 'male'; // 'male' или 'female'
+  String _selectedGender = 'male'; 
   bool _isLoading = false;
 
   Future<void> _saveProfile() async {
@@ -26,7 +28,7 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
 
     if (name.isEmpty || weight.isEmpty || age.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text("Пожалуйста, заполните все поля"), backgroundColor: Colors.red),
+        SnackBar(content: Text("fill_all_fields".tr()), backgroundColor: Colors.red),
       );
       return;
     }
@@ -36,7 +38,6 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
     try {
       final uid = FirebaseAuth.instance.currentUser!.uid;
 
-      // Сохраняем данные пользователя
       await FirebaseFirestore.instance.collection('users').doc(uid).set({
         'name': name,
         'gender': _selectedGender,
@@ -46,15 +47,14 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
       }, SetOptions(merge: true));
 
       if (mounted) {
-        // Переходим на главный экран и удаляем историю навигации
         Navigator.of(context).pushAndRemoveUntil(
-          MaterialPageRoute(builder: (context) => const DashboardScreen()),
+          MaterialPageRoute(builder: (context) => const HomeWrapper()),
           (route) => false,
         );
       }
     } catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text("Ошибка: $e")));
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text("${'error_msg'.tr()}: $e")));
       }
     } finally {
       if (mounted) setState(() => _isLoading = false);
@@ -73,36 +73,34 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 const SizedBox(height: 40),
-                const Text("Добро пожаловать", style: TextStyle(color: Color(0xFF8E8E93), fontSize: 16)),
+                Text("welcome".tr(), style: const TextStyle(color: Color(0xFF8E8E93), fontSize: 16)),
                 const SizedBox(height: 8),
-                const Text("ДАВАЙ ЗНАКОМИТЬСЯ", style: TextStyle(color: Colors.white, fontSize: 32, fontWeight: FontWeight.w900, fontStyle: FontStyle.italic)),
+                Text("lets_get_acquainted".tr(), style: const TextStyle(color: Colors.white, fontSize: 32, fontWeight: FontWeight.w900, fontStyle: FontStyle.italic)),
                 const SizedBox(height: 40),
 
-                // 1. ИМЯ
-                const Text("Как к тебе обращаться?", style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
+                Text("how_to_address".tr(), style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
                 const SizedBox(height: 12),
                 HeavyInput(
                   controller: _nameController, 
-                  hint: "Твое имя", 
+                  hint: "your_name_hint".tr(), 
                   onChanged: (v) {},
                 ),
 
                 const SizedBox(height: 24),
 
-                // 2. ПОЛ
-                const Text("Пол", style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
+                Text("gender".tr(), style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
                 const SizedBox(height: 12),
                 Row(
                   children: [
                     _GenderButton(
-                      label: "Мужчина", 
+                      label: "male".tr(), 
                       icon: Icons.male, 
                       isSelected: _selectedGender == 'male', 
                       onTap: () => setState(() => _selectedGender = 'male')
                     ),
                     const SizedBox(width: 16),
                     _GenderButton(
-                      label: "Женщина", 
+                      label: "female".tr(), 
                       icon: Icons.female, 
                       isSelected: _selectedGender == 'female', 
                       onTap: () => setState(() => _selectedGender = 'female')
@@ -112,14 +110,13 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
 
                 const SizedBox(height: 24),
 
-                // 3. ВЕС И ВОЗРАСТ
                 Row(
                   children: [
                     Expanded(
                       child: Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
-                          const Text("Вес (кг)", style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
+                          Text("weight_kg_label".tr(), style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
                           const SizedBox(height: 12),
                           HeavyInput(
                             controller: _weightController, 
@@ -135,7 +132,7 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
                       child: Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
-                          const Text("Возраст", style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
+                          Text("age_label".tr(), style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
                           const SizedBox(height: 12),
                           HeavyInput(
                             controller: _ageController, 
@@ -155,9 +152,9 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
                   const Center(child: CircularProgressIndicator(color: Color(0xFFCCFF00)))
                 else
                   NeonActionButton(
-                    text: "НАЧАТЬ ТРАНСФОРМАЦИЮ", 
+                    text: "start_transformation".tr(), 
                     onTap: _saveProfile,
-                    isFullWidth: true, // Убедись, что твоя кнопка поддерживает этот параметр, или убери его
+                    isFullWidth: true, 
                   ),
                 const SizedBox(height: 40),
               ],
@@ -169,7 +166,6 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
   }
 }
 
-// Виджет кнопки выбора пола
 class _GenderButton extends StatelessWidget {
   final String label;
   final IconData icon;

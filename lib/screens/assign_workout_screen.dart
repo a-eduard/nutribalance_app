@@ -4,7 +4,6 @@ import 'package:easy_localization/easy_localization.dart';
 
 import '../ui_widgets.dart'; 
 import '../exercise_selection_screen.dart';
-import '../services/push_notification_service.dart';
 
 class WorkoutExerciseItem {
   String name;
@@ -32,6 +31,7 @@ class AssignWorkoutScreen extends StatefulWidget {
 
 class _AssignWorkoutScreenState extends State<AssignWorkoutScreen> {
   final TextEditingController _nameController = TextEditingController();
+  final TextEditingController _coachNotesController = TextEditingController(); // НОВОЕ ПОЛЕ
   List<WorkoutExerciseItem> _exercises = [];
   bool _isLoading = false;
 
@@ -40,6 +40,8 @@ class _AssignWorkoutScreenState extends State<AssignWorkoutScreen> {
     super.initState();
     if (widget.existingWorkoutData != null) {
       _nameController.text = widget.existingWorkoutData!['name'] ?? "";
+      _coachNotesController.text = widget.existingWorkoutData!['coachNotes'] ?? ""; // ЗАГРУЖАЕМ СОВЕТЫ
+      
       final rawExercises = List<String>.from(widget.existingWorkoutData!['exercises'] ?? []);
       final targets = Map<String, String>.from(widget.existingWorkoutData!['targets'] ?? {});
       
@@ -57,6 +59,7 @@ class _AssignWorkoutScreenState extends State<AssignWorkoutScreen> {
   @override
   void dispose() {
     _nameController.dispose();
+    _coachNotesController.dispose(); // ОЧИЩАЕМ
     super.dispose();
   }
 
@@ -103,6 +106,7 @@ class _AssignWorkoutScreenState extends State<AssignWorkoutScreen> {
 
       final dataToSave = {
         'name': _nameController.text.trim(),
+        'coachNotes': _coachNotesController.text.trim(), // СОХРАНЯЕМ СОВЕТЫ
         'exercises': namesList,
         'targets': targets,
         'date': Timestamp.now(),
@@ -110,7 +114,6 @@ class _AssignWorkoutScreenState extends State<AssignWorkoutScreen> {
       };
 
       if (widget.existingWorkoutId != null) {
-        // ОБНОВЛЕНИЕ СУЩЕСТВУЮЩЕЙ
         await FirebaseFirestore.instance
             .collection('users')
             .doc(widget.clientId)
@@ -120,41 +123,11 @@ class _AssignWorkoutScreenState extends State<AssignWorkoutScreen> {
             
         if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('updated_successfully'.tr()), backgroundColor: const Color(0xFFCCFF00)));
       } else {
-        // СОЗДАНИЕ НОВОЙ
         await FirebaseFirestore.instance
             .collection('users')
             .doc(widget.clientId)
             .collection('assigned_workouts')
             .add(dataToSave);
-            
-        // --- БЛОК ОТПРАВКИ PUSH-УВЕДОМЛЕНИЯ КЛИЕНТУ С ЛОГАМИ ---
-        try {
-          debugPrint('--- НАЧАЛО ОТПРАВКИ ПУША (ТРЕНИРОВКА) ---');
-          final clientDoc = await FirebaseFirestore.instance.collection('users').doc(widget.clientId).get();
-          
-          if (clientDoc.exists) {
-            debugPrint('FCM: Документ клиента найден!');
-            if (clientDoc.data()!.containsKey('fcmToken')) {
-              String clientToken = clientDoc.data()!['fcmToken'];
-              debugPrint('FCM: Токен найден: $clientToken. Отправляем запрос на сервер...');
-              
-              PushNotificationService.sendPushMessage(
-                token: clientToken,
-                title: 'Новая тренировка! 🏋️',
-                body: 'Тренер назначил вам новую программу. Заходите в приложение!',
-              ).then((_) {
-                debugPrint('FCM: Запрос на сервер отправлен успешно!');
-              });
-            } else {
-              debugPrint('FCM ОШИБКА: У клиента нет поля fcmToken в базе!');
-            }
-          } else {
-            debugPrint('FCM ОШИБКА: Документ клиента не найден в базе!');
-          }
-        } catch (e) {
-          debugPrint('FCM КРИТИЧЕСКАЯ ОШИБКА отправки уведомления: $e');
-        }
-        // ----------------------------------------------
       }
 
       if (mounted) Navigator.pop(context); 
@@ -197,7 +170,24 @@ class _AssignWorkoutScreenState extends State<AssignWorkoutScreen> {
               style: const TextStyle(color: Colors.white, fontSize: 18, fontWeight: FontWeight.bold),
               decoration: InputDecoration(
                 hintText: 'program_name_hint'.tr(),
-                hintStyle: TextStyle(color: Colors.white.withOpacity(0.3)), 
+                hintStyle: TextStyle(color: Colors.white.withValues(alpha: 0.3)), 
+                filled: true,
+                fillColor: const Color(0xFF1C1C1E),
+                border: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: BorderSide.none),
+              ),
+            ),
+
+            // БЛОК ДЛЯ СОВЕТОВ ТРЕНЕРА
+            const SizedBox(height: 24),
+            const Text('СОВЕТЫ И РЕКОМЕНДАЦИИ', style: TextStyle(color: Color(0xFFCCFF00), fontSize: 12, fontWeight: FontWeight.bold)),
+            const SizedBox(height: 8),
+            TextField(
+              controller: _coachNotesController,
+              maxLines: 4,
+              style: const TextStyle(color: Colors.white, fontSize: 14),
+              decoration: InputDecoration(
+                hintText: 'Опишите фокус тренировки, разминку или особые указания...',
+                hintStyle: TextStyle(color: Colors.white.withValues(alpha: 0.3)), 
                 filled: true,
                 fillColor: const Color(0xFF1C1C1E),
                 border: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: BorderSide.none),
@@ -232,7 +222,7 @@ class _AssignWorkoutScreenState extends State<AssignWorkoutScreen> {
                  width: double.infinity,
                  padding: const EdgeInsets.all(40),
                  child: Center(
-                   child: Text('list_empty'.tr(), style: TextStyle(color: Colors.white.withOpacity(0.2))), 
+                   child: Text('list_empty'.tr(), style: TextStyle(color: Colors.white.withValues(alpha: 0.2))), 
                  ),
               )
             else
@@ -283,7 +273,7 @@ class _AssignWorkoutScreenState extends State<AssignWorkoutScreen> {
                           style: const TextStyle(color: Color(0xFFCCFF00), fontSize: 14),
                           decoration: InputDecoration(
                             hintText: 'comment_optional'.tr(),
-                            hintStyle: TextStyle(color: Colors.white.withOpacity(0.2)), 
+                            hintStyle: TextStyle(color: Colors.white.withValues(alpha: 0.2)), 
                             isDense: true,
                             contentPadding: const EdgeInsets.symmetric(horizontal: 0, vertical: 8),
                             enabledBorder: const UnderlineInputBorder(borderSide: BorderSide(color: Colors.white10)),

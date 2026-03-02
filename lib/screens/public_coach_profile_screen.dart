@@ -1,7 +1,8 @@
 import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
-import 'package:easy_localization/easy_localization.dart'; // ЛОКАЛИЗАЦИЯ
+import 'package:easy_localization/easy_localization.dart'; 
+import 'package:cached_network_image/cached_network_image.dart';
 
 import '../models/coach.dart';
 import '../services/database_service.dart';
@@ -109,6 +110,16 @@ class _PublicCoachProfileScreenState extends State<PublicCoachProfileScreen> {
 
   @override
   Widget build(BuildContext context) {
+    // Подготовка картинки для шапки (умеет читать и ссылки из Storage, и старый Base64)
+    ImageProvider? headerImageProvider;
+    if (widget.coach.photoUrl.isNotEmpty) {
+      if (widget.coach.photoUrl.startsWith('http')) {
+        headerImageProvider = CachedNetworkImageProvider(widget.coach.photoUrl);
+      } else {
+        try { headerImageProvider = MemoryImage(base64Decode(widget.coach.photoUrl)); } catch (_) {}
+      }
+    }
+
     return Scaffold(
       backgroundColor: Colors.black,
       extendBodyBehindAppBar: true,
@@ -126,14 +137,14 @@ class _PublicCoachProfileScreenState extends State<PublicCoachProfileScreen> {
               height: 350,
               decoration: BoxDecoration(
                 color: const Color(0xFF1C1C1E),
-                image: (widget.coach.photoUrl.isNotEmpty)
+                image: headerImageProvider != null
                     ? DecorationImage(
-                        image: MemoryImage(base64Decode(widget.coach.photoUrl)),
+                        image: headerImageProvider,
                         fit: BoxFit.cover,
                       )
                     : null,
               ),
-              child: (widget.coach.photoUrl.isEmpty)
+              child: headerImageProvider == null
                   ? const Icon(Icons.person, size: 100, color: Colors.grey)
                   : Container(
                       decoration: BoxDecoration(

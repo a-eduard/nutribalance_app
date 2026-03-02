@@ -7,22 +7,18 @@ class StorageService {
 
   /// Загружает файл аватара в папку avatars/{userId}
   /// Возвращает URL для скачивания
-  Future<String?> uploadUserAvatar(File file, String userId) async {
+  Future<String?> uploadUserAvatar(File imageFile, String uid) async {
     try {
-      // Ссылка на путь: avatars/uid.jpg
-      // Перезаписываем старый файл, чтобы не плодить мусор
-      final ref = _storage.ref().child('avatars').child('$userId.jpg');
+      // ФИКС КЭША: Генерируем уникальное имя файла с помощью timestamp
+      final String fileName = 'avatar_${DateTime.now().millisecondsSinceEpoch}.jpg';
+      final ref = FirebaseStorage.instance.ref().child('users/$uid/$fileName');
       
-      // Загрузка
-      final task = await ref.putFile(file);
+      await ref.putFile(imageFile);
+      final downloadUrl = await ref.getDownloadURL();
       
-      // Получение ссылки
-      if (task.state == TaskState.success) {
-        return await ref.getDownloadURL();
-      }
-      return null;
+      return downloadUrl;
     } catch (e) {
-      debugPrint("Storage Upload Error: $e");
+      print("Ошибка загрузки аватарки: $e");
       return null;
     }
   }

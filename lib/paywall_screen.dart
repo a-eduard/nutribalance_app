@@ -1,4 +1,7 @@
 import 'package:flutter/material.dart';
+import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:firebase_auth/firebase_auth.dart';
+import '../widgets/base_background.dart';
 
 class PaywallScreen extends StatefulWidget {
   const PaywallScreen({super.key});
@@ -8,281 +11,187 @@ class PaywallScreen extends StatefulWidget {
 }
 
 class _PaywallScreenState extends State<PaywallScreen> {
-  // 0 = Годовая (по умолчанию), 1 = Месячная
-  int _selectedPlanIndex = 0;
+  String _userRole = 'user'; // По умолчанию ставим 'user'
+  bool _isLoading = true;
 
   @override
-  Widget build(BuildContext context) {
-    // Цвета из нашей дизайн-системы
-    const neonLime = Color(0xFFCCFF00);
-    const surfaceColor = Color(0xFF1E1E1E);
-    const secondaryText = Color(0xFF8E8E93);
+  void initState() {
+    super.initState();
+    _loadUserRole();
+  }
 
-    return Scaffold(
-      backgroundColor: const Color(0xFF121212),
-      body: SafeArea(
-        child: Column(
-          children: [
-            // 1. Кнопка закрытия и Заголовок
-            Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-              child: Row(
-                mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                children: [
-                  const SizedBox(width: 40), // Для центровки заголовка
-                  const Text(
-                    "PREMIUM",
-                    style: TextStyle(
-                      fontFamily: 'Manrope',
-                      fontSize: 16,
-                      fontWeight: FontWeight.bold,
-                      letterSpacing: 4,
-                      color: neonLime,
-                    ),
-                  ),
-                  IconButton(
-                    icon: const Icon(Icons.close, color: Colors.white),
-                    onPressed: () => Navigator.of(context).pop(),
-                  ),
-                ],
-              ),
+  Future<void> _loadUserRole() async {
+    final uid = FirebaseAuth.instance.currentUser?.uid;
+    if (uid != null) {
+      final doc = await FirebaseFirestore.instance.collection('users').doc(uid).get();
+      if (mounted) {
+        setState(() {
+          // Читаем роль. Если её нет, считаем, что это 'user'
+          _userRole = doc.data()?['registeredRole'] ?? 'user';
+          _isLoading = false;
+        });
+      }
+    } else {
+      if (mounted) setState(() => _isLoading = false);
+    }
+  }
+
+  Widget _buildTariffCard({required String title, required String price, required String oldPrice, required List<String> features, required VoidCallback onBuy, bool isPopular = false}) {
+    return Container(
+      margin: const EdgeInsets.only(bottom: 16),
+      padding: const EdgeInsets.all(20),
+      decoration: BoxDecoration(
+        color: const Color(0xFF1C1C1E),
+        borderRadius: BorderRadius.circular(20),
+        border: Border.all(color: isPopular ? const Color(0xFF9CD600) : Colors.white10, width: 2),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          if (isPopular)
+            Container(
+              margin: const EdgeInsets.only(bottom: 12),
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+              decoration: BoxDecoration(color: const Color(0xFF9CD600), borderRadius: BorderRadius.circular(8)),
+              child: const Text('ВЫГОДНО', style: TextStyle(color: Colors.black, fontWeight: FontWeight.bold, fontSize: 10)),
             ),
-
-            // 2. Список преимуществ (кратко)
-            Expanded(
-              child: Padding(
-                padding: const EdgeInsets.all(24.0),
-                child: Column(
-                  mainAxisAlignment: MainAxisAlignment.center,
-                  children: [
-                    const Icon(Icons.star, size: 60, color: neonLime),
-                    const SizedBox(height: 24),
-                    Text(
-                      "РАЗБЛОКИРУЙ СВОЙ\nПОТЕНЦИАЛ",
-                      textAlign: TextAlign.center,
-                      style: Theme.of(context).textTheme.headlineMedium
-                          ?.copyWith(fontWeight: FontWeight.bold, height: 1.1),
-                    ),
-                    const SizedBox(height: 32),
-                    _buildBenefitRow("Безлимитное создание тренировок"),
-                    _buildBenefitRow("Расширенная статистика прогресса"),
-                    _buildBenefitRow("Доступ ко всем упражнениям"),
-                  ],
-                ),
-              ),
+          Text(title, style: const TextStyle(color: Colors.white, fontSize: 22, fontWeight: FontWeight.bold)),
+          const SizedBox(height: 8),
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.end,
+            children: [
+              Text(price, style: TextStyle(color: isPopular ? const Color(0xFF9CD600) : Colors.white, fontSize: 28, fontWeight: FontWeight.w900)),
+              if (oldPrice.isNotEmpty) ...[
+                const SizedBox(width: 8),
+                Text(oldPrice, style: const TextStyle(color: Colors.grey, fontSize: 16, decoration: TextDecoration.lineThrough)),
+              ]
+            ],
+          ),
+          const SizedBox(height: 16),
+          ...features.map((f) => Padding(
+            padding: const EdgeInsets.only(bottom: 8.0),
+            child: Row(
+              children: [
+                const Icon(Icons.check_circle, color: Color(0xFF9CD600), size: 18),
+                const SizedBox(width: 12),
+                Expanded(child: Text(f, style: const TextStyle(color: Colors.white70, fontSize: 14))),
+              ],
             ),
-
-            // 3. Карточки Цен
-            Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 24.0),
-              child: Column(
-                children: [
-                  // --- КАРТОЧКА 1: ГОДОВАЯ (BEST VALUE) ---
-                  GestureDetector(
-                    onTap: () => setState(() => _selectedPlanIndex = 0),
-                    child: Stack(
-                      clipBehavior: Clip.none,
-                      children: [
-                        Container(
-                          width: double.infinity,
-                          padding: const EdgeInsets.all(20),
-                          decoration: BoxDecoration(
-                            color: surfaceColor,
-                            // Если выбран - рамка Neon Lime, иначе прозрачная
-                            border: Border.all(
-                              color: _selectedPlanIndex == 0
-                                  ? neonLime
-                                  : Colors.transparent,
-                              width: 2,
-                            ),
-                            borderRadius: BorderRadius.circular(24),
-                          ),
-                          child: const Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              Row(
-                                mainAxisAlignment:
-                                    MainAxisAlignment.spaceBetween,
-                                children: [
-                                  Text(
-                                    "1 ГОД",
-                                    style: TextStyle(
-                                      fontWeight: FontWeight.bold,
-                                      fontSize: 18,
-                                      color: Colors.white,
-                                    ),
-                                  ),
-                                  Column(
-                                    crossAxisAlignment: CrossAxisAlignment.end,
-                                    children: [
-                                      Text(
-                                        "1 990 ₽",
-                                        style: TextStyle(
-                                          fontWeight: FontWeight.bold,
-                                          fontSize: 20,
-                                          color: Colors.white,
-                                        ),
-                                      ),
-                                    ],
-                                  ),
-                                ],
-                              ),
-                              SizedBox(height: 8),
-                              // Цена в месяц (расчет)
-                              Text(
-                                "166 ₽ / месяц",
-                                style: TextStyle(
-                                  color: neonLime,
-                                  fontWeight: FontWeight.bold,
-                                  fontSize: 16,
-                                ),
-                              ),
-                              SizedBox(height: 4),
-                              Text(
-                                "Списывается раз в год. Экономия 45%",
-                                style: TextStyle(
-                                  color: secondaryText,
-                                  fontSize: 12,
-                                ),
-                              ),
-                            ],
-                          ),
-                        ),
-                        // Плашка "ВЫГОДНО"
-                        Positioned(
-                          top: -12,
-                          right: 20,
-                          child: Container(
-                            padding: const EdgeInsets.symmetric(
-                              horizontal: 12,
-                              vertical: 4,
-                            ),
-                            decoration: BoxDecoration(
-                              color: neonLime,
-                              borderRadius: BorderRadius.circular(12),
-                            ),
-                            child: const Text(
-                              "ВЫГОДНО",
-                              style: TextStyle(
-                                color: Colors.black,
-                                fontWeight: FontWeight.bold,
-                                fontSize: 12,
-                              ),
-                            ),
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-
-                  const SizedBox(height: 16),
-
-                  // --- КАРТОЧКА 2: МЕСЯЧНАЯ ---
-                  GestureDetector(
-                    onTap: () => setState(() => _selectedPlanIndex = 1),
-                    child: Container(
-                      width: double.infinity,
-                      padding: const EdgeInsets.all(20),
-                      decoration: BoxDecoration(
-                        color: surfaceColor,
-                        border: Border.all(
-                          color: _selectedPlanIndex == 1
-                              ? neonLime
-                              : Colors.transparent,
-                          width: 2,
-                        ),
-                        borderRadius: BorderRadius.circular(24),
-                      ),
-                      child: const Row(
-                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                        children: [
-                          Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              Text(
-                                "1 МЕСЯЦ",
-                                style: TextStyle(
-                                  fontWeight: FontWeight.bold,
-                                  fontSize: 18,
-                                  color: Colors.white,
-                                ),
-                              ),
-                              SizedBox(height: 4),
-                              Text(
-                                "Списывается ежемесячно",
-                                style: TextStyle(
-                                  color: secondaryText,
-                                  fontSize: 12,
-                                ),
-                              ),
-                            ],
-                          ),
-                          Text(
-                            "299 ₽",
-                            style: TextStyle(
-                              fontWeight: FontWeight.bold,
-                              fontSize: 20,
-                              color: Colors.white,
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
-                  ),
-                ],
+          )),
+          const SizedBox(height: 20),
+          SizedBox(
+            width: double.infinity,
+            height: 50,
+            child: ElevatedButton(
+              onPressed: onBuy,
+              style: ElevatedButton.styleFrom(
+                backgroundColor: isPopular ? const Color(0xFF9CD600) : Colors.white10,
+                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
               ),
+              child: Text('Выбрать', style: TextStyle(color: isPopular ? Colors.black : Colors.white, fontWeight: FontWeight.bold, fontSize: 16)),
             ),
-
-            const SizedBox(height: 32),
-
-            // 4. Кнопка CTA (Меняет текст)
-            Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 24.0),
-              child: ElevatedButton(
-                onPressed: () {
-                  // Логика покупки
-                  final planName = _selectedPlanIndex == 0
-                      ? "Годовая"
-                      : "Месячная";
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    SnackBar(content: Text('Выбрана подписка: $planName')),
-                  );
-                },
-                child: Text(
-                  _selectedPlanIndex == 0
-                      ? "ПОПРОБОВАТЬ ЗА 1 990 ₽"
-                      : "ПОПРОБОВАТЬ ЗА 299 ₽",
-                ),
-              ),
-            ),
-
-            // 5. Footer (Юридический текст)
-            Padding(
-              padding: const EdgeInsets.all(16.0),
-              child: Text(
-                "Подписка продлевается автоматически. Отмена в любой момент в настройках Apple ID / Google Play.",
-                textAlign: TextAlign.center,
-                style: TextStyle(
-                  color: Colors.white.withOpacity(0.4),
-                  fontSize: 10,
-                ),
-              ),
-            ),
-          ],
-        ),
+          )
+        ],
       ),
     );
   }
 
-  Widget _buildBenefitRow(String text) {
-    return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 8.0),
-      child: Row(
-        children: [
-          const Icon(Icons.check, color: Color(0xFFCCFF00), size: 20),
-          const SizedBox(width: 12),
-          Text(text, style: const TextStyle(fontSize: 16, color: Colors.white)),
-        ],
+  Future<void> _handleGoBack() async {
+    if (Navigator.canPop(context)) {
+      Navigator.pop(context); 
+    } else {
+      await FirebaseAuth.instance.signOut();
+      if (mounted) {
+        Navigator.of(context).pushNamedAndRemoveUntil('/', (route) => false);
+      }
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    if (_isLoading) return const Scaffold(backgroundColor: Colors.black, body: Center(child: CircularProgressIndicator(color: Color(0xFF9CD600))));
+
+    return BaseBackground(
+      child: Scaffold(
+        backgroundColor: Colors.transparent,
+        appBar: AppBar(
+          backgroundColor: Colors.transparent,
+          elevation: 0,
+          leading: IconButton(
+            icon: const Icon(Icons.arrow_back, color: Colors.white),
+            onPressed: _handleGoBack,
+          ),
+        ),
+        body: SingleChildScrollView( 
+          physics: const BouncingScrollPhysics(),
+          padding: const EdgeInsets.symmetric(horizontal: 20.0),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const Text("Открой все возможности\nTONNA", style: TextStyle(color: Colors.white, fontSize: 28, fontWeight: FontWeight.w900, height: 1.2)),
+              const SizedBox(height: 8),
+              const Text("ИИ-Ассистенты, умный трекинг и маркетплейс.", style: TextStyle(color: Colors.grey, fontSize: 16)),
+              const SizedBox(height: 32),
+
+              // ИСПРАВЛЕНИЕ ЗДЕСЬ: Добавлена проверка на 'user'
+              if (_userRole == 'athlete' || _userRole == 'user') ...[
+                _buildTariffCard(
+                  title: "Tonna AI Premium (Месяц)",
+                  price: "499 ₽",
+                  oldPrice: "",
+                  features: [
+                    "Безлимитный ИИ-Нутрициолог",
+                    "Генерация программ от ИИ-Тренера",
+                    "Доступ к Маркетплейсу тренеров",
+                    "Умная аналитика прогресса"
+                  ],
+                  onBuy: () {}, 
+                ),
+
+                _buildTariffCard(
+                  title: "Tonna AI Premium (Год)",
+                  price: "3 990 ₽",
+                  oldPrice: "5 988 ₽",
+                  isPopular: true,
+                  features: [
+                    "Все функции подписки на месяц",
+                    "Экономия 33% (2 месяца в подарок)",
+                    "Приоритетная поддержка"
+                  ],
+                  onBuy: () {}, 
+                ),
+              ],
+
+              if (_userRole == 'coach') ...[
+                _buildTariffCard(
+                  title: "Подписка Тренера",
+                  price: "1 990 ₽ / мес",
+                  oldPrice: "",
+                  features: [
+                    "Размещение в Маркетплейсе",
+                    "Прием заявок от клиентов",
+                    "Назначение тренировок клиентам",
+                    "Доступ к дневникам клиентов"
+                  ],
+                  onBuy: () {}, 
+                ),
+                
+                const SizedBox(height: 16),
+                Center(
+                  child: TextButton(
+                    onPressed: _handleGoBack,
+                    child: const Text(
+                      "Выйти и зарегистрироваться как Клиент", 
+                      style: TextStyle(color: Colors.grey, decoration: TextDecoration.underline)
+                    ),
+                  ),
+                ),
+              ],
+
+              const SizedBox(height: 40),
+            ],
+          ),
+        ),
       ),
     );
   }

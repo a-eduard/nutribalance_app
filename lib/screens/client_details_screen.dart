@@ -3,11 +3,12 @@ import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:easy_localization/easy_localization.dart';
-import 'package:fl_chart/fl_chart.dart';
 
 import 'p2p_chat_screen.dart';
 import 'assign_workout_screen.dart';
 import 'client_history_screen.dart'; 
+import 'coach_client_programs_screen.dart'; 
+import '../services/database_service.dart';
 
 class ClientDetailsScreen extends StatefulWidget {
   final String clientId;
@@ -26,17 +27,80 @@ class ClientDetailsScreen extends StatefulWidget {
 class _ClientDetailsScreenState extends State<ClientDetailsScreen> {
   final TextEditingController _notesController = TextEditingController();
   bool _isSavingNote = false;
+  
+  int _selectedRating = 0;
+  bool _hasRatedClient = false;
+  bool _isLoadingRating = true;
+  bool _isSubmittingRating = false;
 
   @override
   void initState() {
     super.initState();
     _loadPrivateNote();
+    _checkIfRated(); 
   }
 
   @override
   void dispose() {
     _notesController.dispose();
     super.dispose();
+  }
+
+  Future<void> _checkIfRated() async {
+    final coachId = FirebaseAuth.instance.currentUser?.uid;
+    if (coachId == null) return;
+
+    try {
+      final doc = await FirebaseFirestore.instance
+          .collection('coaches').doc(coachId)
+          .collection('rated_clients').doc(widget.clientId)
+          .get();
+          
+      if (doc.exists && mounted) {
+        setState(() {
+          _hasRatedClient = true;
+          _selectedRating = doc.data()?['rating'] ?? 5;
+        });
+      }
+    } catch (e) {
+      debugPrint("Ошибка проверки рейтинга: $e");
+    } finally {
+      if (mounted) setState(() => _isLoadingRating = false);
+    }
+  }
+
+  Future<void> _submitRating() async {
+    if (_selectedRating == 0) return;
+    final coachId = FirebaseAuth.instance.currentUser?.uid;
+    if (coachId == null) return;
+
+    setState(() => _isSubmittingRating = true);
+    try {
+      await DatabaseService().rateAthleteHidden(widget.clientId, _selectedRating, "Оценка дисциплины");
+      
+      await FirebaseFirestore.instance
+          .collection('coaches').doc(coachId)
+          .collection('rated_clients').doc(widget.clientId)
+          .set({
+            'rated': true,
+            'rating': _selectedRating,
+            'timestamp': FieldValue.serverTimestamp(),
+          });
+          
+      if (mounted) {
+        setState(() => _hasRatedClient = true);
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text("Оценка успешно сохранена!", style: TextStyle(color: Colors.black, fontWeight: FontWeight.bold)), 
+            backgroundColor: Color(0xFF9CD600)
+          )
+        );
+      }
+    } catch (e) {
+      debugPrint("Ошибка сохранения рейтинга: $e");
+    } finally {
+      if (mounted) setState(() => _isSubmittingRating = false);
+    }
   }
 
   Future<void> _loadPrivateNote() async {
@@ -54,9 +118,7 @@ class _ClientDetailsScreenState extends State<ClientDetailsScreen> {
           _notesController.text = doc.data()?['note'] ?? '';
         });
       }
-    } catch (e) {
-      debugPrint("Load note error: $e");
-    }
+    } catch (e) {}
   }
 
   Future<void> _savePrivateNote() async {
@@ -75,7 +137,6 @@ class _ClientDetailsScreenState extends State<ClientDetailsScreen> {
       
       if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('data_saved'.tr()), backgroundColor: const Color(0xFF9CD600)));
     } catch (e) {
-      debugPrint("Save note error: $e");
     } finally {
       if (mounted) setState(() => _isSavingNote = false);
     }
@@ -99,7 +160,7 @@ class _ClientDetailsScreenState extends State<ClientDetailsScreen> {
                   Navigator.pop(context);
                   ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('client_disconnected'.tr()), backgroundColor: const Color(0xFF9CD600)));
                 }
-              } catch (e) { debugPrint(e.toString()); }
+              } catch (e) {}
             },
             child: Text('yes_remove'.tr(), style: const TextStyle(color: Colors.redAccent, fontWeight: FontWeight.bold)),
           ),
@@ -149,11 +210,8 @@ class _ClientDetailsScreenState extends State<ClientDetailsScreen> {
 
                 ImageProvider? imageProvider;
                 if (photoUrl.isNotEmpty) {
-                  if (photoUrl.startsWith('http')) {
-                    imageProvider = NetworkImage(photoUrl);
-                  } else {
-                    try { imageProvider = MemoryImage(base64Decode(photoUrl)); } catch (_) {}
-                  }
+                  if (photoUrl.startsWith('http')) imageProvider = NetworkImage(photoUrl);
+                  else { try { imageProvider = MemoryImage(base64Decode(photoUrl)); } catch (_) {} }
                 }
 
                 return Column(
@@ -164,7 +222,7 @@ class _ClientDetailsScreenState extends State<ClientDetailsScreen> {
                         decoration: BoxDecoration(shape: BoxShape.circle, border: Border.all(color: const Color(0xFF9CD600), width: 2)),
                         child: ClipOval(
                           child: imageProvider != null
-                              ? Image(image: imageProvider, fit: BoxFit.cover, errorBuilder: (c, e, s) => const Icon(Icons.person, size: 50, color: Colors.grey))
+                              ? Image(image: imageProvider, width: 100, height: 100, fit: BoxFit.cover, errorBuilder: (c, e, s) => const Icon(Icons.person, size: 50, color: Colors.grey))
                               : const Icon(Icons.person, size: 50, color: Colors.grey),
                         ),
                       ),
@@ -172,13 +230,14 @@ class _ClientDetailsScreenState extends State<ClientDetailsScreen> {
                     const SizedBox(height: 16),
                     Center(child: Text(widget.clientName, style: const TextStyle(color: Colors.white, fontSize: 24, fontWeight: FontWeight.bold))),
                     const SizedBox(height: 16),
-                    Row(
-                      mainAxisAlignment: MainAxisAlignment.center,
+                    
+                    Wrap(
+                      alignment: WrapAlignment.center,
+                      spacing: 8.0, 
+                      runSpacing: 8.0, 
                       children: [
                         _buildInfoChip('age'.tr(), age),
-                        const SizedBox(width: 8),
                         _buildInfoChip('height_cm'.tr(), height),
-                        const SizedBox(width: 8),
                         _buildInfoChip('weight_kg'.tr(), weight),
                       ],
                     ),
@@ -224,6 +283,16 @@ class _ClientDetailsScreenState extends State<ClientDetailsScreen> {
             ListTile(
               shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12), side: const BorderSide(color: Colors.white12)),
               tileColor: const Color(0xFF1C1C1E),
+              leading: const Icon(Icons.list_alt, color: Colors.white),
+              title: const Text('Отправленные программы', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
+              trailing: const Icon(Icons.arrow_forward_ios, color: Colors.grey, size: 16),
+              onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => CoachClientProgramsScreen(clientId: widget.clientId, clientName: widget.clientName))),
+            ),
+            const SizedBox(height: 12),
+
+            ListTile(
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12), side: const BorderSide(color: Colors.white12)),
+              tileColor: const Color(0xFF1C1C1E),
               leading: const Icon(Icons.history, color: Colors.white),
               title: Text('history_workouts_btn'.tr(), style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
               trailing: const Icon(Icons.arrow_forward_ios, color: Colors.grey, size: 16),
@@ -256,6 +325,7 @@ class _ClientDetailsScreenState extends State<ClientDetailsScreen> {
             ),
             const SizedBox(height: 24),
 
+            // ЗАДАЧА 2: Компактный текстовый виджет веса вместо громоздкого графика
             Text('weight_progress'.tr(), style: const TextStyle(color: Color(0xFF9CD600), fontSize: 12, fontWeight: FontWeight.bold, letterSpacing: 1.2)),
             const SizedBox(height: 16),
             StreamBuilder<QuerySnapshot>(
@@ -265,59 +335,135 @@ class _ClientDetailsScreenState extends State<ClientDetailsScreen> {
                   .orderBy('date', descending: false)
                   .snapshots(),
               builder: (context, snapshot) {
-                if (snapshot.connectionState == ConnectionState.waiting) {
-                  return const Center(child: CircularProgressIndicator(color: Color(0xFF9CD600)));
-                }
-
-                if (!snapshot.hasData || snapshot.data!.docs.length < 2) {
+                if (snapshot.connectionState == ConnectionState.waiting) return const Center(child: CircularProgressIndicator(color: Color(0xFF9CD600)));
+                if (!snapshot.hasData || snapshot.data!.docs.isEmpty) {
                   return Container(
-                    width: double.infinity,
-                    padding: const EdgeInsets.all(20),
-                    decoration: BoxDecoration(color: const Color(0xFF1C1C1E), borderRadius: BorderRadius.circular(16)),
-                    child: Center(
-                      child: Text('chart_no_data'.tr(), textAlign: TextAlign.center, style: const TextStyle(color: Colors.grey)),
-                    ),
+                    width: double.infinity, padding: const EdgeInsets.all(20), 
+                    decoration: BoxDecoration(color: const Color(0xFF1C1C1E), borderRadius: BorderRadius.circular(16)), 
+                    child: Center(child: Text('chart_no_data'.tr(), textAlign: TextAlign.center, style: const TextStyle(color: Colors.grey)))
                   );
                 }
 
                 final docs = snapshot.data!.docs;
+                double initialWeight = (docs.first.data() as Map<String, dynamic>)['weight']?.toDouble() ?? 0.0;
+                double currentWeight = (docs.last.data() as Map<String, dynamic>)['weight']?.toDouble() ?? 0.0;
+                double diff = currentWeight - initialWeight;
+                
+                String diffStr = diff > 0 ? '+${diff.toStringAsFixed(1)}' : diff.toStringAsFixed(1);
+                Color diffColor = diff > 0 ? Colors.redAccent : (diff < 0 ? const Color(0xFF9CD600) : Colors.grey);
 
                 return Container(
-                  height: 220,
-                  padding: const EdgeInsets.only(top: 24, bottom: 10, left: 10, right: 24),
-                  decoration: BoxDecoration(color: const Color(0xFF1C1C1E), borderRadius: BorderRadius.circular(16)),
-                  child: LineChart(
-                    LineChartData(
-                      gridData: const FlGridData(show: false),
-                      titlesData: const FlTitlesData(show: false), 
-                      borderData: FlBorderData(show: false),
-                      lineBarsData: [
-                        LineChartBarData(
-                          spots: docs.asMap().entries.map((e) {
-                            final data = e.value.data() as Map<String, dynamic>;
-                            double weight = (data['weight'] ?? 0.0).toDouble();
-                            return FlSpot(e.key.toDouble(), weight);
-                          }).toList(),
-                          isCurved: true,
-                          color: const Color(0xFF9CD600), 
-                          barWidth: 3,
-                          isStrokeCapRound: true,
-                          dotData: const FlDotData(show: true),
-                          belowBarData: BarAreaData(show: true, color: const Color(0xFF9CD600).withOpacity(0.1)),
+                  padding: const EdgeInsets.symmetric(vertical: 16, horizontal: 12),
+                  decoration: BoxDecoration(
+                    color: const Color(0xFF1C1C1E), 
+                    borderRadius: BorderRadius.circular(16), 
+                    border: Border.all(color: Colors.white.withOpacity(0.05))
+                  ),
+                  child: Row(
+                    children: [
+                      Expanded(
+                        child: Column(
+                          children: [
+                            const Text("Начальный", style: TextStyle(color: Colors.grey, fontSize: 11)),
+                            const SizedBox(height: 4),
+                            Text("${initialWeight.toStringAsFixed(1)} кг", style: const TextStyle(color: Colors.white, fontSize: 16, fontWeight: FontWeight.bold)),
+                          ],
                         ),
-                      ],
-                    ),
+                      ),
+                      Container(width: 1, height: 30, color: Colors.white10),
+                      Expanded(
+                        child: Column(
+                          children: [
+                            const Text("Текущий", style: TextStyle(color: Colors.grey, fontSize: 11)),
+                            const SizedBox(height: 4),
+                            Text("${currentWeight.toStringAsFixed(1)} кг", style: const TextStyle(color: Colors.white, fontSize: 16, fontWeight: FontWeight.bold)),
+                          ],
+                        ),
+                      ),
+                      Container(width: 1, height: 30, color: Colors.white10),
+                      Expanded(
+                        child: Column(
+                          children: [
+                            const Text("Изменение", style: TextStyle(color: Colors.grey, fontSize: 11)),
+                            const SizedBox(height: 4),
+                            Text("$diffStr кг", style: TextStyle(color: diffColor, fontSize: 16, fontWeight: FontWeight.bold)),
+                          ],
+                        ),
+                      ),
+                    ],
                   ),
                 );
               },
             ),
+            const SizedBox(height: 24),
             
+            const Divider(color: Colors.white10, height: 64),
+            const Text('ОЦЕНИ КЛИЕНТА', style: TextStyle(color: Colors.grey, fontSize: 12, fontWeight: FontWeight.bold, letterSpacing: 1.2)),
+            const SizedBox(height: 16),
+            Container(
+              padding: const EdgeInsets.all(16),
+              decoration: BoxDecoration(
+                color: const Color(0xFF1C1C1E), 
+                borderRadius: BorderRadius.circular(16), 
+                border: Border.all(color: Colors.white.withOpacity(0.05))
+              ),
+              child: _isLoadingRating 
+                ? const Center(child: CircularProgressIndicator(color: Color(0xFF9CD600)))
+                : Column(
+                    children: [
+                      Text(
+                        _hasRatedClient ? "Оценка выставлена и сохранена" : "Оценка видна только другим тренерам", 
+                        style: TextStyle(color: _hasRatedClient ? const Color(0xFF9CD600) : Colors.grey, fontSize: 11)
+                      ),
+                      const SizedBox(height: 12),
+                      Row(
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        children: List.generate(5, (index) => IconButton(
+                          icon: Icon(
+                            index < _selectedRating ? Icons.star_rounded : Icons.star_outline_rounded, 
+                            color: index < _selectedRating ? const Color(0xFF9CD600).withOpacity(_hasRatedClient ? 1.0 : 0.6) : Colors.white24, 
+                            size: 32
+                          ),
+                          onPressed: _hasRatedClient ? null : () {
+                            setState(() => _selectedRating = index + 1);
+                          },
+                        )),
+                      ),
+                      if (!_hasRatedClient) ...[
+                        const SizedBox(height: 16),
+                        SizedBox(
+                          width: double.infinity,
+                          child: ElevatedButton(
+                            onPressed: (_selectedRating > 0 && !_isSubmittingRating) ? _submitRating : null,
+                            style: ElevatedButton.styleFrom(
+                              backgroundColor: const Color(0xFF9CD600),
+                              disabledBackgroundColor: Colors.white10,
+                              foregroundColor: Colors.black,
+                              padding: const EdgeInsets.symmetric(vertical: 14),
+                              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12))
+                            ),
+                            child: _isSubmittingRating 
+                                ? const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(color: Colors.black, strokeWidth: 2))
+                                : const Text('СОХРАНИТЬ ОЦЕНКУ', style: TextStyle(fontWeight: FontWeight.bold)),
+                          ),
+                        ),
+                      ]
+                    ],
+                  ),
+            ),
             const SizedBox(height: 40),
+
             Center(
-              child: TextButton.icon(
+              child: OutlinedButton.icon(
                 onPressed: () => _showEndCoachingDialog(context),
                 icon: const Icon(Icons.person_remove, color: Colors.redAccent),
                 label: Text('end_coaching'.tr(), style: const TextStyle(color: Colors.redAccent, fontWeight: FontWeight.bold)),
+                style: OutlinedButton.styleFrom(
+                  padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
+                  side: BorderSide(color: Colors.redAccent.withOpacity(0.3), width: 1.5),
+                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                  backgroundColor: Colors.redAccent.withOpacity(0.05),
+                ),
               ),
             ),
             const SizedBox(height: 20),

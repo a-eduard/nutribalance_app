@@ -6,7 +6,12 @@ class AIAssistantsCard extends StatelessWidget {
   final bool isPro;
   const AIAssistantsCard({super.key, required this.isPro});
 
-  Widget _buildActionCard(BuildContext context, {required String title, required String imagePath, required VoidCallback onTap}) {
+  Widget _buildActionCard(
+    BuildContext context, {
+    required String title,
+    required String imagePath,
+    required VoidCallback onTap,
+  }) {
     return GestureDetector(
       onTap: onTap,
       child: Container(
@@ -15,7 +20,10 @@ class AIAssistantsCard extends StatelessWidget {
           color: const Color(0xFF1C1C1E).withValues(alpha: 0.6),
           borderRadius: BorderRadius.circular(16),
           // ДИЗАЙН СОХРАНЕН: Единый лаймовый стиль для всех карточек ИИ
-          border: Border.all(color: const Color(0xFF9CD600).withValues(alpha: 0.3), width: 1.5),
+          border: Border.all(
+            color: const Color(0xFFB76E79).withValues(alpha: 0.3),
+            width: 1.5,
+          ),
         ),
         child: Row(
           mainAxisAlignment: MainAxisAlignment.center,
@@ -30,7 +38,11 @@ class AIAssistantsCard extends StatelessWidget {
                   title,
                   maxLines: 1,
                   // ДИЗАЙН СОХРАНЕН: Текст белый
-                  style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 16), 
+                  style: const TextStyle(
+                    color: Colors.white,
+                    fontWeight: FontWeight.bold,
+                    fontSize: 16,
+                  ),
                 ),
               ),
             ),
@@ -46,7 +58,15 @@ class AIAssistantsCard extends StatelessWidget {
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         // ДИЗАЙН СОХРАНЕН: Заголовок лаймовый
-        const Text('ИИ-АССИСТЕНТЫ', style: TextStyle(color: Color(0xFF9CD600), fontWeight: FontWeight.bold, fontSize: 12, letterSpacing: 1.0)),
+        const Text(
+          'ИИ-АССИСТЕНТЫ',
+          style: TextStyle(
+            color: Color(0xFFB76E79),
+            fontWeight: FontWeight.bold,
+            fontSize: 12,
+            letterSpacing: 1.0,
+          ),
+        ),
         const SizedBox(height: 12),
         Row(
           children: [
@@ -58,9 +78,15 @@ class AIAssistantsCard extends StatelessWidget {
                 onTap: () {
                   if (isPro) {
                     // ВОЗВРАЩЕНО: Навигация к ИИ-нутрициологу
-                    Navigator.push(context, MaterialPageRoute(builder: (_) => const AIChatScreen(botType: 'dietitian')));
+                    Navigator.push(
+                      context,
+                      MaterialPageRoute(
+                        builder: (_) =>
+                            const AIChatScreen(botType: 'dietitian'),
+                      ),
+                    );
                   } else {
-                    Navigator.pushNamed(context, '/paywall'); 
+                    Navigator.pushNamed(context, '/paywall');
                   }
                 },
               ),
@@ -74,9 +100,14 @@ class AIAssistantsCard extends StatelessWidget {
                 onTap: () {
                   if (isPro) {
                     // ВОЗВРАЩЕНО: Навигация к ИИ-тренеру
-                    Navigator.push(context, MaterialPageRoute(builder: (_) => const AIChatScreen(botType: 'trainer')));
+                    Navigator.push(
+                      context,
+                      MaterialPageRoute(
+                        builder: (_) => const AIChatScreen(botType: 'trainer'),
+                      ),
+                    );
                   } else {
-                    Navigator.pushNamed(context, '/paywall'); 
+                    Navigator.pushNamed(context, '/paywall');
                   }
                 },
               ),

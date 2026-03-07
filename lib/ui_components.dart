@@ -4,7 +4,7 @@ import 'package:flutter/material.dart';
 class GlassCard extends StatelessWidget {
   final Widget child;
   final VoidCallback? onTap;
-  
+
   const GlassCard({super.key, required this.child, this.onTap});
 
   @override
@@ -14,7 +14,9 @@ class GlassCard extends StatelessWidget {
       decoration: BoxDecoration(
         color: const Color(0xFF1C1C1E), // Глубокий серый
         borderRadius: BorderRadius.circular(24), // Сильное скругление
-        border: Border.all(color: Colors.white.withOpacity(0.08)), // Тонкая рамка
+        border: Border.all(
+          color: Colors.white.withOpacity(0.08),
+        ), // Тонкая рамка
         boxShadow: [
           BoxShadow(
             color: const Color(0xFF000000).withOpacity(0.5),
@@ -28,12 +30,9 @@ class GlassCard extends StatelessWidget {
         child: InkWell(
           borderRadius: BorderRadius.circular(24),
           onTap: onTap,
-          splashColor: const Color(0xFFCCFF00).withOpacity(0.1),
-          highlightColor: const Color(0xFFCCFF00).withOpacity(0.05),
-          child: Padding(
-            padding: const EdgeInsets.all(20.0),
-            child: child,
-          ),
+          splashColor: const Color(0xFFB76E79).withOpacity(0.1),
+          highlightColor: const Color(0xFFB76E79).withOpacity(0.05),
+          child: Padding(padding: const EdgeInsets.all(20.0), child: child),
         ),
       ),
     );
@@ -46,7 +45,12 @@ class NeonButton extends StatelessWidget {
   final VoidCallback onTap;
   final IconData? icon; // Добавил опциональную иконку для гибкости
 
-  const NeonButton({super.key, required this.text, required this.onTap, this.icon});
+  const NeonButton({
+    super.key,
+    required this.text,
+    required this.onTap,
+    this.icon,
+  });
 
   @override
   Widget build(BuildContext context) {
@@ -55,14 +59,14 @@ class NeonButton extends StatelessWidget {
       height: 56,
       decoration: BoxDecoration(
         gradient: const LinearGradient(
-          colors: [Color(0xFFCCFF00), Color(0xFFB2E600)], // Лаймовый градиент
+          colors: [Color(0xFFB76E79), Color(0xFFB2E600)], // Лаймовый градиент
           begin: Alignment.topLeft,
           end: Alignment.bottomRight,
         ),
         borderRadius: BorderRadius.circular(16),
         boxShadow: [
           BoxShadow(
-            color: const Color(0xFFCCFF00).withOpacity(0.4), // Свечение
+            color: const Color(0xFFB76E79).withOpacity(0.4), // Свечение
             blurRadius: 16,
             offset: const Offset(0, 4),
           ),
@@ -73,12 +77,17 @@ class NeonButton extends StatelessWidget {
         style: ElevatedButton.styleFrom(
           backgroundColor: Colors.transparent,
           shadowColor: Colors.transparent,
-          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(16),
+          ),
         ),
         child: Row(
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
-            if (icon != null) ...[Icon(icon, color: Colors.black), const SizedBox(width: 8)],
+            if (icon != null) ...[
+              Icon(icon, color: Colors.black),
+              const SizedBox(width: 8),
+            ],
             Text(
               text.toUpperCase(),
               style: const TextStyle(
@@ -101,7 +110,12 @@ class ModernInput extends StatelessWidget {
   final String hint;
   final Function(String)? onChanged;
 
-  const ModernInput({super.key, required this.controller, required this.hint, this.onChanged});
+  const ModernInput({
+    super.key,
+    required this.controller,
+    required this.hint,
+    this.onChanged,
+  });
 
   @override
   Widget build(BuildContext context) {
@@ -117,8 +131,8 @@ class ModernInput extends StatelessWidget {
         textAlign: TextAlign.center,
         keyboardType: TextInputType.number,
         style: const TextStyle(
-          color: Colors.white, 
-          fontSize: 20, 
+          color: Colors.white,
+          fontSize: 20,
           fontWeight: FontWeight.bold,
           // fontFamily: 'Manrope', // Убрал, чтобы не крашилось если шрифт не подключен
         ),

@@ -3,35 +3,37 @@
     "platforms": {
       "android": {
         "default": {
-          "projectId": "gym-tracker-9925c",
-          "appId": "1:830594518730:android:83575990bf418cbd3e2e33",
+          "projectId": "nutribalance-app-11a09",
+          "appId": "1:942600708331:android:ba4a1ccb69a4024495deae",
           "fileOutput": "android/app/google-services.json"
         }
       },
       "dart": {
         "lib/firebase_options.dart": {
-          "projectId": "gym-tracker-9925c",
+          "projectId": "nutribalance-app-11a09",
           "configurations": {
-            "android": "1:830594518730:android:83575990bf418cbd3e2e33",
-            "ios": "1:830594518730:ios:11adc1d95be376203e2e33",
-            "macos": "1:830594518730:ios:11adc1d95be376203e2e33",
-            "web": "1:830594518730:web:b1e384f2e830b4323e2e33",
-            "windows": "1:830594518730:web:ef72dfe538085da73e2e33"
+            "android": "1:942600708331:android:ba4a1ccb69a4024495deae",
+            "ios": "1:942600708331:ios:557d359f99353f3595deae",
+            "macos": "1:942600708331:ios:557d359f99353f3595deae",
+            "web": "1:942600708331:web:8fc9bc6207c454ee95deae",
+            "windows": "1:942600708331:web:829136da0e71bb6f95deae"
           }
         }
       }
     }
   },
   "functions": [
-  {
-    "source": "functions",
-    "codebase": "default",
-    "ignore": [
-      "node_modules",
-      ".git",
-      "firebase-debug.log",
-      "firebase-debug.*.log"
-    ]
-  }
- ]
+    {
+      "source": "functions",
+      "codebase": "default",
+      "disallowLegacyRuntimeConfig": true,
+      "ignore": [
+        "node_modules",
+        ".git",
+        "firebase-debug.log",
+        "firebase-debug.*.log",
+        "*.local"
+      ]
+    }
+  ]
 }

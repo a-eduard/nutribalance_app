@@ -1,45 +1,37 @@
 {
   "project_info": {
-    "project_number": "830594518730",
-    "project_id": "gym-tracker-9925c",
-    "storage_bucket": "gym-tracker-9925c.firebasestorage.app"
+    "project_number": "942600708331",
+    "project_id": "nutribalance-app-11a09",
+    "storage_bucket": "nutribalance-app-11a09.firebasestorage.app"
   },
   "client": [
     {
       "client_info": {
-        "mobilesdk_app_id": "1:830594518730:android:83575990bf418cbd3e2e33",
+        "mobilesdk_app_id": "1:942600708331:android:ba4a1ccb69a4024495deae",
         "android_client_info": {
           "package_name": "com.example.flutter_application_1"
         }
       },
       "oauth_client": [
         {
-          "client_id": "830594518730-0eact6eg9ate86qiacci3re4t854l3af.apps.googleusercontent.com",
-          "client_type": 1,
-          "android_info": {
-            "package_name": "com.example.flutter_application_1",
-            "certificate_hash": "69ac615745096cbbfa903bff66aef7450b0da9b4"
-          }
-        },
-        {
-          "client_id": "830594518730-aigrmkcgpdnvp3garukt03aruijjkuh9.apps.googleusercontent.com",
+          "client_id": "942600708331-8ai58m8mpkqbpdlaj9b0ton40d4nt266.apps.googleusercontent.com",
           "client_type": 3
         }
       ],
       "api_key": [
         {
-          "current_key": "AIzaSyDOEfzqyqAsCCIpxowhi0bJJcsAmp1_oCA"
+          "current_key": "AIzaSyA_D0ULHVcDoNwbUD7DQW3gV66oXS-wo0I"
         }
       ],
       "services": {
         "appinvite_service": {
           "other_platform_oauth_client": [
             {
-              "client_id": "830594518730-aigrmkcgpdnvp3garukt03aruijjkuh9.apps.googleusercontent.com",
+              "client_id": "942600708331-8ai58m8mpkqbpdlaj9b0ton40d4nt266.apps.googleusercontent.com",
               "client_type": 3
             },
             {
-              "client_id": "830594518730-vnmb3qbfnhk0vbeq40fuq93bu9hqi4ss.apps.googleusercontent.com",
+              "client_id": "942600708331-tepi705bcitaqr956p3k1kjp4pj22poa.apps.googleusercontent.com",
               "client_type": 2,
               "ios_info": {
                 "bundle_id": "com.example.flutterApplication1"

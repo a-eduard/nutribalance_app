@@ -4,11 +4,14 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart'; 
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:intl/intl.dart'; 
 import 'package:image_picker/image_picker.dart';
 import 'package:cached_network_image/cached_network_image.dart';
 
 import '../services/ai_service.dart';
 import '../services/database_service.dart';
+import '../widgets/shopping_list_widget.dart';
+import '../widgets/ai_chat_parser.dart';
 
 class AIChatScreen extends StatefulWidget {
   final String botType;
@@ -25,18 +28,9 @@ class _AIChatScreenState extends State<AIChatScreen> {
   String _fullUserContext = "";
   File? _selectedImage; 
 
-  Color get themeColor {
-    if (widget.botType == 'trainer') return const Color(0xFF9CD600);
-    if (widget.botType == 'coach_mentor') return const Color(0xFF8B5CF6);
-    return const Color(0xFF00E5FF);
-  }
-  
-  String get botTitle {
-    if (widget.botType == 'trainer') return 'ИИ-Тренер';
-    if (widget.botType == 'coach_mentor') return 'ИИ-Ментор PRO';
-    return 'ИИ-Нутрициолог';
-  }
-
+  Color get themeColor => const Color(0xFFB76E79); // Единый цвет Rose Gold
+  String get botTitle => 'Eva — твой нутрициолог';
+ 
   @override
   void initState() {
     super.initState();
@@ -62,14 +56,19 @@ class _AIChatScreenState extends State<AIChatScreen> {
         });
       }
       
+      // ШАГ 3: Защита от дублей. Сообщение отправляется только если чат абсолютно пуст (новый юзер)
       final historyCheck = await FirebaseFirestore.instance.collection('users').doc(uid).collection('ai_chats_${widget.botType}').limit(1).get();
+      
       if (historyCheck.docs.isEmpty) {
-        String welcome = "Здравствуйте! Я ваш ИИ-Диетолог. 🍏 Пришли мне фото еды, и я посчитаю калории!";
+        // ШАГ 1: Новое продающее стартовое сообщение
+        String welcome = "Привет! Я Ева — твой личный ИИ-помощник, нутрициолог и подруга. ✨ Я здесь не для того, чтобы сажать тебя на жесткие диеты, а чтобы помочь обрести гармонию с телом. Хочешь, я расскажу, что я умею и как могу сделать твою жизнь легче?";
+        
         if (widget.botType == 'trainer') {
           welcome = "Привет! Я твой ИИ-Тренер. 💪 Какая у тебя цель?";
         } else if (widget.botType == 'coach_mentor') {
           welcome = "Приветствую, коллега! 🧠 Я ИИ-Ментор по биомеханике, медицине и тренировкам. Какой сложный случай клиента разберем сегодня?";
         }
+        
         await DatabaseService().saveBotChatMessage(widget.botType, welcome, 'ai');
       }
     } catch (e) {
@@ -118,22 +117,41 @@ class _AIChatScreenState extends State<AIChatScreen> {
     );
   }
 
+  void _triggerSendMessage(String text) {
+    _controller.text = text;
+    _sendMessage();
+  }
+
   Future<void> _sendMessage() async {
     final text = _controller.text.trim();
     if (text.isEmpty && _selectedImage == null) return;
+    
     final File? imageToSend = _selectedImage;
     setState(() { _controller.clear(); _selectedImage = null; _isTyping = true; });
 
     try {
       String? imageUrl;
-      if (imageToSend != null) imageUrl = await DatabaseService().uploadChatImage(imageToSend, 'ai_chat_${widget.botType}');
+      String? localBase64; 
+
+      if (imageToSend != null) {
+        imageUrl = await DatabaseService().uploadChatImage(imageToSend, 'ai_chat_${widget.botType}');
+        localBase64 = base64Encode(await imageToSend.readAsBytes());
+      }
+      
       await DatabaseService().saveBotChatMessage(widget.botType, text, 'user', imageUrl: imageUrl);
+      
       String aiResponse = "";
-      if (imageUrl != null && widget.botType == 'dietitian') aiResponse = await AIService().sendMultimodalMessage(userMessage: text, imageUrl: imageUrl, userContext: _fullUserContext);
-      else {
+      if (localBase64 != null && widget.botType == 'dietitian') {
+        aiResponse = await AIService().sendMultimodalMessage(
+          userMessage: text, 
+          base64Image: localBase64, 
+          userContext: _fullUserContext
+        );
+      } else {
         final history = await DatabaseService().getChatHistoryForAI(widget.botType);
         aiResponse = await AIService().sendChatMessage(botType: widget.botType, userMessage: text, userContext: _fullUserContext, chatHistory: history);
       }
+      
       await DatabaseService().saveBotChatMessage(widget.botType, aiResponse, 'ai');
     } catch (e) {
       if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text("Ошибка ИИ: $e")));
@@ -144,19 +162,50 @@ class _AIChatScreenState extends State<AIChatScreen> {
 
   Map<String, dynamic>? _tryParseJson(String text) {
     try {
-      final exp = RegExp(r"```json\s*([\s\S]*?)\s*```");
+      String jsonString = text;
+      
+      // 1. Извлекаем сырой текст
+      final exp = RegExp(r"```(?:json)?\s*([\s\S]*?)\s*```", caseSensitive: false);
       final match = exp.firstMatch(text);
       if (match != null) {
-        final jsonStr = match.group(1);
-        if (jsonStr != null) return jsonDecode(jsonStr);
-      } else return jsonDecode(text);
-    } catch (_) {}
-    return null;
+        jsonString = match.group(1)!;
+      } else {
+        final startIdx = text.indexOf('{');
+        final endIdx = text.lastIndexOf('}');
+        if (startIdx != -1 && endIdx != -1 && endIdx > startIdx) {
+          jsonString = text.substring(startIdx, endIdx + 1);
+        } else {
+          return null; 
+        }
+      }
+
+      // 2. ХИРУРГИЧЕСКАЯ ОЧИСТКА ГАЛЛЮЦИНАЦИЙ ИИ
+      // Убираем висячие запятые перед закрывающими скобками (частая ошибка Gemini)
+      jsonString = jsonString.replaceAll(RegExp(r',\s*\}'), '}');
+      jsonString = jsonString.replaceAll(RegExp(r',\s*\]'), ']');
+      jsonString = jsonString.trim();
+
+      return jsonDecode(jsonString);
+    } catch (e) {
+      debugPrint("Parse Error: $e");
+      return null;
+    }
   }
 
   String _cleanText(String text, Map<String, dynamic>? jsonData) {
-    if (jsonData != null && jsonData.containsKey('coach_message')) return jsonData['coach_message'].toString();
-    return text.replaceAll(RegExp(r"```json\s*([\s\S]*?)\s*```"), "").trim();
+    if (jsonData == null) return text.trim();
+
+    String stripped = text.replaceAll(RegExp(r"```(?:json)?\s*([\s\S]*?)\s*```", caseSensitive: false), '').trim();
+    
+    if (stripped.startsWith('{') && stripped.endsWith('}')) {
+      stripped = ''; 
+    }
+
+    if (stripped.isEmpty && jsonData.containsKey('coach_message') && jsonData['coach_message'].toString().isNotEmpty) {
+      return jsonData['coach_message'].toString().trim();
+    }
+    
+    return stripped;
   }
 
   @override
@@ -196,51 +245,95 @@ class _AIChatScreenState extends State<AIChatScreen> {
                       final data = doc.data() as Map<String, dynamic>;
                       final isUser = data['role'] == 'user';
                       final rawText = data['text'] ?? '';
+                      
+                      // QA FIX: Читаем состояние из БД (State Management)
+                      final bool isActionCompleted = data['isActionCompleted'] == true;
+
+                      final cleanRawText = rawText.replaceAll(RegExp(r'<thinking>[\s\S]*?<\/thinking>'), '').trim();
+
                       final imageUrl = data['imageUrl'] as String?;
-                      final jsonData = isUser ? null : _tryParseJson(rawText);
-                      final displayText = isUser ? rawText : _cleanText(rawText, jsonData);
+                      final jsonData = isUser ? null : _tryParseJson(cleanRawText);
+                      final displayText = isUser ? rawText : _cleanText(cleanRawText, jsonData);
+
+                      final Timestamp? ts = data['timestamp'] as Timestamp?;
+                      final String timeStr = ts != null ? DateFormat('HH:mm').format(ts.toDate()) : '';
+                      final bool isEdited = data['isEdited'] == true;
 
                       return Column(
                         crossAxisAlignment: isUser ? CrossAxisAlignment.end : CrossAxisAlignment.start,
                         children: [
-                          Align(
-                            alignment: isUser ? Alignment.centerRight : Alignment.centerLeft,
-                            child: GestureDetector(
-                              onLongPress: () => _showLongPressMenu(doc.id, displayText, isUser),
-                              child: Container(
-                                margin: const EdgeInsets.symmetric(vertical: 6), 
-                                padding: const EdgeInsets.all(14), 
-                                constraints: BoxConstraints(maxWidth: MediaQuery.of(context).size.width * 0.85),
-                                decoration: BoxDecoration(
-                                  color: isUser ? themeColor.withValues(alpha: 0.1) : const Color(0xFF1E1E1E).withValues(alpha: 0.9),
-                                  borderRadius: BorderRadius.circular(16),
-                                  border: Border.all(
-                                    color: isUser ? themeColor.withValues(alpha: 0.3) : themeColor.withValues(alpha: 0.1),
-                                    width: 1,
+                          if (displayText.isNotEmpty || imageUrl != null)
+                            Align(
+                              alignment: isUser ? Alignment.centerRight : Alignment.centerLeft,
+                              child: GestureDetector(
+                                onLongPress: () => _showLongPressMenu(doc.id, displayText, isUser),
+                                child: Container(
+                                  margin: const EdgeInsets.symmetric(vertical: 6), 
+                                  padding: const EdgeInsets.all(14), 
+                                  constraints: BoxConstraints(maxWidth: MediaQuery.of(context).size.width * 0.85),
+                                  decoration: BoxDecoration(
+                                    color: isUser ? themeColor.withValues(alpha: 0.1) : const Color(0xFF1E1E1E).withValues(alpha: 0.9),
+                                    borderRadius: BorderRadius.circular(16),
+                                    border: Border.all(
+                                      color: isUser ? themeColor.withValues(alpha: 0.3) : themeColor.withValues(alpha: 0.1),
+                                      width: 1,
+                                    ),
                                   ),
-                                ),
-                                child: Column(
-                                  crossAxisAlignment: isUser ? CrossAxisAlignment.end : CrossAxisAlignment.start,
-                                  children: [
-                                    if (imageUrl != null) 
-                                      Padding(
-                                        padding: const EdgeInsets.only(bottom: 8.0), 
-                                        child: ClipRRect(
-                                          borderRadius: BorderRadius.circular(12), 
-                                          child: CachedNetworkImage(imageUrl: imageUrl, width: 200, fit: BoxFit.cover, placeholder: (c, u) => const CircularProgressIndicator())
-                                        )
-                                      ),
-                                    if (displayText.isNotEmpty) 
-                                      Text(
-                                        displayText, 
-                                        style: const TextStyle(color: Colors.white, fontSize: 15, height: 1.4)
-                                      ),
-                                  ],
+                                  child: Column(
+                                    crossAxisAlignment: isUser ? CrossAxisAlignment.end : CrossAxisAlignment.start,
+                                    children: [
+                                      if (imageUrl != null) 
+                                        Padding(
+                                          padding: EdgeInsets.only(bottom: displayText.isNotEmpty ? 8.0 : 0), 
+                                          child: ClipRRect(
+                                            borderRadius: BorderRadius.circular(12), 
+                                            child: CachedNetworkImage(imageUrl: imageUrl, width: 200, fit: BoxFit.cover, placeholder: (c, u) => const CircularProgressIndicator())
+                                          )
+                                        ),
+                                      if (displayText.isNotEmpty || imageUrl == null) 
+                                        Wrap(
+                                          alignment: WrapAlignment.end,
+                                          crossAxisAlignment: WrapCrossAlignment.end,
+                                          children: [
+                                            if (displayText.isNotEmpty)
+                                              Text(
+                                                displayText, 
+                                                style: const TextStyle(color: Colors.white, fontSize: 15, height: 1.4)
+                                              ),
+                                            const SizedBox(width: 8),
+                                            Padding(
+                                              padding: const EdgeInsets.only(bottom: 2.0),
+                                              child: Row(
+                                                mainAxisSize: MainAxisSize.min,
+                                                children: [
+                                                  if (isEdited)
+                                                    const Padding(
+                                                      padding: EdgeInsets.only(right: 4),
+                                                      child: Text('изм.', style: TextStyle(color: Colors.white54, fontSize: 10, fontWeight: FontWeight.bold)),
+                                                    ),
+                                                  Text(timeStr, style: const TextStyle(color: Colors.white54, fontSize: 10, fontWeight: FontWeight.bold)),
+                                                ],
+                                              ),
+                                            ),
+                                          ],
+                                        ),
+                                    ],
+                                  ),
                                 ),
                               ),
                             ),
-                          ),
-                          if (jsonData != null) _buildSaveCard(jsonData, doc.id),
+                          
+                          if (jsonData != null) 
+                            AIChatSaveCardWidget(
+                              jsonData: jsonData, 
+                              msgId: doc.id, 
+                              botType: widget.botType, // Передаем botType для сохранения состояния
+                              themeColor: themeColor, 
+                              // QA FIX: Связываем локальный кэш и базу данных
+                              isInitiallySaved: isActionCompleted || _savedMessageIds.contains(doc.id), 
+                              onSaveSuccess: (id) => setState(() => _savedMessageIds.add(id)),
+                              onSendMessage: _triggerSendMessage,
+                            ),
                         ],
                       );
                     },
@@ -258,199 +351,51 @@ class _AIChatScreenState extends State<AIChatScreen> {
 
   Widget _buildInputArea() {
     return Container(
-      padding: const EdgeInsets.all(12), 
-      color: const Color(0xFF1C1C1E).withValues(alpha: 0.85),
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12), 
+      decoration: const BoxDecoration(
+        color: Color(0xFF1C1C1E), 
+        border: Border(top: BorderSide(color: Colors.white10))
+      ),
       child: SafeArea(
         child: Column(
+          mainAxisSize: MainAxisSize.min,
           children: [
             if (_selectedImage != null) Stack(children: [ClipRRect(borderRadius: BorderRadius.circular(12), child: Image.file(_selectedImage!, height: 80, width: 80, fit: BoxFit.cover)), Positioned(right: 0, child: GestureDetector(onTap: () => setState(() => _selectedImage = null), child: const CircleAvatar(radius: 10, child: Icon(Icons.close, size: 12))))]),
-            Row(children: [
+            Row(
+              crossAxisAlignment: CrossAxisAlignment.end,
+              children: [
               IconButton(icon: const Icon(Icons.attach_file, color: Colors.grey), onPressed: _showAttachmentOptions),
-              Expanded(child: TextField(controller: _controller, style: const TextStyle(color: Colors.white), decoration: const InputDecoration(hintText: "Сообщение...", border: InputBorder.none))),
-              CircleAvatar(
-                backgroundColor: themeColor.withValues(alpha: 0.1), 
-                child: IconButton(icon: Icon(Icons.send, color: themeColor), onPressed: _sendMessage)
+              Expanded(
+                child: Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 16),
+                  decoration: BoxDecoration(color: const Color(0xFF2C2C2E), borderRadius: BorderRadius.circular(20)),
+                  child: TextField(
+                    controller: _controller, 
+                    keyboardType: TextInputType.multiline,
+                    maxLines: 5,
+                    minLines: 1,
+                    style: const TextStyle(color: Colors.white), 
+                    decoration: InputDecoration(
+                      hintText: "Сообщение...", 
+                      hintStyle: TextStyle(color: Colors.white.withOpacity(0.4)),
+                      border: InputBorder.none
+                    )
+                  ),
+                )
+              ),
+              const SizedBox(width: 8),
+              GestureDetector(
+                onTap: _sendMessage,
+                child: Container(
+                  padding: const EdgeInsets.all(12),
+                  margin: const EdgeInsets.only(bottom: 2), 
+                  decoration: BoxDecoration(color: themeColor, shape: BoxShape.circle),
+                  child: const Icon(Icons.send, color: Colors.black, size: 20),
+                ),
               ),
             ]),
           ],
         ),
-      ),
-    );
-  }
-
-  Widget _buildSaveCard(Map<String, dynamic> jsonData, String msgId) {
-    final bool isSaved = _savedMessageIds.contains(msgId);
-    final String type = jsonData['type'] ?? '';
-    
-    // БЛОК 3: Обработка специального типа needs_plan
-    if (type == 'needs_plan') {
-      final draft = jsonData['draft_meal'] ?? {};
-      return Container(
-        margin: const EdgeInsets.symmetric(vertical: 8),
-        padding: const EdgeInsets.all(16),
-        decoration: BoxDecoration(
-          color: const Color(0xFF1C1C1E).withValues(alpha: 0.9), 
-          borderRadius: BorderRadius.circular(16), 
-          border: Border.all(color: Colors.orangeAccent.withValues(alpha: 0.3))
-        ),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            const Center(child: Text("⚠️ Нет плана питания", style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 16))),
-            Padding(
-              padding: const EdgeInsets.only(top: 12.0, bottom: 16.0),
-              child: Center(
-                child: Text("Чтобы сохранить ${draft['meal_name'] ?? 'блюдо'} (${draft['calories'] ?? 0} ккал), нужно рассчитать дневную норму.", style: const TextStyle(color: Colors.orangeAccent, fontSize: 13, fontWeight: FontWeight.w500), textAlign: TextAlign.center),
-              ),
-            ),
-            if (!isSaved)
-              Row(
-                children: [
-                  Expanded(
-                    child: OutlinedButton(
-                      style: OutlinedButton.styleFrom(
-                        side: BorderSide(color: Colors.grey.withValues(alpha: 0.5)),
-                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-                        padding: const EdgeInsets.symmetric(vertical: 12)
-                      ),
-                      onPressed: () async {
-                        await DatabaseService().saveMealDraft(draft);
-                        setState(() => _savedMessageIds.add(msgId));
-                      },
-                      child: const Text("ПОЗЖЕ", style: TextStyle(color: Colors.grey, fontSize: 12)),
-                    ),
-                  ),
-                  const SizedBox(width: 8),
-                  Expanded(
-                    flex: 2,
-                    child: ElevatedButton(
-                      style: ElevatedButton.styleFrom(
-                        backgroundColor: themeColor, 
-                        foregroundColor: Colors.black,
-                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-                        padding: const EdgeInsets.symmetric(vertical: 12)
-                      ),
-                      onPressed: () {
-                        _controller.text = "Помоги составить план питания и рассчитай норму КБЖУ";
-                        _sendMessage();
-                        setState(() => _savedMessageIds.add(msgId)); 
-                      },
-                      child: const Text("СОСТАВИТЬ ПЛАН", style: TextStyle(fontWeight: FontWeight.bold, fontSize: 12)),
-                    ),
-                  ),
-                ],
-              )
-            else
-              const Center(child: Text("ОБРАБОТАНО", style: TextStyle(color: Colors.grey, fontWeight: FontWeight.bold, letterSpacing: 1.0)))
-          ],
-        ),
-      );
-    }
-
-    // СТАНДАРТНАЯ ОТРИСОВКА КАРТОЧЕК
-    String title = "Программа готова";
-    String description = "";
-    String buttonText = "СОХРАНИТЬ В БАЗУ";
-
-    if (type == 'set_goal') {
-      title = "🎯 Ваша новая цель КБЖУ";
-      description = "${jsonData['calories']} ккал\nБелки: ${jsonData['protein']}г | Жиры: ${jsonData['fat']}г | Углеводы: ${jsonData['carbs']}г";
-      buttonText = "ОБНОВИТЬ ЦЕЛЬ";
-    } else if (type == 'log_meal') {
-      title = "🍽 ${jsonData['meal_name'] ?? 'Прием пищи'}";
-      description = "${jsonData['calories']} ккал\nБ: ${jsonData['protein']}г | Ж: ${jsonData['fat']}г | У: ${jsonData['carbs']}г";
-      buttonText = "СОХРАНИТЬ В ДНЕВНИК"; 
-    } else if (type == 'save_food') {
-      title = "📝 Запомнить продукт";
-      description = "${jsonData['name']}\n${jsonData['calories']} ккал | Б: ${jsonData['protein']}г | Ж: ${jsonData['fat']}г | У: ${jsonData['carbs']}г";
-      buttonText = "СОХРАНИТЬ В БАЗУ"; 
-    } else if (type == 'workout' || jsonData['days'] != null) {
-      title = jsonData['program_title'] ?? jsonData['program_name'] ?? "Программа тренировок";
-      buttonText = "СОХРАНИТЬ ПРОГРАММУ";
-    } else {
-      title = jsonData['title'] ?? "План питания";
-    }
-
-    return Container(
-      margin: const EdgeInsets.symmetric(vertical: 8),
-      padding: const EdgeInsets.all(16),
-      decoration: BoxDecoration(
-        color: const Color(0xFF1C1C1E).withValues(alpha: 0.9), 
-        borderRadius: BorderRadius.circular(16), 
-        border: Border.all(color: isSaved ? Colors.grey.withValues(alpha: 0.2) : themeColor.withValues(alpha: 0.3))
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Center(child: Text(title, style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 16), textAlign: TextAlign.center)),
-          
-          if (description.isNotEmpty)
-            Padding(
-              padding: const EdgeInsets.only(top: 12.0, bottom: 8.0),
-              child: Center(
-                child: Text(description, style: TextStyle(color: themeColor, fontSize: 14, fontWeight: FontWeight.w500), textAlign: TextAlign.center),
-              ),
-            ),
-
-          if (jsonData['days'] != null)
-            Padding(
-              padding: const EdgeInsets.only(top: 12.0, bottom: 8.0),
-              child: Container(
-                width: double.infinity,
-                padding: const EdgeInsets.all(12),
-                decoration: BoxDecoration(color: Colors.black.withValues(alpha: 0.5), borderRadius: BorderRadius.circular(12)),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: (jsonData['days'] as List<dynamic>).map((day) {
-                    final dayName = day['day_name'] ?? 'Тренировка';
-                    final exercises = day['exercises'] as List<dynamic>? ?? [];
-                    return Padding(
-                      padding: const EdgeInsets.only(bottom: 8.0),
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Text("📅 $dayName", style: TextStyle(color: themeColor, fontWeight: FontWeight.bold, fontSize: 14)),
-                          ...exercises.map((ex) => Text("• ${ex['name']} (${ex['sets']} × ${ex['reps']})", style: const TextStyle(color: Colors.white70, fontSize: 13))),
-                        ],
-                      ),
-                    );
-                  }).toList(),
-                ),
-              ),
-            ),
-
-          const SizedBox(height: 16),
-          
-          SizedBox(
-            width: double.infinity,
-            child: OutlinedButton(
-              style: OutlinedButton.styleFrom(
-                backgroundColor: isSaved ? Colors.transparent : themeColor.withValues(alpha: 0.05),
-                side: BorderSide(color: isSaved ? Colors.grey.withValues(alpha: 0.3) : themeColor.withValues(alpha: 0.4)),
-                padding: const EdgeInsets.symmetric(vertical: 14),
-                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-              ),
-              onPressed: isSaved ? null : () async {
-                if (type == 'set_goal') {
-                  await DatabaseService().saveNutritionGoal(jsonData);
-                } else if (type == 'log_meal') {
-                  await DatabaseService().logMeal(jsonData);
-                } else if (type == 'save_food') {
-                  await DatabaseService().saveCustomFood(jsonData);
-                } else if (type == 'workout' || jsonData['days'] != null) {
-                  await DatabaseService().saveAIWorkoutProgram(jsonData);
-                } else {
-                  await DatabaseService().saveAIDietPlan(jsonData);
-                }
-                setState(() => _savedMessageIds.add(msgId));
-              },
-              child: Text(
-                isSaved ? "СОХРАНЕНО" : buttonText, 
-                style: TextStyle(color: isSaved ? Colors.grey : themeColor, fontWeight: FontWeight.bold, letterSpacing: 1.0)
-              ),
-            ),
-          ),
-        ],
       ),
     );
   }

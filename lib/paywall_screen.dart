@@ -1,7 +1,5 @@
 import 'package:flutter/material.dart';
-import 'package:cloud_firestore/cloud_firestore.dart';
-import 'package:firebase_auth/firebase_auth.dart';
-import '../widgets/base_background.dart';
+import '../services/database_service.dart';
 
 class PaywallScreen extends StatefulWidget {
   const PaywallScreen({super.key});
@@ -11,187 +9,222 @@ class PaywallScreen extends StatefulWidget {
 }
 
 class _PaywallScreenState extends State<PaywallScreen> {
-  String _userRole = 'user'; // По умолчанию ставим 'user'
-  bool _isLoading = true;
+  bool _isLoading = false;
+  
+  static const Color _accentColor = Color(0xFFB76E79); // Rose Gold
+  static const Color _textColor = Color(0xFF2D2D2D);
 
-  @override
-  void initState() {
-    super.initState();
-    _loadUserRole();
-  }
-
-  Future<void> _loadUserRole() async {
-    final uid = FirebaseAuth.instance.currentUser?.uid;
-    if (uid != null) {
-      final doc = await FirebaseFirestore.instance.collection('users').doc(uid).get();
+  Future<void> _startTrial() async {
+    setState(() => _isLoading = true);
+    try {
+      // Активируем пробный период на 7 дней
+      await DatabaseService().activateTrial(7);
+      
+      if (!mounted) return;
+      Navigator.pop(context); // Закрываем экран оплаты
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text("✨ Подписка активирована! Добро пожаловать в премиум.", style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
+          backgroundColor: _accentColor,
+        ),
+      );
+    } catch (e) {
       if (mounted) {
-        setState(() {
-          // Читаем роль. Если её нет, считаем, что это 'user'
-          _userRole = doc.data()?['registeredRole'] ?? 'user';
-          _isLoading = false;
-        });
+        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Произошла ошибка. Попробуйте позже.')));
       }
-    } else {
+    } finally {
       if (mounted) setState(() => _isLoading = false);
-    }
-  }
-
-  Widget _buildTariffCard({required String title, required String price, required String oldPrice, required List<String> features, required VoidCallback onBuy, bool isPopular = false}) {
-    return Container(
-      margin: const EdgeInsets.only(bottom: 16),
-      padding: const EdgeInsets.all(20),
-      decoration: BoxDecoration(
-        color: const Color(0xFF1C1C1E),
-        borderRadius: BorderRadius.circular(20),
-        border: Border.all(color: isPopular ? const Color(0xFF9CD600) : Colors.white10, width: 2),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          if (isPopular)
-            Container(
-              margin: const EdgeInsets.only(bottom: 12),
-              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-              decoration: BoxDecoration(color: const Color(0xFF9CD600), borderRadius: BorderRadius.circular(8)),
-              child: const Text('ВЫГОДНО', style: TextStyle(color: Colors.black, fontWeight: FontWeight.bold, fontSize: 10)),
-            ),
-          Text(title, style: const TextStyle(color: Colors.white, fontSize: 22, fontWeight: FontWeight.bold)),
-          const SizedBox(height: 8),
-          Row(
-            crossAxisAlignment: CrossAxisAlignment.end,
-            children: [
-              Text(price, style: TextStyle(color: isPopular ? const Color(0xFF9CD600) : Colors.white, fontSize: 28, fontWeight: FontWeight.w900)),
-              if (oldPrice.isNotEmpty) ...[
-                const SizedBox(width: 8),
-                Text(oldPrice, style: const TextStyle(color: Colors.grey, fontSize: 16, decoration: TextDecoration.lineThrough)),
-              ]
-            ],
-          ),
-          const SizedBox(height: 16),
-          ...features.map((f) => Padding(
-            padding: const EdgeInsets.only(bottom: 8.0),
-            child: Row(
-              children: [
-                const Icon(Icons.check_circle, color: Color(0xFF9CD600), size: 18),
-                const SizedBox(width: 12),
-                Expanded(child: Text(f, style: const TextStyle(color: Colors.white70, fontSize: 14))),
-              ],
-            ),
-          )),
-          const SizedBox(height: 20),
-          SizedBox(
-            width: double.infinity,
-            height: 50,
-            child: ElevatedButton(
-              onPressed: onBuy,
-              style: ElevatedButton.styleFrom(
-                backgroundColor: isPopular ? const Color(0xFF9CD600) : Colors.white10,
-                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-              ),
-              child: Text('Выбрать', style: TextStyle(color: isPopular ? Colors.black : Colors.white, fontWeight: FontWeight.bold, fontSize: 16)),
-            ),
-          )
-        ],
-      ),
-    );
-  }
-
-  Future<void> _handleGoBack() async {
-    if (Navigator.canPop(context)) {
-      Navigator.pop(context); 
-    } else {
-      await FirebaseAuth.instance.signOut();
-      if (mounted) {
-        Navigator.of(context).pushNamedAndRemoveUntil('/', (route) => false);
-      }
     }
   }
 
   @override
   Widget build(BuildContext context) {
-    if (_isLoading) return const Scaffold(backgroundColor: Colors.black, body: Center(child: CircularProgressIndicator(color: Color(0xFF9CD600))));
-
-    return BaseBackground(
-      child: Scaffold(
-        backgroundColor: Colors.transparent,
-        appBar: AppBar(
-          backgroundColor: Colors.transparent,
-          elevation: 0,
-          leading: IconButton(
-            icon: const Icon(Icons.arrow_back, color: Colors.white),
-            onPressed: _handleGoBack,
-          ),
-        ),
-        body: SingleChildScrollView( 
-          physics: const BouncingScrollPhysics(),
-          padding: const EdgeInsets.symmetric(horizontal: 20.0),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              const Text("Открой все возможности\nTONNA", style: TextStyle(color: Colors.white, fontSize: 28, fontWeight: FontWeight.w900, height: 1.2)),
-              const SizedBox(height: 8),
-              const Text("ИИ-Ассистенты, умный трекинг и маркетплейс.", style: TextStyle(color: Colors.grey, fontSize: 16)),
-              const SizedBox(height: 32),
-
-              // ИСПРАВЛЕНИЕ ЗДЕСЬ: Добавлена проверка на 'user'
-              if (_userRole == 'athlete' || _userRole == 'user') ...[
-                _buildTariffCard(
-                  title: "Tonna AI Premium (Месяц)",
-                  price: "499 ₽",
-                  oldPrice: "",
-                  features: [
-                    "Безлимитный ИИ-Нутрициолог",
-                    "Генерация программ от ИИ-Тренера",
-                    "Доступ к Маркетплейсу тренеров",
-                    "Умная аналитика прогресса"
-                  ],
-                  onBuy: () {}, 
-                ),
-
-                _buildTariffCard(
-                  title: "Tonna AI Premium (Год)",
-                  price: "3 990 ₽",
-                  oldPrice: "5 988 ₽",
-                  isPopular: true,
-                  features: [
-                    "Все функции подписки на месяц",
-                    "Экономия 33% (2 месяца в подарок)",
-                    "Приоритетная поддержка"
-                  ],
-                  onBuy: () {}, 
-                ),
-              ],
-
-              if (_userRole == 'coach') ...[
-                _buildTariffCard(
-                  title: "Подписка Тренера",
-                  price: "1 990 ₽ / мес",
-                  oldPrice: "",
-                  features: [
-                    "Размещение в Маркетплейсе",
-                    "Прием заявок от клиентов",
-                    "Назначение тренировок клиентам",
-                    "Доступ к дневникам клиентов"
-                  ],
-                  onBuy: () {}, 
-                ),
-                
-                const SizedBox(height: 16),
-                Center(
-                  child: TextButton(
-                    onPressed: _handleGoBack,
-                    child: const Text(
-                      "Выйти и зарегистрироваться как Клиент", 
-                      style: TextStyle(color: Colors.grey, decoration: TextDecoration.underline)
+    return Scaffold(
+      backgroundColor: const Color(0xFFF9F9F9), // Светлый фон
+      body: SafeArea(
+        child: Column(
+          children: [
+            // Кнопка закрытия (крестик) в правом верхнем углу
+            Align(
+              alignment: Alignment.topRight,
+              child: IconButton(
+                icon: const Icon(Icons.close, color: Colors.grey),
+                onPressed: () => Navigator.pop(context),
+              ),
+            ),
+            
+            Expanded(
+              child: SingleChildScrollView(
+                padding: const EdgeInsets.symmetric(horizontal: 24.0),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    const SizedBox(height: 10),
+                    // Заголовок
+                    const Text(
+                      "✨ Обрети гармонию\nс телом",
+                      style: TextStyle(
+                        fontSize: 32,
+                        fontWeight: FontWeight.w900,
+                        color: _textColor,
+                        height: 1.2,
+                      ),
                     ),
+                    const SizedBox(height: 16),
+                    
+                    // Подзаголовок
+                    const Text(
+                      "Твой личный ИИ-нутрициолог, который заботится о тебе, а не ругает за калории.",
+                      style: TextStyle(
+                        fontSize: 16,
+                        color: Colors.grey,
+                        height: 1.5,
+                        fontWeight: FontWeight.w500,
+                      ),
+                    ),
+                    
+                    const SizedBox(height: 40),
+                    
+                    // Блок преимуществ
+                    _buildFeatureItem(
+                      emoji: "🌸",
+                      title: "Питание по фазам цикла",
+                      description: "Ева адаптирует твой рацион под гормональный фон. Больше никакой борьбы с организмом.",
+                    ),
+                    _buildFeatureItem(
+                      emoji: "🧘‍♀️",
+                      title: "Без чувства вины и стресса",
+                      description: "Мы убрали красные полоски. Если ты съела десерт — мы просто мягко сбалансируем завтрашний день.",
+                    ),
+                    _buildFeatureItem(
+                      emoji: "🥑",
+                      title: "Магия холодильника",
+                      description: "Сфоткай полку с продуктами — Ева придумает быстрый и полезный рецепт за 5 секунд.",
+                    ),
+                    _buildFeatureItem(
+                      emoji: "🩺",
+                      title: "Чтение твоих анализов",
+                      description: "Загрузи результаты анализов (PDF/фото), и Ева поможет восполнить дефициты витаминов через еду.",
+                    ),
+                    
+                    const SizedBox(height: 40),
+                  ],
+                ),
+              ),
+            ),
+
+            // Закрепленный подвал с кнопкой и текстом
+            Container(
+              padding: const EdgeInsets.fromLTRB(24, 16, 24, 24),
+              decoration: BoxDecoration(
+                color: Colors.white,
+                boxShadow: [
+                  BoxShadow(color: Colors.black.withValues(alpha: 0.05), blurRadius: 20, offset: const Offset(0, -5))
+                ],
+              ),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  // Кнопка CTA
+                  Container(
+                    width: double.infinity,
+                    height: 60,
+                    decoration: BoxDecoration(
+                      gradient: const LinearGradient(
+                        colors: [_accentColor, Color(0xFFD49A89)], // Rose Gold градиент
+                        begin: Alignment.centerLeft,
+                        end: Alignment.centerRight,
+                      ),
+                      borderRadius: BorderRadius.circular(20),
+                      boxShadow: [
+                        BoxShadow(color: _accentColor.withValues(alpha: 0.3), blurRadius: 15, offset: const Offset(0, 8))
+                      ],
+                    ),
+                    child: ElevatedButton(
+                      onPressed: _isLoading ? null : _startTrial,
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: Colors.transparent,
+                        shadowColor: Colors.transparent,
+                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+                      ),
+                      child: _isLoading 
+                        ? const SizedBox(width: 24, height: 24, child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2))
+                        : const Text(
+                            "НАЧАТЬ ПРЕОБРАЖЕНИЕ\n(7 дней бесплатно)",
+                            textAlign: TextAlign.center,
+                            style: TextStyle(
+                              color: Colors.white,
+                              fontWeight: FontWeight.w900,
+                              fontSize: 15,
+                              letterSpacing: 0.5,
+                              height: 1.2
+                            ),
+                          ),
+                    ),
+                  ),
+                  const SizedBox(height: 16),
+                  
+                  // Мелкий текст под кнопкой
+                  const Text(
+                    "Далее 490 ₽ в месяц. Отмени в любой момент.",
+                    style: TextStyle(
+                      color: Colors.grey,
+                      fontSize: 12,
+                      fontWeight: FontWeight.w500,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  // Виджет для одного буллита
+  Widget _buildFeatureItem({required String emoji, required String title, required String description}) {
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 24.0),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          // Иконка
+          Container(
+            padding: const EdgeInsets.all(12),
+            decoration: BoxDecoration(
+              color: const Color(0xFFFDECE8), // Очень нежный персиковый фон
+              borderRadius: BorderRadius.circular(16),
+            ),
+            child: Text(emoji, style: const TextStyle(fontSize: 24)),
+          ),
+          const SizedBox(width: 16),
+          // Текст
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  title,
+                  style: const TextStyle(
+                    fontSize: 16,
+                    fontWeight: FontWeight.bold,
+                    color: _textColor,
+                  ),
+                ),
+                const SizedBox(height: 6),
+                Text(
+                  description,
+                  style: const TextStyle(
+                    fontSize: 13,
+                    color: Colors.grey,
+                    height: 1.4,
                   ),
                 ),
               ],
-
-              const SizedBox(height: 40),
-            ],
+            ),
           ),
-        ),
+        ],
       ),
     );
   }

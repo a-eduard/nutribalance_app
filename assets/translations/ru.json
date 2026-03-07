@@ -36,7 +36,7 @@
   "my_coach": "Мой тренер",
   "workout_default": "Тренировка",
   "ai_coach": "AI ТРЕНЕР",
-  "marketplace": "МАРКЕТПЛЕЙС",
+  "marketplace": "Маркетплейс",
   "my_programs": "МОИ ПРОГРАММЫ",
   "no_programs": "Нет программ",
   "delete_program_title": "Удалить программу?",
@@ -279,5 +279,11 @@
   "ex_cable_crunch": "Скручивания в блоке (Молитва)",
   "ex_ab_wheel": "Ролик для пресса",
   "ex_woodchoppers": "Дровосек в блоке",
-  "ex_bicycle_crunches": "Велосипед"
+  "ex_bicycle_crunches": "Велосипед",
+  "day": "ДЕНЬ",
+  "seven_days": "7 ДНЕЙ",
+  "thirty_days": "30 ДНЕЙ",
+  "week": "НЕДЕЛЯ",
+  "month": "МЕСЯЦ",
+  "year": "ГОД"
 }

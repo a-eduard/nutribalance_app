@@ -41,48 +41,51 @@ class DefaultFirebaseOptions {
   }
 
   static const FirebaseOptions web = FirebaseOptions(
-    apiKey: 'AIzaSyDEQkDTSjNikxsxjMLKCYdJ4BSOTEoCO_4',
-    appId: '1:830594518730:web:b1e384f2e830b4323e2e33',
-    messagingSenderId: '830594518730',
-    projectId: 'gym-tracker-9925c',
-    authDomain: 'gym-tracker-9925c.firebaseapp.com',
-    storageBucket: 'gym-tracker-9925c.firebasestorage.app',
-    measurementId: 'G-9685YJL1YD',
+    apiKey: 'AIzaSyAHHsWjLW_2yEq8zeD_9gB1ssUa8cuMwFM',
+    appId: '1:942600708331:web:8fc9bc6207c454ee95deae',
+    messagingSenderId: '942600708331',
+    projectId: 'nutribalance-app-11a09',
+    authDomain: 'nutribalance-app-11a09.firebaseapp.com',
+    storageBucket: 'nutribalance-app-11a09.firebasestorage.app',
+    measurementId: 'G-P6F2BW6QTY',
   );
 
   static const FirebaseOptions android = FirebaseOptions(
-    apiKey: 'AIzaSyDOEfzqyqAsCCIpxowhi0bJJcsAmp1_oCA',
-    appId: '1:830594518730:android:83575990bf418cbd3e2e33',
-    messagingSenderId: '830594518730',
-    projectId: 'gym-tracker-9925c',
-    storageBucket: 'gym-tracker-9925c.firebasestorage.app',
+    apiKey: 'AIzaSyA_D0ULHVcDoNwbUD7DQW3gV66oXS-wo0I',
+    appId: '1:942600708331:android:ba4a1ccb69a4024495deae',
+    messagingSenderId: '942600708331',
+    projectId: 'nutribalance-app-11a09',
+    storageBucket: 'nutribalance-app-11a09.firebasestorage.app',
   );
 
   static const FirebaseOptions ios = FirebaseOptions(
-    apiKey: 'AIzaSyD51ebLXqL4DK79x7c9xUoxYa3LWmjGV10',
-    appId: '1:830594518730:ios:11adc1d95be376203e2e33',
-    messagingSenderId: '830594518730',
-    projectId: 'gym-tracker-9925c',
-    storageBucket: 'gym-tracker-9925c.firebasestorage.app',
+    apiKey: 'AIzaSyCHzM0Bd6mkUMoksSfZFddxb1mbrsE86dg',
+    appId: '1:942600708331:ios:557d359f99353f3595deae',
+    messagingSenderId: '942600708331',
+    projectId: 'nutribalance-app-11a09',
+    storageBucket: 'nutribalance-app-11a09.firebasestorage.app',
+    iosClientId: '942600708331-tepi705bcitaqr956p3k1kjp4pj22poa.apps.googleusercontent.com',
     iosBundleId: 'com.example.flutterApplication1',
   );
 
   static const FirebaseOptions macos = FirebaseOptions(
-    apiKey: 'AIzaSyD51ebLXqL4DK79x7c9xUoxYa3LWmjGV10',
-    appId: '1:830594518730:ios:11adc1d95be376203e2e33',
-    messagingSenderId: '830594518730',
-    projectId: 'gym-tracker-9925c',
-    storageBucket: 'gym-tracker-9925c.firebasestorage.app',
+    apiKey: 'AIzaSyCHzM0Bd6mkUMoksSfZFddxb1mbrsE86dg',
+    appId: '1:942600708331:ios:557d359f99353f3595deae',
+    messagingSenderId: '942600708331',
+    projectId: 'nutribalance-app-11a09',
+    storageBucket: 'nutribalance-app-11a09.firebasestorage.app',
+    iosClientId: '942600708331-tepi705bcitaqr956p3k1kjp4pj22poa.apps.googleusercontent.com',
     iosBundleId: 'com.example.flutterApplication1',
   );
 
   static const FirebaseOptions windows = FirebaseOptions(
-    apiKey: 'AIzaSyDEQkDTSjNikxsxjMLKCYdJ4BSOTEoCO_4',
-    appId: '1:830594518730:web:ef72dfe538085da73e2e33',
-    messagingSenderId: '830594518730',
-    projectId: 'gym-tracker-9925c',
-    authDomain: 'gym-tracker-9925c.firebaseapp.com',
-    storageBucket: 'gym-tracker-9925c.firebasestorage.app',
-    measurementId: 'G-H4EKYTCNDE',
+    apiKey: 'AIzaSyAHHsWjLW_2yEq8zeD_9gB1ssUa8cuMwFM',
+    appId: '1:942600708331:web:829136da0e71bb6f95deae',
+    messagingSenderId: '942600708331',
+    projectId: 'nutribalance-app-11a09',
+    authDomain: 'nutribalance-app-11a09.firebaseapp.com',
+    storageBucket: 'nutribalance-app-11a09.firebasestorage.app',
+    measurementId: 'G-Z0KXLWVV0Z',
   );
+
 }

@@ -30,6 +30,10 @@ class _P2PChatScreenState extends State<P2PChatScreen> {
   String? _chatRoomId;
   bool _isSending = false;
   String? _editingMessageId; 
+  
+  // Новые цвета NutriBalance
+  static const Color _accentColor = Color(0xFFB76E79);
+  static const Color _bgColor = Color(0xFF1A1A1C);
 
   @override
   void initState() {
@@ -37,9 +41,6 @@ class _P2PChatScreenState extends State<P2PChatScreen> {
     _initializeChat();
   }
 
-  // ==========================================
-  // FIX: УСТРАНЕНИЕ УТЕЧКИ ПАМЯТИ (Memory Leak)
-  // ==========================================
   @override
   void dispose() {
     _messageController.dispose();
@@ -86,19 +87,14 @@ class _P2PChatScreenState extends State<P2PChatScreen> {
         'editTimestamp': FieldValue.serverTimestamp(),
       });
     } catch (e) {
-      debugPrint("Ошибка обновления сообщения: $e");
+      debugPrint("Ошибка обновления: $e");
     }
   }
 
-  Future<void> _deleteMessage(String messageId) async {
+  Future<void> _deleteMessage(String messageId, String? imageUrl) async {
     if (_chatRoomId == null) return;
     try {
-      await FirebaseFirestore.instance
-          .collection('chats')
-          .doc(_chatRoomId)
-          .collection('messages')
-          .doc(messageId)
-          .delete();
+      await _chatService.deleteMessage(_chatRoomId!, messageId, imageUrl: imageUrl);
     } catch (e) {
       debugPrint("Ошибка удаления: $e");
     }
@@ -107,26 +103,20 @@ class _P2PChatScreenState extends State<P2PChatScreen> {
   void _showAttachmentOptions() {
     showModalBottomSheet(
       context: context,
-      backgroundColor: const Color(0xFF1C1C1E),
-      shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(16))),
+      backgroundColor: const Color(0xFFF9F9F9),
+      shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(20))),
       builder: (ctx) => SafeArea(
         child: Wrap(
           children: [
             ListTile(
               leading: const Icon(Icons.camera_alt, color: Colors.white),
               title: const Text('Сделать фото', style: TextStyle(color: Colors.white)),
-              onTap: () {
-                Navigator.pop(ctx);
-                _pickAndSendImage(ImageSource.camera);
-              },
+              onTap: () { Navigator.pop(ctx); _pickAndSendImage(ImageSource.camera); },
             ),
             ListTile(
               leading: const Icon(Icons.photo_library, color: Colors.white),
               title: const Text('Выбрать из галереи', style: TextStyle(color: Colors.white)),
-              onTap: () {
-                Navigator.pop(ctx);
-                _pickAndSendImage(ImageSource.gallery);
-              },
+              onTap: () { Navigator.pop(ctx); _pickAndSendImage(ImageSource.gallery); },
             ),
           ],
         ),
@@ -136,19 +126,13 @@ class _P2PChatScreenState extends State<P2PChatScreen> {
 
   Future<void> _pickAndSendImage(ImageSource source) async {
     final picker = ImagePicker();
-    final pickedFile = await picker.pickImage(
-      source: source, 
-      imageQuality: 85,
-      maxWidth: 1080,
-      maxHeight: 1080,
-    );
+    final pickedFile = await picker.pickImage(source: source, imageQuality: 85, maxWidth: 1080, maxHeight: 1080);
     if (pickedFile != null) {
       setState(() => _isSending = true);
       try {
         final File imageFile = File(pickedFile.path);
         await _chatService.sendMessage(widget.otherUserId, "", imageFile: imageFile);
       } catch (e) {
-        debugPrint("Ошибка отправки фото: $e");
       } finally {
         if (mounted) setState(() => _isSending = false);
       }
@@ -159,10 +143,7 @@ class _P2PChatScreenState extends State<P2PChatScreen> {
     final text = _messageController.text.trim();
     if (text.isEmpty || _chatRoomId == null) return;
 
-    setState(() {
-      _messageController.clear();
-      _isSending = true; 
-    });
+    setState(() { _messageController.clear(); _isSending = true; });
 
     try {
       await _chatService.sendMessage(widget.otherUserId, text);
@@ -170,45 +151,36 @@ class _P2PChatScreenState extends State<P2PChatScreen> {
         _scrollController.animateTo(0.0, duration: const Duration(milliseconds: 300), curve: Curves.easeOut);
       }
     } catch (e) {
-      debugPrint("Ошибка отправки сообщения: $e");
     } finally {
       if (mounted) setState(() => _isSending = false);
     }
   }
 
-  void _showContextMenu(String messageId, String text, bool isMe, bool isTextOnly) {
+  void _showContextMenu(String messageId, String text, bool isMe, bool isTextOnly, String? imageUrl) {
     showModalBottomSheet(
       context: context,
-      backgroundColor: const Color(0xFF1C1C1E),
-      shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(16))),
+      backgroundColor: const Color(0xFFF9F9F9),
+      shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(20))),
       builder: (ctx) => SafeArea(
         child: Wrap(
           children: [
             ListTile(
               leading: const Icon(Icons.copy, color: Colors.white),
               title: const Text('Копировать текст', style: TextStyle(color: Colors.white)),
-              onTap: () {
-                Clipboard.setData(ClipboardData(text: text));
-                Navigator.pop(ctx);
-              },
+              onTap: () { Clipboard.setData(ClipboardData(text: text)); Navigator.pop(ctx); },
             ),
             if (isMe && isTextOnly)
               ListTile(
                 leading: const Icon(Icons.edit, color: Colors.white),
                 title: const Text('Редактировать', style: TextStyle(color: Colors.white)),
-                onTap: () {
-                  Navigator.pop(ctx);
-                  _setEditingMode(messageId, text);
-                },
+                onTap: () { Navigator.pop(ctx); _setEditingMode(messageId, text); },
               ),
-            ListTile(
-              leading: const Icon(Icons.delete, color: Colors.redAccent),
-              title: const Text('Удалить', style: TextStyle(color: Colors.redAccent)),
-              onTap: () {
-                Navigator.pop(ctx);
-                _deleteMessage(messageId);
-              },
-            ),
+            if (isMe)
+              ListTile(
+                leading: const Icon(Icons.delete, color: Colors.redAccent),
+                title: const Text('Удалить у всех', style: TextStyle(color: Colors.redAccent)),
+                onTap: () { Navigator.pop(ctx); _deleteMessage(messageId, imageUrl); },
+              ),
           ],
         ),
       ),
@@ -225,22 +197,14 @@ class _P2PChatScreenState extends State<P2PChatScreen> {
           alignment: Alignment.center,
           children: [
             InteractiveViewer(
-              minScale: 0.5,
-              maxScale: 4.0,
+              minScale: 0.5, maxScale: 4.0,
               child: CachedNetworkImage(
                 imageUrl: imageUrl,
-                placeholder: (context, url) => const CircularProgressIndicator(color: Color(0xFF9CD600)),
+                placeholder: (context, url) => const CircularProgressIndicator(color: _accentColor),
                 errorWidget: (context, url, error) => const Icon(Icons.error, color: Colors.white, size: 50),
               ),
             ),
-            Positioned(
-              top: 40,
-              right: 20,
-              child: IconButton(
-                icon: const Icon(Icons.close, color: Colors.white, size: 30),
-                onPressed: () => Navigator.pop(context),
-              ),
-            ),
+            Positioned(top: 40, right: 20, child: IconButton(icon: const Icon(Icons.close, color: Colors.white, size: 30), onPressed: () => Navigator.pop(context))),
           ],
         ),
       ),
@@ -250,7 +214,7 @@ class _P2PChatScreenState extends State<P2PChatScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: Colors.black,
+      backgroundColor: _bgColor,
       appBar: AppBar(
         title: Row(
           children: [
@@ -263,20 +227,13 @@ class _P2PChatScreenState extends State<P2PChatScreen> {
 
                 ImageProvider? avatarProvider;
                 if (photoUrl != null && photoUrl.isNotEmpty) {
-                  if (photoUrl.startsWith('http')) {
-                    avatarProvider = CachedNetworkImageProvider(photoUrl);
-                  } else {
-                    try { avatarProvider = MemoryImage(base64Decode(photoUrl)); } catch (_) {}
-                  }
+                  if (photoUrl.startsWith('http')) avatarProvider = CachedNetworkImageProvider(photoUrl);
+                  else { try { avatarProvider = MemoryImage(base64Decode(photoUrl)); } catch (_) {} }
                 }
 
                 return CircleAvatar(
-                  radius: 18,
-                  backgroundColor: Colors.grey[800],
-                  backgroundImage: avatarProvider,
-                  child: avatarProvider == null
-                      ? Text(widget.otherUserName.isNotEmpty ? widget.otherUserName[0].toUpperCase() : '?', style: const TextStyle(color: Colors.white, fontSize: 16, fontWeight: FontWeight.bold))
-                      : null,
+                  radius: 18, backgroundColor: Colors.grey[800], backgroundImage: avatarProvider,
+                  child: avatarProvider == null ? Text(widget.otherUserName.isNotEmpty ? widget.otherUserName[0].toUpperCase() : '?', style: const TextStyle(color: Colors.white, fontSize: 16, fontWeight: FontWeight.bold)) : null,
                 );
               }
             ),
@@ -284,21 +241,22 @@ class _P2PChatScreenState extends State<P2PChatScreen> {
             Expanded(child: Text(widget.otherUserName, style: const TextStyle(fontWeight: FontWeight.bold), overflow: TextOverflow.ellipsis)),
           ],
         ),
-        backgroundColor: const Color(0xFF1C1C1E),
+        backgroundColor: _bgColor,
+        elevation: 0,
         leading: const BackButton(color: Colors.white),
       ),
       body: Column(
         children: [
           Expanded(
             child: _chatRoomId == null 
-              ? const Center(child: CircularProgressIndicator(color: Color(0xFF9CD600)))
+              ? const Center(child: CircularProgressIndicator(color: _accentColor))
               : StreamBuilder<QuerySnapshot>(
                   stream: FirebaseFirestore.instance
                       .collection('chats').doc(_chatRoomId)
                       .collection('messages').orderBy('timestamp', descending: true) 
                       .snapshots(),
                   builder: (context, snapshot) {
-                    if (snapshot.connectionState == ConnectionState.waiting) return const Center(child: CircularProgressIndicator(color: Color(0xFF9CD600)));
+                    if (snapshot.connectionState == ConnectionState.waiting) return const Center(child: CircularProgressIndicator(color: _accentColor));
                     if (!snapshot.hasData || snapshot.data!.docs.isEmpty) return Center(child: Text('Нет сообщений', style: TextStyle(color: Colors.white.withOpacity(0.3))));
 
                     return ListView.builder(
@@ -320,18 +278,16 @@ class _P2PChatScreenState extends State<P2PChatScreen> {
                         return Align(
                           alignment: isMe ? Alignment.centerRight : Alignment.centerLeft,
                           child: GestureDetector(
-                            onLongPress: () => _showContextMenu(doc.id, text, isMe, imageUrl == null),
+                            onLongPress: () => _showContextMenu(doc.id, text, isMe, imageUrl == null, imageUrl),
                             child: Container(
                               margin: const EdgeInsets.only(bottom: 6),
                               padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
                               constraints: BoxConstraints(maxWidth: MediaQuery.of(context).size.width * 0.75),
                               decoration: BoxDecoration(
-                                color: isMe ? const Color(0xFF9CD600) : const Color(0xFF2C2C2E),
+                                color: isMe ? _accentColor : const Color(0xFFF9F9F9),
                                 borderRadius: BorderRadius.only(
-                                  topLeft: const Radius.circular(16),
-                                  topRight: const Radius.circular(16),
-                                  bottomLeft: Radius.circular(isMe ? 16 : 2),
-                                  bottomRight: Radius.circular(isMe ? 2 : 16),
+                                  topLeft: const Radius.circular(20), topRight: const Radius.circular(20),
+                                  bottomLeft: Radius.circular(isMe ? 20 : 4), bottomRight: Radius.circular(isMe ? 4 : 20),
                                 ),
                               ),
                               child: Column(
@@ -343,31 +299,39 @@ class _P2PChatScreenState extends State<P2PChatScreen> {
                                       child: Padding(
                                         padding: EdgeInsets.only(bottom: text.isNotEmpty ? 8.0 : 0),
                                         child: ClipRRect(
-                                          borderRadius: BorderRadius.circular(12),
+                                          borderRadius: BorderRadius.circular(16),
                                           child: CachedNetworkImage(
-                                            imageUrl: imageUrl,
-                                            width: 200,
-                                            fit: BoxFit.cover,
-                                            placeholder: (context, url) => const SizedBox(height: 150, child: Center(child: CircularProgressIndicator(color: Color(0xFF9CD600)))),
+                                            imageUrl: imageUrl, width: 200, fit: BoxFit.cover,
+                                            placeholder: (context, url) => const SizedBox(height: 150, child: Center(child: CircularProgressIndicator(color: _accentColor))),
                                             errorWidget: (context, url, error) => const Icon(Icons.broken_image, color: Colors.white, size: 40),
                                           ),
                                         ),
                                       ),
                                     ),
-                                  if (text.isNotEmpty)
-                                    Text(text, style: TextStyle(color: isMe ? Colors.black : Colors.white, fontSize: 16)),
-                                  const SizedBox(height: 2),
-                                  Row(
-                                    mainAxisSize: MainAxisSize.min,
-                                    children: [
-                                      if (isEdited)
-                                        const Padding(
-                                          padding: EdgeInsets.only(right: 4),
-                                          child: Text('изм.', style: TextStyle(color: Colors.black45, fontSize: 10, fontWeight: FontWeight.bold)),
+                                  if (text.isNotEmpty || imageUrl == null)
+                                    Wrap(
+                                      alignment: WrapAlignment.end,
+                                      crossAxisAlignment: WrapCrossAlignment.end,
+                                      children: [
+                                        if (text.isNotEmpty)
+                                          Text(text, style: const TextStyle(color: Colors.white, fontSize: 16)),
+                                        const SizedBox(width: 8),
+                                        Padding(
+                                          padding: const EdgeInsets.only(bottom: 2.0),
+                                          child: Row(
+                                            mainAxisSize: MainAxisSize.min,
+                                            children: [
+                                              if (isEdited)
+                                                const Padding(
+                                                  padding: EdgeInsets.only(right: 4),
+                                                  child: Text('изм.', style: TextStyle(color: Colors.white54, fontSize: 10, fontWeight: FontWeight.bold)),
+                                                ),
+                                              Text(timeStr, style: const TextStyle(color: Colors.white54, fontSize: 10, fontWeight: FontWeight.bold)),
+                                            ],
+                                          ),
                                         ),
-                                      Text(timeStr, style: TextStyle(color: isMe ? Colors.black54 : Colors.white54, fontSize: 10, fontWeight: FontWeight.bold)),
-                                    ],
-                                  ),
+                                      ],
+                                    ),
                                 ],
                               ),
                             ),
@@ -381,10 +345,7 @@ class _P2PChatScreenState extends State<P2PChatScreen> {
           
           Container(
             padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
-            decoration: const BoxDecoration(
-              color: Color(0xFF1C1C1E), 
-              border: Border(top: BorderSide(color: Colors.white10))
-            ),
+            decoration: const BoxDecoration(color: Color(0xFF1A1A1C), border: Border(top: BorderSide(color: Colors.white10))),
             child: SafeArea(
               child: Column(
                 mainAxisSize: MainAxisSize.min,
@@ -394,60 +355,41 @@ class _P2PChatScreenState extends State<P2PChatScreen> {
                       padding: const EdgeInsets.only(bottom: 8, left: 8, right: 8),
                       child: Row(
                         children: [
-                          const Icon(Icons.edit, color: Color(0xFF9CD600), size: 16),
+                          const Icon(Icons.edit, color: _accentColor, size: 16),
                           const SizedBox(width: 8),
-                          const Expanded(
-                            child: Text(
-                              'Редактирование',
-                              style: TextStyle(color: Color(0xFF9CD600), fontSize: 13, fontWeight: FontWeight.bold),
-                            ),
-                          ),
-                          GestureDetector(
-                            onTap: _cancelEditing,
-                            child: const Icon(Icons.close, color: Colors.grey, size: 18),
-                          ),
+                          const Expanded(child: Text('Редактирование', style: TextStyle(color: _accentColor, fontSize: 13, fontWeight: FontWeight.bold))),
+                          GestureDetector(onTap: _cancelEditing, child: const Icon(Icons.close, color: Colors.grey, size: 18)),
                         ],
                       ),
                     ),
                   
                   Row(
+                    crossAxisAlignment: CrossAxisAlignment.end,
                     children: [
-                      IconButton(
-                        icon: const Icon(Icons.attach_file, color: Colors.grey),
-                        onPressed: _editingMessageId != null ? null : _showAttachmentOptions,
-                      ),
+                      IconButton(icon: const Icon(Icons.attach_file, color: Colors.grey), onPressed: _editingMessageId != null ? null : _showAttachmentOptions),
                       Expanded(
                         child: Container(
                           padding: const EdgeInsets.symmetric(horizontal: 16),
-                          decoration: BoxDecoration(color: const Color(0xFF2C2C2E), borderRadius: BorderRadius.circular(24)),
+                          decoration: BoxDecoration(color: const Color(0xFFF9F9F9), borderRadius: BorderRadius.circular(20)),
                           child: TextField(
                             controller: _messageController,
+                            keyboardType: TextInputType.multiline,
+                            maxLines: 5, minLines: 1, textCapitalization: TextCapitalization.sentences,
                             style: const TextStyle(color: Colors.white),
-                            maxLines: 4, minLines: 1,
-                            textCapitalization: TextCapitalization.sentences,
-                            decoration: InputDecoration(
-                              hintText: 'Сообщение...',
-                              hintStyle: TextStyle(color: Colors.white.withOpacity(0.4)),
-                              border: InputBorder.none,
-                            ),
+                            decoration: InputDecoration(hintText: 'Сообщение...', hintStyle: TextStyle(color: Colors.white.withOpacity(0.4)), border: InputBorder.none),
                           ),
                         ),
                       ),
                       const SizedBox(width: 8),
                       GestureDetector(
-                        onTap: _isSending 
-                            ? null 
-                            : (_editingMessageId != null ? _updateMessage : _sendMessage),
+                        onTap: _isSending ? null : (_editingMessageId != null ? _updateMessage : _sendMessage),
                         child: Container(
                           padding: const EdgeInsets.all(12),
-                          decoration: const BoxDecoration(color: Color(0xFF9CD600), shape: BoxShape.circle),
+                          margin: const EdgeInsets.only(bottom: 2), 
+                          decoration: const BoxDecoration(color: _accentColor, shape: BoxShape.circle),
                           child: _isSending 
-                            ? const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(color: Colors.black, strokeWidth: 2))
-                            : Icon(
-                                _editingMessageId != null ? Icons.check : Icons.send, 
-                                color: Colors.black, 
-                                size: 20
-                              ),
+                            ? const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2))
+                            : Icon(_editingMessageId != null ? Icons.check : Icons.send, color: Colors.white, size: 20),
                         ),
                       ),
                     ],

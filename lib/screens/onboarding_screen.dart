@@ -2,7 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:easy_localization/easy_localization.dart'; // ЛОКАЛИЗАЦИЯ
-import '../ui_widgets.dart'; 
+import '../ui_widgets.dart';
 import 'dashboard_screen.dart';
 import 'home_wrapper.dart';
 
@@ -17,8 +17,8 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
   final TextEditingController _nameController = TextEditingController();
   final TextEditingController _weightController = TextEditingController();
   final TextEditingController _ageController = TextEditingController();
-  
-  String _selectedGender = 'male'; 
+
+  String _selectedGender = 'male';
   bool _isLoading = false;
 
   Future<void> _saveProfile() async {
@@ -28,7 +28,10 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
 
     if (name.isEmpty || weight.isEmpty || age.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text("fill_all_fields".tr()), backgroundColor: Colors.red),
+        SnackBar(
+          content: Text("fill_all_fields".tr()),
+          backgroundColor: Colors.red,
+        ),
       );
       return;
     }
@@ -54,7 +57,9 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
       }
     } catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text("${'error_msg'.tr()}: $e")));
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text("${'error_msg'.tr()}: $e")));
       }
     } finally {
       if (mounted) setState(() => _isLoading = false);
@@ -73,37 +78,63 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 const SizedBox(height: 40),
-                Text("welcome".tr(), style: const TextStyle(color: Color(0xFF8E8E93), fontSize: 16)),
+                Text(
+                  "welcome".tr(),
+                  style: const TextStyle(
+                    color: Color(0xFF8E8E93),
+                    fontSize: 16,
+                  ),
+                ),
                 const SizedBox(height: 8),
-                Text("lets_get_acquainted".tr(), style: const TextStyle(color: Colors.white, fontSize: 32, fontWeight: FontWeight.w900, fontStyle: FontStyle.italic)),
+                Text(
+                  "lets_get_acquainted".tr(),
+                  style: const TextStyle(
+                    color: Colors.white,
+                    fontSize: 32,
+                    fontWeight: FontWeight.w900,
+                    fontStyle: FontStyle.italic,
+                  ),
+                ),
                 const SizedBox(height: 40),
 
-                Text("how_to_address".tr(), style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
+                Text(
+                  "how_to_address".tr(),
+                  style: const TextStyle(
+                    color: Colors.white,
+                    fontWeight: FontWeight.bold,
+                  ),
+                ),
                 const SizedBox(height: 12),
                 HeavyInput(
-                  controller: _nameController, 
-                  hint: "your_name_hint".tr(), 
+                  controller: _nameController,
+                  hint: "your_name_hint".tr(),
                   onChanged: (v) {},
                 ),
 
                 const SizedBox(height: 24),
 
-                Text("gender".tr(), style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
+                Text(
+                  "gender".tr(),
+                  style: const TextStyle(
+                    color: Colors.white,
+                    fontWeight: FontWeight.bold,
+                  ),
+                ),
                 const SizedBox(height: 12),
                 Row(
                   children: [
                     _GenderButton(
-                      label: "male".tr(), 
-                      icon: Icons.male, 
-                      isSelected: _selectedGender == 'male', 
-                      onTap: () => setState(() => _selectedGender = 'male')
+                      label: "male".tr(),
+                      icon: Icons.male,
+                      isSelected: _selectedGender == 'male',
+                      onTap: () => setState(() => _selectedGender = 'male'),
                     ),
                     const SizedBox(width: 16),
                     _GenderButton(
-                      label: "female".tr(), 
-                      icon: Icons.female, 
-                      isSelected: _selectedGender == 'female', 
-                      onTap: () => setState(() => _selectedGender = 'female')
+                      label: "female".tr(),
+                      icon: Icons.female,
+                      isSelected: _selectedGender == 'female',
+                      onTap: () => setState(() => _selectedGender = 'female'),
                     ),
                   ],
                 ),
@@ -116,11 +147,17 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
                       child: Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
-                          Text("weight_kg_label".tr(), style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
+                          Text(
+                            "weight_kg_label".tr(),
+                            style: const TextStyle(
+                              color: Colors.white,
+                              fontWeight: FontWeight.bold,
+                            ),
+                          ),
                           const SizedBox(height: 12),
                           HeavyInput(
-                            controller: _weightController, 
-                            hint: "80", 
+                            controller: _weightController,
+                            hint: "80",
                             keyboardType: TextInputType.number,
                             onChanged: (v) {},
                           ),
@@ -132,11 +169,17 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
                       child: Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
-                          Text("age_label".tr(), style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
+                          Text(
+                            "age_label".tr(),
+                            style: const TextStyle(
+                              color: Colors.white,
+                              fontWeight: FontWeight.bold,
+                            ),
+                          ),
                           const SizedBox(height: 12),
                           HeavyInput(
-                            controller: _ageController, 
-                            hint: "25", 
+                            controller: _ageController,
+                            hint: "25",
                             keyboardType: TextInputType.number,
                             onChanged: (v) {},
                           ),
@@ -149,12 +192,14 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
                 const SizedBox(height: 60),
 
                 if (_isLoading)
-                  const Center(child: CircularProgressIndicator(color: Color(0xFFCCFF00)))
+                  const Center(
+                    child: CircularProgressIndicator(color: Color(0xFFB76E79)),
+                  )
                 else
                   NeonActionButton(
-                    text: "start_transformation".tr(), 
+                    text: "start_transformation".tr(),
                     onTap: _saveProfile,
-                    isFullWidth: true, 
+                    isFullWidth: true,
                   ),
                 const SizedBox(height: 40),
               ],
@@ -172,7 +217,12 @@ class _GenderButton extends StatelessWidget {
   final bool isSelected;
   final VoidCallback onTap;
 
-  const _GenderButton({required this.label, required this.icon, required this.isSelected, required this.onTap});
+  const _GenderButton({
+    required this.label,
+    required this.icon,
+    required this.isSelected,
+    required this.onTap,
+  });
 
   @override
   Widget build(BuildContext context) {
@@ -182,15 +232,29 @@ class _GenderButton extends StatelessWidget {
         child: Container(
           padding: const EdgeInsets.symmetric(vertical: 16),
           decoration: BoxDecoration(
-            color: isSelected ? const Color(0xFFCCFF00) : const Color(0xFF1C1C1E),
+            color: isSelected
+                ? const Color(0xFFB76E79)
+                : const Color(0xFF1C1C1E),
             borderRadius: BorderRadius.circular(12),
-            border: Border.all(color: isSelected ? const Color(0xFFCCFF00) : Colors.white10),
+            border: Border.all(
+              color: isSelected ? const Color(0xFFB76E79) : Colors.white10,
+            ),
           ),
           child: Column(
             children: [
-              Icon(icon, color: isSelected ? Colors.black : Colors.white, size: 28),
+              Icon(
+                icon,
+                color: isSelected ? Colors.black : Colors.white,
+                size: 28,
+              ),
               const SizedBox(height: 8),
-              Text(label, style: TextStyle(color: isSelected ? Colors.black : Colors.white, fontWeight: FontWeight.bold)),
+              Text(
+                label,
+                style: TextStyle(
+                  color: isSelected ? Colors.black : Colors.white,
+                  fontWeight: FontWeight.bold,
+                ),
+              ),
             ],
           ),
         ),

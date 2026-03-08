@@ -31,18 +31,18 @@ class NutritionSummaryCard extends StatelessWidget {
             int leftCals = targetCals - curC;
             double progress = targetCals > 0 ? (curC / targetCals).clamp(0.0, 1.0) : 0;
             
-            // GUILT-FREE ЛОГИКА
             bool isExceeded = targetCals > 0 && curC > targetCals;
-            final Color accent = isExceeded ? const Color(0xFFB6A6CA) : const Color(0xFFB76E79); // Лавандовый вместо красного
+            final Color accent = isExceeded ? const Color(0xFFB6A6CA) : const Color(0xFFB76E79); 
             final Color textColor = const Color(0xFF2D2D2D);
+            final Color subTextColor = const Color(0xFF8E8E93);
 
             return Container(
-              padding: const EdgeInsets.all(20),
+              padding: const EdgeInsets.all(24), // Увеличили воздух
               decoration: BoxDecoration(
                 color: Colors.white,
-                borderRadius: BorderRadius.circular(24),
+                borderRadius: BorderRadius.circular(24), // Мягкие углы
                 boxShadow: [
-                  BoxShadow(color: Colors.black.withValues(alpha: 0.05), blurRadius: 20, offset: const Offset(0, 8))
+                  BoxShadow(color: Colors.black.withValues(alpha: 0.04), blurRadius: 24, offset: const Offset(0, 8)) // Премиум тень
                 ],
               ),
               child: Column(
@@ -51,11 +51,11 @@ class NutritionSummaryCard extends StatelessWidget {
                   Row(
                     mainAxisAlignment: MainAxisAlignment.spaceBetween,
                     children: [
-                      Text('ПИТАНИЕ НА СЕГОДНЯ', style: TextStyle(color: accent, fontWeight: FontWeight.bold, fontSize: 11, letterSpacing: 1.0)),
-                      const Icon(Icons.bar_chart, color: Colors.grey, size: 18), 
+                      Text('ПИТАНИЕ НА СЕГОДНЯ', style: TextStyle(color: accent, fontWeight: FontWeight.w800, fontSize: 11, letterSpacing: 1.2)),
+                      const Icon(Icons.bar_chart, color: Color(0xFFC7C7CC), size: 20), 
                     ],
                   ),
-                  const SizedBox(height: 12),
+                  const SizedBox(height: 16),
                   Row(
                     mainAxisAlignment: MainAxisAlignment.spaceBetween,
                     crossAxisAlignment: CrossAxisAlignment.end,
@@ -63,30 +63,29 @@ class NutritionSummaryCard extends StatelessWidget {
                       Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
-                          // Меняем текст, если норма превышена
-                          Text(isExceeded ? 'Норма выполнена ✨' : 'Осталось', style: const TextStyle(color: Colors.grey, fontSize: 12)),
-                          Text(isExceeded ? 'Баланс' : '${leftCals.abs()} ккал', style: TextStyle(color: textColor, fontSize: isExceeded ? 24 : 28, fontWeight: FontWeight.w900)),
+                          Text(isExceeded ? 'Норма выполнена ✨' : 'Осталось', style: TextStyle(color: subTextColor, fontSize: 13, fontWeight: FontWeight.w500)),
+                          Text(isExceeded ? 'Баланс' : '${leftCals.abs()} ккал', style: TextStyle(color: textColor, fontSize: isExceeded ? 26 : 30, fontWeight: FontWeight.w900, letterSpacing: -0.5)),
                         ],
                       ),
                       Column(
                         crossAxisAlignment: CrossAxisAlignment.end,
                         children: [
-                          Text('Б: $curP / $targetP', style: const TextStyle(color: Colors.grey, fontSize: 12, fontWeight: FontWeight.w600)),
-                          const SizedBox(height: 2),
-                          Text('Ж: $curF / $targetF', style: const TextStyle(color: Colors.grey, fontSize: 12, fontWeight: FontWeight.w600)),
-                          const SizedBox(height: 2),
-                          Text('У: $curCarb / $targetC', style: const TextStyle(color: Colors.grey, fontSize: 12, fontWeight: FontWeight.w600)),
+                          Text('Б: $curP / $targetP', style: TextStyle(color: subTextColor, fontSize: 12, fontWeight: FontWeight.w600)),
+                          const SizedBox(height: 4),
+                          Text('Ж: $curF / $targetF', style: TextStyle(color: subTextColor, fontSize: 12, fontWeight: FontWeight.w600)),
+                          const SizedBox(height: 4),
+                          Text('У: $curCarb / $targetC', style: TextStyle(color: subTextColor, fontSize: 12, fontWeight: FontWeight.w600)),
                         ],
                       ),
                     ],
                   ),
-                  const SizedBox(height: 16), 
+                  const SizedBox(height: 20), 
                   ClipRRect(
-                    borderRadius: BorderRadius.circular(10),
+                    borderRadius: BorderRadius.circular(12),
                     child: LinearProgressIndicator(
                       value: progress,
-                      backgroundColor: const Color(0xFFF0F0F0),
-                      valueColor: AlwaysStoppedAnimation<Color>(accent), // Становится лавандовым
+                      backgroundColor: const Color(0xFFF2F2F7),
+                      valueColor: AlwaysStoppedAnimation<Color>(accent), 
                       minHeight: 8, 
                     ),
                   ),

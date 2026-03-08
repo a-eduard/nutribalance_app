@@ -2,9 +2,9 @@ import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:easy_localization/easy_localization.dart';
-import 'package:flutter/gestures.dart';
-import 'package:url_launcher/url_launcher.dart';
 import '../services/auth_service.dart';
+import '../paywall_screen.dart';
+import 'home_wrapper.dart';
 
 class AuthScreen extends StatefulWidget {
   const AuthScreen({super.key});
@@ -25,8 +25,10 @@ class _AuthScreenState extends State<AuthScreen> {
   final TextEditingController _passwordController = TextEditingController();
   final TextEditingController _nameController = TextEditingController();
 
-  static const Color _accentColor = Color(0xFFB76E79); // Rose Gold
-  static const Color _bgColor = Color(0xFF1A1A1C); // Мягкий темный фон
+  static const Color _accentColor = Color(0xFFB76E79); 
+  static const Color _bgColor = Color(0xFFF9F9F9); 
+  static const Color _textColor = Color(0xFF2D2D2D);
+  static const Color _subTextColor = Color(0xFF8E8E93);
 
   Future<void> _submit() async {
     final email = _emailController.text.trim();
@@ -38,23 +40,41 @@ class _AuthScreenState extends State<AuthScreen> {
       return;
     }
 
+    if (!_isLogin && !_acceptedTerms) {
+      _showError("Примите условия соглашения");
+      return;
+    }
+
     setState(() => _isLoading = true);
 
     try {
+      UserCredential cred;
       if (_isLogin) {
-        await _auth.signInWithEmailAndPassword(email: email, password: password);
+        cred = await _auth.signInWithEmailAndPassword(email: email, password: password);
       } else {
-        UserCredential cred = await _auth.createUserWithEmailAndPassword(email: email, password: password);
+        cred = await _auth.createUserWithEmailAndPassword(email: email, password: password);
         if (cred.user != null) {
           await _db.collection('users').doc(cred.user!.uid).set({
             'name': name,
             'email': email,
-            'activeRole': 'user', // Роль теперь только одна
+            'activeRole': 'user',
             'createdAt': FieldValue.serverTimestamp(),
             'isPro': false, 
           }, SetOptions(merge: true));
         }
       }
+      
+      if (cred.user != null && mounted) {
+        final userDoc = await _db.collection('users').doc(cred.user!.uid).get();
+        final isPro = userDoc.data()?['isPro'] ?? false;
+        
+        if (!isPro) {
+          Navigator.pushReplacement(context, MaterialPageRoute(builder: (_) => const PaywallScreen()));
+        } else {
+          Navigator.pushReplacement(context, MaterialPageRoute(builder: (_) => const HomeWrapper())); 
+        }
+      }
+      
     } on FirebaseAuthException catch (e) {
       _showError(e.message ?? "error_msg".tr());
     } finally {
@@ -73,6 +93,7 @@ class _AuthScreenState extends State<AuthScreen> {
       if (result is UserCredential && result.user != null) {
         final uid = result.user!.uid;
         final userDoc = await _db.collection('users').doc(uid).get();
+        
         if (!userDoc.exists) {
           await _db.collection('users').doc(uid).set({
             'name': result.user!.displayName ?? 'Пользователь',
@@ -82,9 +103,23 @@ class _AuthScreenState extends State<AuthScreen> {
             'isPro': false,
           });
         }
+        
+        if (mounted) {
+           final updatedDoc = await _db.collection('users').doc(uid).get();
+           final isPro = updatedDoc.data()?['isPro'] ?? false;
+           
+           if (!isPro) {
+             Navigator.pushReplacement(context, MaterialPageRoute(builder: (_) => const PaywallScreen()));
+           } else {
+             Navigator.pushReplacement(context, MaterialPageRoute(builder: (_) => const HomeWrapper())); 
+           }
+        }
+        
+      } else if (result is String) {
+        _showError(result);
       }
     } catch (e) {
-      _showError("Произошла ошибка");
+      _showError("Произошла ошибка авторизации");
     } finally {
       if (mounted) setState(() => _isLoading = false);
     }
@@ -101,53 +136,85 @@ class _AuthScreenState extends State<AuthScreen> {
       body: SafeArea(
         child: Center(
           child: SingleChildScrollView(
-            padding: const EdgeInsets.all(24.0),
+            padding: const EdgeInsets.symmetric(horizontal: 28.0, vertical: 24.0),
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.center,
               children: [
                 const Text(
-                  'NutriBalance', // Новое название
-                  style: TextStyle(color: _accentColor, fontSize: 28, fontWeight: FontWeight.w900, letterSpacing: 1.5),
+                  'NutriBalance',
+                  style: TextStyle(color: _accentColor, fontSize: 34, fontWeight: FontWeight.w900, letterSpacing: 0.5),
                 ),
                 const SizedBox(height: 8),
-                const Text('Гармония в каждой калории', style: TextStyle(color: Colors.grey, fontSize: 14)),
-                const SizedBox(height: 40),
+                const Text('Гармония в каждой калории', style: TextStyle(color: _subTextColor, fontSize: 15, fontWeight: FontWeight.w500)),
+                const SizedBox(height: 48),
 
                 if (!_isLogin) ...[
-                  _buildInput(_nameController, "Имя", Icons.person),
+                  _buildInput(_nameController, "Имя", Icons.person_outline),
                   const SizedBox(height: 16),
                 ],
-                _buildInput(_emailController, "Email", Icons.email),
+                _buildInput(_emailController, "Email", Icons.email_outlined),
                 const SizedBox(height: 16),
-                _buildInput(_passwordController, "Пароль", Icons.lock, isPassword: true),
+                _buildInput(_passwordController, "Пароль", Icons.lock_outline, isPassword: true),
 
                 if (!_isLogin) ...[
                   const SizedBox(height: 24),
                   _buildLegalCheckbox(),
                 ],
                 
-                const SizedBox(height: 32),
+                const SizedBox(height: 40),
 
-                SizedBox(
-                  width: double.infinity, height: 56,
+                Container(
+                  width: double.infinity, 
+                  height: 60,
+                  decoration: BoxDecoration(
+                    gradient: const LinearGradient(colors: [_accentColor, Color(0xFFD49A89)], begin: Alignment.topLeft, end: Alignment.bottomRight),
+                    borderRadius: BorderRadius.circular(24),
+                    boxShadow: [BoxShadow(color: _accentColor.withValues(alpha: 0.3), blurRadius: 24, offset: const Offset(0, 8))],
+                  ),
                   child: ElevatedButton(
                     onPressed: _isLoading ? null : _submit,
                     style: ElevatedButton.styleFrom(
-                      backgroundColor: _accentColor,
-                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)), // Плавные углы
+                      backgroundColor: Colors.transparent,
+                      shadowColor: Colors.transparent,
+                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(24)),
                     ),
                     child: _isLoading 
-                      ? const CircularProgressIndicator(color: Colors.white)
-                      : Text(_isLogin ? "ВОЙТИ" : "СОЗДАТЬ АККАУНТ", style: const TextStyle(fontWeight: FontWeight.w900, color: Colors.white, fontSize: 16)),
+                      ? const SizedBox(width: 24, height: 24, child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2))
+                      : Text(_isLogin ? "ВОЙТИ" : "СОЗДАТЬ АККАУНТ", style: const TextStyle(fontWeight: FontWeight.w800, color: Colors.white, fontSize: 16, letterSpacing: 1.0)),
                   ),
                 ),
 
-                const SizedBox(height: 24),
+                const SizedBox(height: 20),
+
+                // ИСПРАВЛЕНО: Ссылка заменена на PNG-версию логотипа
+                Container(
+                  width: double.infinity, height: 60,
+                  decoration: BoxDecoration(
+                    color: Colors.white,
+                    borderRadius: BorderRadius.circular(24),
+                    boxShadow: [BoxShadow(color: Colors.black.withValues(alpha: 0.04), blurRadius: 24, offset: const Offset(0, 8))],
+                  ),
+                  child: OutlinedButton.icon(
+                    onPressed: _isLoading ? null : _handleGoogleSignIn,
+                    icon: Image.network(
+                      'https://cdn-icons-png.flaticon.com/512/2991/2991148.png', // Надежный и качественный PNG
+                       width: 22,
+                    ),
+                    label: const Text("Войти через Google", style: TextStyle(color: _textColor, fontWeight: FontWeight.w700, fontSize: 15)),
+                    style: OutlinedButton.styleFrom(
+                      backgroundColor: Colors.transparent,
+                      side: const BorderSide(color: Colors.transparent),
+                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(24)),
+                    ),
+                  ),
+                ),
+
+                const SizedBox(height: 32),
                 TextButton(
                   onPressed: () => setState(() => _isLogin = !_isLogin),
                   child: Text(
                     _isLogin ? "Нет аккаунта? Зарегистрироваться" : "Уже есть аккаунт? Войти",
-                    style: const TextStyle(color: _accentColor, fontWeight: FontWeight.bold),
+                    style: const TextStyle(color: _accentColor, fontWeight: FontWeight.bold, fontSize: 15),
                   ),
                 ),
               ],
@@ -160,14 +227,20 @@ class _AuthScreenState extends State<AuthScreen> {
 
   Widget _buildInput(TextEditingController controller, String hint, IconData icon, {bool isPassword = false}) {
     return Container(
-      decoration: BoxDecoration(color: const Color(0xFFF9F9F9), borderRadius: BorderRadius.circular(20)),
+      decoration: BoxDecoration(
+        color: Colors.white, 
+        borderRadius: BorderRadius.circular(16), 
+        boxShadow: [BoxShadow(color: Colors.black.withValues(alpha: 0.02), blurRadius: 10, offset: const Offset(0, 4))],
+      ),
       child: TextField(
         controller: controller, obscureText: isPassword,
-        style: const TextStyle(color: Colors.white),
+        style: const TextStyle(color: _textColor, fontWeight: FontWeight.w600),
         decoration: InputDecoration(
-          prefixIcon: Icon(icon, color: Colors.grey, size: 20),
-          hintText: hint, hintStyle: TextStyle(color: Colors.white.withOpacity(0.3)),
-          border: InputBorder.none, contentPadding: const EdgeInsets.symmetric(vertical: 18),
+          prefixIcon: Icon(icon, color: const Color(0xFFC7C7CC), size: 22),
+          hintText: hint, 
+          hintStyle: const TextStyle(color: Color(0xFFC7C7CC), fontWeight: FontWeight.w400),
+          border: InputBorder.none, 
+          contentPadding: const EdgeInsets.symmetric(vertical: 20),
         ),
       ),
     );
@@ -175,11 +248,16 @@ class _AuthScreenState extends State<AuthScreen> {
 
   Widget _buildLegalCheckbox() {
     return Row(
-      crossAxisAlignment: CrossAxisAlignment.start,
+      crossAxisAlignment: CrossAxisAlignment.center,
       children: [
-        Checkbox(value: _acceptedTerms, onChanged: (val) => setState(() => _acceptedTerms = val ?? false), activeColor: _accentColor),
-        Expanded(
-          child: Text("Я соглашаюсь с Политикой конфиденциальности", style: const TextStyle(color: Colors.grey, fontSize: 12)),
+        Checkbox(
+          value: _acceptedTerms, 
+          onChanged: (val) => setState(() => _acceptedTerms = val ?? false), 
+          activeColor: _accentColor,
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(6)),
+        ),
+        const Expanded(
+          child: Text("Я соглашаюсь с Политикой конфиденциальности", style: TextStyle(color: _subTextColor, fontSize: 13, fontWeight: FontWeight.w500)),
         ),
       ],
     );

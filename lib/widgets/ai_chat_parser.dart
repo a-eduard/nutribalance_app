@@ -1,6 +1,5 @@
 import 'package:flutter/material.dart';
 import '../services/database_service.dart';
-import 'shopping_list_widget.dart';
 
 class AIChatSaveCardWidget extends StatefulWidget {
   final Map<String, dynamic> jsonData;
@@ -41,11 +40,6 @@ class _AIChatSaveCardWidgetState extends State<AIChatSaveCardWidget> {
     final String actionType = widget.jsonData['action_type'] ?? widget.jsonData['type'] ?? '';
     
     if (actionType == 'advice') return const SizedBox.shrink();
-    
-    // ВЫЗОВ СПИСКА ПОКУПОК
-    if (actionType == 'shopping_list') {
-      return ShoppingListCardWidget(data: widget.jsonData);
-    }
 
     if (actionType == 'needs_plan') {
       final draft = widget.jsonData['draft_meal'] ?? {};
@@ -115,7 +109,12 @@ class _AIChatSaveCardWidgetState extends State<AIChatSaveCardWidget> {
     String buttonText = "СОХРАНИТЬ";
     Color cardAccentColor = widget.themeColor; 
 
-    if (actionType == 'update_goal' || actionType == 'set_goal') {
+    if (actionType == 'shopping_list') {
+      title = "🛒 Список покупок";
+      description = "Ева составила список продуктов. Хотите сохранить его на Главный экран?";
+      buttonText = "СОХРАНИТЬ СПИСОК";
+      cardAccentColor = Colors.teal;
+    } else if (actionType == 'update_goal' || actionType == 'set_goal') {
       title = "🎯 Ваша новая цель КБЖУ";
       description = "${widget.jsonData['calories'] ?? 0} ккал\nБ: ${widget.jsonData['protein'] ?? 0}г | Ж: ${widget.jsonData['fat'] ?? 0}г | У: ${widget.jsonData['carbs'] ?? 0}г";
       buttonText = "ОБНОВИТЬ ЦЕЛЬ";
@@ -158,7 +157,10 @@ class _AIChatSaveCardWidgetState extends State<AIChatSaveCardWidget> {
                     await DatabaseService().saveNutritionGoal(widget.jsonData);
                   } else if (actionType == 'log_food' || actionType == 'log_meal') {
                     await DatabaseService().logMeal(widget.jsonData);
+                  } else if (actionType == 'shopping_list') {
+                    await DatabaseService().saveShoppingList(widget.jsonData);
                   }
+                  
                   await DatabaseService().markBotMessageAsActionCompleted(widget.botType, widget.msgId);
                   setState(() => _isSaved = true);
                   widget.onSaveSuccess(widget.msgId);

@@ -525,4 +525,58 @@ $customFoodsContext
     });
     await _updateWeeklyNutritionCache(user.uid);
   }
+  // --- СПИСОК ПОКУПОК ---
+  Future<void> saveShoppingList(Map<String, dynamic> jsonData) async {
+    final user = _auth.currentUser;
+    if (user == null) return;
+    
+    final categories = jsonData['categories'] ?? [];
+    
+    // Форматируем список, добавляя поле isChecked: false ко всем продуктам
+    List<dynamic> parsedCategories = [];
+    for (var cat in categories) {
+      List<dynamic> items = cat['items'] ?? [];
+      List<dynamic> parsedItems = items.map((item) => {
+        'name': item['name'] ?? '',
+        'amount': item['amount'] ?? '',
+        'isChecked': false,
+      }).toList();
+      
+      parsedCategories.add({
+        'name': cat['name'] ?? 'Категория',
+        'items': parsedItems,
+      });
+    }
+
+    // Сохраняем в коллекцию пользователя
+    await _db.collection('users').doc(user.uid).collection('shopping_list').doc('current').set({
+      'categories': parsedCategories,
+      'updatedAt': FieldValue.serverTimestamp(),
+    });
+  }
+
+  Future<void> toggleShoppingListItem(String categoryName, String itemName, bool isChecked) async {
+    final user = _auth.currentUser;
+    if (user == null) return;
+    
+    final docRef = _db.collection('users').doc(user.uid).collection('shopping_list').doc('current');
+    
+    await _db.runTransaction((transaction) async {
+      final snapshot = await transaction.get(docRef);
+      if (!snapshot.exists) return;
+      
+      List<dynamic> categories = snapshot.data()?['categories'] ?? [];
+      for (var cat in categories) {
+        if (cat['name'] == categoryName) {
+          List<dynamic> items = cat['items'] ?? [];
+          for (var item in items) {
+            if (item['name'] == itemName) {
+              item['isChecked'] = isChecked;
+            }
+          }
+        }
+      }
+      transaction.update(docRef, {'categories': categories});
+    });
+  }
 }

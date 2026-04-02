@@ -50,3 +50,9 @@ ios/Runner/GeneratedPluginRegistrant.*
 
 # Firebase (если используешь эмуляторы)
 firebase-debug.log
+
+# Секреты и конфигурации Firebase
+**/android/app/google-services.json
+**/ios/Runner/GoogleService-Info.plist
+**/macos/Runner/GoogleService-Info.plist
+firebase-export-*/

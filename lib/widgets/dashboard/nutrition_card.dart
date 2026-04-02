@@ -10,6 +10,9 @@ class NutritionSummaryCard extends StatelessWidget {
     return StreamBuilder<DocumentSnapshot>(
       stream: DatabaseService().getNutritionGoal(),
       builder: (context, goalSnapshot) {
+        // === БРОНЕБОЙНАЯ ЗАЩИТА ПОТОКА ===
+        if (goalSnapshot.hasError) return const SizedBox.shrink();
+        
         final goalData = goalSnapshot.data?.data() as Map<String, dynamic>?;
         final int targetCals = goalData?['calories'] ?? 0;
         final int targetP = goalData?['protein'] ?? 0;
@@ -19,30 +22,53 @@ class NutritionSummaryCard extends StatelessWidget {
         return StreamBuilder<DocumentSnapshot>(
           stream: DatabaseService().getTodayMealsDoc(),
           builder: (context, mealSnapshot) {
+            // === БРОНЕБОЙНАЯ ЗАЩИТА ПОТОКА ===
+            if (mealSnapshot.hasError) return const Center(child: Text("Ошибка загрузки данных"));
+
             int curC = 0, curP = 0, curF = 0, curCarb = 0;
+            double totalHealthScore = 0;
+            int mealsCount = 0;
+
             if (mealSnapshot.hasData && mealSnapshot.data!.exists) {
               final data = mealSnapshot.data!.data() as Map<String, dynamic>? ?? {};
               curC = (data['calories'] as num?)?.toInt() ?? 0;
               curP = (data['protein'] as num?)?.toInt() ?? 0;
               curF = (data['fat'] as num?)?.toInt() ?? 0;
               curCarb = (data['carbs'] as num?)?.toInt() ?? 0;
+              
+              // === БЕЗОПАСНЫЙ ПАРСИНГ ИНДЕКСА ПОЛЬЗЫ ===
+              final List<dynamic> items = data['items'] ?? [];
+              for (var item in items) {
+                if (item is Map<String, dynamic>) {
+                  if (item.containsKey('health_score') && item['health_score'] != null) {
+                    totalHealthScore += (item['health_score'] as num).toDouble();
+                    mealsCount++;
+                  }
+                }
+              }
             }
 
+            final int avgHealthScore = mealsCount > 0 ? (totalHealthScore / mealsCount).round() : 0;
             int leftCals = targetCals - curC;
             double progress = targetCals > 0 ? (curC / targetCals).clamp(0.0, 1.0) : 0;
             
             bool isExceeded = targetCals > 0 && curC > targetCals;
-            final Color accent = isExceeded ? const Color(0xFFB6A6CA) : const Color(0xFFB76E79); 
+            final Color activeColor = isExceeded ? const Color(0xFFB6A6CA) : const Color(0xFFB76E79); 
             final Color textColor = const Color(0xFF2D2D2D);
             final Color subTextColor = const Color(0xFF8E8E93);
+            const Color roseGold = Color(0xFFB76E79); // Фирменный цвет для концепции Guilt-Free
 
             return Container(
-              padding: const EdgeInsets.all(24), // Увеличили воздух
+              padding: const EdgeInsets.all(24), 
               decoration: BoxDecoration(
                 color: Colors.white,
-                borderRadius: BorderRadius.circular(24), // Мягкие углы
+                borderRadius: BorderRadius.circular(24), 
                 boxShadow: [
-                  BoxShadow(color: Colors.black.withValues(alpha: 0.04), blurRadius: 24, offset: const Offset(0, 8)) // Премиум тень
+                  BoxShadow(
+                    color: Colors.black.withValues(alpha: 0.04), 
+                    blurRadius: 24, 
+                    offset: const Offset(0, 8)
+                  )
                 ],
               ),
               child: Column(
@@ -51,22 +77,47 @@ class NutritionSummaryCard extends StatelessWidget {
                   Row(
                     mainAxisAlignment: MainAxisAlignment.spaceBetween,
                     children: [
-                      Text('ПИТАНИЕ НА СЕГОДНЯ', style: TextStyle(color: accent, fontWeight: FontWeight.w800, fontSize: 11, letterSpacing: 1.2)),
-                      const Icon(Icons.bar_chart, color: Color(0xFFC7C7CC), size: 20), 
+                      Text('ПИТАНИЕ НА СЕГОДНЯ', style: TextStyle(color: activeColor, fontWeight: FontWeight.w800, fontSize: 11, letterSpacing: 1.2)),
+                      // === ВЫВОД ИНДЕКСА ПОЛЬЗЫ В СТРОГОМ ROSE GOLD ЦВЕТЕ ===
+                      if (mealsCount > 0)
+                        Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                          decoration: BoxDecoration(
+                            color: roseGold.withValues(alpha: 0.1), 
+                            borderRadius: BorderRadius.circular(8)
+                          ),
+                          child: Row(
+                            children: [
+                              const Icon(Icons.favorite, color: roseGold, size: 12),
+                              const SizedBox(width: 4),
+                              Text("Польза $avgHealthScore/10", style: const TextStyle(color: roseGold, fontSize: 10, fontWeight: FontWeight.bold)),
+                            ],
+                          ),
+                        )
+                      else
+                        const Icon(Icons.bar_chart, color: Color(0xFFC7C7CC), size: 20), 
                     ],
                   ),
                   const SizedBox(height: 16),
                   Row(
-                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
                     crossAxisAlignment: CrossAxisAlignment.end,
                     children: [
-                      Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Text(isExceeded ? 'Норма выполнена ✨' : 'Осталось', style: TextStyle(color: subTextColor, fontSize: 13, fontWeight: FontWeight.w500)),
-                          Text(isExceeded ? 'Баланс' : '${leftCals.abs()} ккал', style: TextStyle(color: textColor, fontSize: isExceeded ? 26 : 30, fontWeight: FontWeight.w900, letterSpacing: -0.5)),
-                        ],
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            // === ИСПРАВЛЕННЫЙ ТЕКСТ СВЕРХ НОРМЫ ===
+                            Text(isExceeded ? 'Сверх нормы ✨' : 'Осталось', style: TextStyle(color: subTextColor, fontSize: 13, fontWeight: FontWeight.w600)),
+                            FittedBox(
+                              fit: BoxFit.scaleDown,
+                              alignment: Alignment.centerLeft,
+                              // === ИСПРАВЛЕННЫЙ ВЫВОД ЦИФРЫ ===
+                              child: Text('${leftCals.abs()} ккал', style: TextStyle(color: textColor, fontSize: isExceeded ? 26 : 30, fontWeight: FontWeight.w900, letterSpacing: -0.5)),
+                            ),
+                          ],
+                        ),
                       ),
+                      const SizedBox(width: 8),
                       Column(
                         crossAxisAlignment: CrossAxisAlignment.end,
                         children: [
@@ -80,14 +131,20 @@ class NutritionSummaryCard extends StatelessWidget {
                     ],
                   ),
                   const SizedBox(height: 20), 
-                  ClipRRect(
-                    borderRadius: BorderRadius.circular(12),
-                    child: LinearProgressIndicator(
-                      value: progress,
-                      backgroundColor: const Color(0xFFF2F2F7),
-                      valueColor: AlwaysStoppedAnimation<Color>(accent), 
-                      minHeight: 8, 
-                    ),
+                  TweenAnimationBuilder<Color?>(
+                    tween: ColorTween(end: activeColor),
+                    duration: const Duration(milliseconds: 500),
+                    builder: (context, color, child) {
+                      return ClipRRect(
+                        borderRadius: BorderRadius.circular(12),
+                        child: LinearProgressIndicator(
+                          value: progress,
+                          backgroundColor: const Color(0xFFF9F9F9),
+                          valueColor: AlwaysStoppedAnimation<Color>(color ?? const Color(0xFFB76E79)), 
+                          minHeight: 8, 
+                        ),
+                      );
+                    },
                   ),
                 ],
               ),

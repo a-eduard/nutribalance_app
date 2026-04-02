@@ -2,11 +2,12 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:firebase_core/firebase_core.dart';
 import 'package:firebase_messaging/firebase_messaging.dart';
+import 'package:firebase_app_check/firebase_app_check.dart'; // <-- ДОБАВЛЕНО
 import 'package:easy_localization/easy_localization.dart';
 
 import 'firebase_options.dart';
 import 'screens/home_wrapper.dart';
-import 'services/local_notification_service.dart'; 
+import 'services/local_notification_service.dart';
 
 @pragma('vm:entry-point')
 Future<void> _firebaseMessagingBackgroundHandler(RemoteMessage message) async {
@@ -22,6 +23,18 @@ Future<void> main() async {
   await Firebase.initializeApp(
     options: DefaultFirebaseOptions.currentPlatform,
   );
+
+  // === ИСПРАВЛЕНИЕ БАГА С ЗАВИСАНИЕМ (APP CHECK) ===
+  // Теперь Firebase сразу получает провайдер и не блокирует сетевые потоки
+  try {
+    await FirebaseAppCheck.instance.activate(
+      androidProvider: AndroidProvider.playIntegrity, 
+      appleProvider: AppleProvider.deviceCheck,       
+    );
+    debugPrint("App Check успешно инициализирован");
+  } catch (e) {
+    debugPrint("Ошибка инициализации App Check: $e");
+  }
 
   await LocalNotificationService().init();
   await EasyLocalization.ensureInitialized();
@@ -48,7 +61,7 @@ class MyApp extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
-      title: 'NutriBalance',
+      title: 'MyEva',
       debugShowCheckedModeBanner: false,
       
       localizationsDelegates: context.localizationDelegates,

@@ -1,80 +1,186 @@
 const { onCall, HttpsError } = require("firebase-functions/v2/https");
+const { onRequest } = require("firebase-functions/v2/https");
 const { onDocumentCreated } = require("firebase-functions/v2/firestore");
 const { defineString } = require("firebase-functions/params");
 const auth = require("firebase-functions/v1/auth"); 
 const admin = require("firebase-admin");
 const { GoogleGenerativeAI } = require("@google/generative-ai");
+const crypto = require("crypto"); // Для ключей идемпотентности ЮKassa
 
 admin.initializeApp();
+
 const geminiKey = defineString('GEMINI_API_KEY');
+// Ключи ЮKassa из твоего файла .env
+const yooShopId = defineString('YOOKASSA_SHOP_ID');
+const yooSecretKey = defineString('YOOKASSA_SECRET_KEY');
 
 function getGenAI() {
     return new GoogleGenerativeAI(geminiKey.value());
 }
 
 // ==========================================
-// 1. ОЧИСТКА ДАННЫХ ПРИ УДАЛЕНИИ АККАУНТА
+// 1. ПЛАТЕЖИ ЮKASSA
 // ==========================================
-exports.cleanupOnAccountDelete = auth.user().onDelete(async (user) => {
-    const uid = user.uid;
-    console.log(`[cleanupOnAccountDelete] Cleaning up data for user ${uid}`);
-    const db = admin.firestore();
+
+// 1.1 СОЗДАНИЕ ПЛАТЕЖА (Вызывается из Flutter)
+exports.createPayment = onCall(async (request) => {
+    if (!request.auth) throw new HttpsError('unauthenticated', 'Нужна авторизация.');
+
+    const uid = request.auth.uid;
+    const userEmail = request.auth.token.email || 'no-reply@myeva.ru'; 
+    
+    // ФИКС 3: Идемпотентность теперь генерируется на клиенте (защита от двойных списаний)
+    const { amount, description, paymentType, durationDays, idempotencyKey } = request.data;
+    if (!idempotencyKey) throw new HttpsError('invalid-argument', 'Отсутствует ключ идемпотентности');
+
+    const authString = Buffer.from(`${yooShopId.value()}:${yooSecretKey.value()}`).toString('base64');
+    const formattedAmount = Number(amount).toFixed(2);
 
     try {
-        const userRef = db.collection('users').doc(uid);
-        const subcollections = await userRef.listCollections();
+        const response = await fetch('https://api.yookassa.ru/v3/payments', {
+            method: 'POST',
+            headers: {
+                'Authorization': `Basic ${authString}`,
+                'Idempotence-Key': idempotencyKey, 
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({
+                amount: { value: formattedAmount, currency: "RUB" },
+                capture: true,
+                confirmation: { type: "redirect", return_url: "https://myeva.ru/success" },
+                description: description,
+                receipt: {
+                    customer: { email: userEmail },
+                    items: [
+                        {
+                            // УЛУЧШЕНИЕ 1: Строгое описание для ФНС
+                            description: "Оплата информационных услуг MyEva", 
+                            quantity: "1.00",
+                            amount: { value: formattedAmount, currency: "RUB" },
+                            vat_code: 1, 
+                            payment_mode: "full_prepayment", 
+                            payment_subject: "service" 
+                        }
+                    ]
+                },
+                metadata: {
+                    userId: uid,
+                    paymentType: paymentType || 'premium',
+                    durationDays: durationDays ? durationDays.toString() : '30'
+                }
+            })
+        });
 
-        for (const subcoll of subcollections) {
-            await deleteCollectionInBatches(subcoll);
-        }
+        const paymentData = await response.json();
+        if (!response.ok) throw new HttpsError('invalid-argument', `ЮKassa отказала: ${paymentData.description || 'Неизвестная ошибка'}`);
 
-        await userRef.delete();
-        
-        const bucket = admin.storage().bucket();
-        await bucket.deleteFiles({ prefix: `users/${uid}/` });
-
-        console.log(`[cleanupOnAccountDelete] SUCCESS for ${uid}`);
+        return { paymentId: paymentData.id, confirmationUrl: paymentData.confirmation.confirmation_url };
     } catch (error) {
-        console.error(`[cleanupOnAccountDelete] FATAL ERROR for ${uid}:`, error);
+        console.error("🔥 Ошибка createPayment:", error);
+        if (error instanceof HttpsError) throw error;
+        throw new HttpsError('internal', `Сбой сервера: ${error.message}`);
     }
 });
 
-async function deleteCollectionInBatches(collectionRef) {
-    const batchSize = 500;
-    let snapshot = await collectionRef.limit(batchSize).get();
+// 1.2 WEBHOOK (Слушает ЮKassa и выдает доступ)
+exports.yookassaWebhook = onRequest(async (req, res) => {
+    // ФИКС 1: Базовая защита вебхука. ЮKassa шлет только POST.
+    if (req.method !== 'POST') return res.status(405).send('Method Not Allowed');
+    
+    // Идеально: добавь в ЛК ЮKassa к URL вебхука ?secret=ТВОЙ_ПАРОЛЬ и раскомментируй строку ниже:
+    // if (req.query.secret !== 'super_secret_code_123') return res.status(403).send('Forbidden');
 
+    const event = req.body;
+
+    if (event && event.event === 'payment.succeeded') {
+        const paymentObj = event.object;
+        const uid = paymentObj.metadata?.userId;
+        const pType = paymentObj.metadata?.paymentType; 
+        const durationDays = parseInt(paymentObj.metadata?.durationDays || '30', 10);
+
+        if (uid) {
+            try {
+                const db = admin.firestore();
+                const userRef = db.collection('users').doc(uid);
+                
+                if (pType === 'specialist') {
+                    await userRef.update({ hasSpecialistAccess: true });
+                } else {
+                    // ФИКС 2: Честное накопление дней подписки
+                    await db.runTransaction(async (t) => {
+                        const doc = await t.get(userRef);
+                        const data = doc.data() || {};
+                        
+                        let currentProUntil = data.proUntil ? data.proUntil.toDate() : new Date();
+                        // Если подписка уже истекла, считаем от сегодня
+                        if (currentProUntil < new Date()) {
+                            currentProUntil = new Date();
+                        }
+                        
+                        currentProUntil.setDate(currentProUntil.getDate() + durationDays);
+                        
+                        t.update(userRef, {
+                            isPro: true,
+                            proUntil: admin.firestore.Timestamp.fromDate(currentProUntil)
+                        });
+                    });
+                }
+                console.log(`✅ Доступ выдан юзеру ${uid} за платеж ${paymentObj.id}`);
+            } catch (error) {
+                console.error("Ошибка выдачи доступа:", error);
+            }
+        }
+    }
+    res.status(200).send('OK');
+});
+
+// ==========================================
+// 2. ОЧИСТКА ДАННЫХ ПРИ УДАЛЕНИИ АККАУНТА
+// ==========================================
+exports.cleanupOnAccountDelete = auth.user().onDelete(async (user) => {
+    const uid = user.uid;
+    const db = admin.firestore();
+    try {
+        const chatsSnap = await db.collection('chats').where('users', 'array-contains', uid).get();
+        if (!chatsSnap.empty) {
+            const chatBatch = db.batch();
+            chatsSnap.docs.forEach(doc => chatBatch.delete(doc.ref));
+            await chatBatch.commit();
+        }
+
+        const userRef = db.collection('users').doc(uid);
+        const subcollections = await userRef.listCollections();
+        for (const subcoll of subcollections) await deleteCollectionInBatches(subcoll);
+        await userRef.delete();
+        await admin.storage().bucket().deleteFiles({ prefix: `users/${uid}/` });
+    } catch (error) { console.error(`[cleanupOnAccountDelete] ERROR for ${uid}:`, error); }
+});
+
+async function deleteCollectionInBatches(collectionRef) {
+    let snapshot = await collectionRef.limit(500).get();
     while (snapshot.size > 0) {
         const batch = admin.firestore().batch();
-        snapshot.docs.forEach((doc) => {
-            batch.delete(doc.ref);
-        });
+        snapshot.docs.forEach((doc) => batch.delete(doc.ref));
         await batch.commit();
-        snapshot = await collectionRef.limit(batchSize).get();
+        snapshot = await collectionRef.limit(500).get();
     }
 }
 
 // ==========================================
-// 2. БАЗОВЫЕ PUSH-УВЕДОМЛЕНИЯ
+// 3. БАЗОВЫЕ PUSH-УВЕДОМЛЕНИЯ
 // ==========================================
 async function sendPush(uid, title, body, dataPayload = {}) {
     try {
         const userDoc = await admin.firestore().collection('users').doc(uid).get();
-        if (!userDoc.exists) return;
-        
-        const fcmToken = userDoc.data().fcmToken;
-        if (!fcmToken) return;
-
-        const message = {
-            token: fcmToken,
+        if (!userDoc.exists || !userDoc.data().fcmToken) return;
+        await admin.messaging().send({
+            token: userDoc.data().fcmToken,
             notification: { title: title, body: body },
             android: { priority: "high", notification: { channelId: "high_importance_channel" } },
             apns: { payload: { aps: { contentAvailable: true, sound: "default" } } },
             data: dataPayload
-        };
-
-        await admin.messaging().send(message);
+        });
     } catch (error) {
-        console.error(`[sendPush] ERROR sending to ${uid}:`, error);
         if (error.code === 'messaging/registration-token-not-registered') {
             await admin.firestore().collection('users').doc(uid).update({ fcmToken: admin.firestore.FieldValue.delete() });
         }
@@ -82,100 +188,111 @@ async function sendPush(uid, title, body, dataPayload = {}) {
 }
 
 exports.notifyOnNewNotification = onDocumentCreated('users/{userId}/notifications/{notificationId}', async (event) => {
-    const userId = event.params.userId;
     const notifData = event.data.data();
-    if (!notifData) return;
-    
-    const title = notifData.title || "Новое уведомление";
-    const body = notifData.body || "Проверьте приложение NutriBalance.";
-    await sendPush(userId, title, body, { type: notifData.type || "general" });
+    if (notifData) await sendPush(event.params.userId, notifData.title || "Новое уведомление", notifData.body || "", { type: notifData.type || "general" });
 });
 
 // ==========================================
-// 3. EVA — ИИ-НУТРИЦИОЛОГ (ЕДИНСТВЕННЫЙ БОТ)
+// 4. EVA — ИИ-НУТРИЦИОЛОГ
 // ==========================================
-exports.askDietitian = onCall({ cors: true, maxInstances: 10 }, async (request) => {
-    const { prompt, history, userContext, imageBase64 } = request.data;
-    
+exports.askDietitian = onCall({ cors: true, maxInstances: 10, timeoutSeconds: 40 }, async (request) => {
+    const { prompt, history, userContext, imagesBase64, pdfBase64 } = request.data;
     try {
-        const model = getGenAI().getGenerativeModel({ 
-            model: "gemini-2.5-flash",
-            generationConfig: { temperature: 0.2 }
-        });
-        
-        const dietitianPrompt = `Ты — Eva, элитный нутрициолог и умный сканер продуктов приложения NutriBalance. Твоя цель: помогать девушкам достигать их целей комфортно и безопасно. Твой тон: поддерживающий, заботливый, профессиональный. Обращайся к пользователю в женском роде.
-
-У тебя есть строго 4 сценария работы. В сценариях 1, 2 и 3 ты сначала согласовываешь действие текстом, и ТОЛЬКО после слова "Да/Сохрани" выдаешь блок \`\`\`json ... \`\`\`. 
-Внутри JSON ВСЕГДА должно быть поле "action_type". Контекст клиента: ${userContext || ""}
-
-СЦЕНАРИЙ 1: РАСЧЕТ ЦЕЛИ (КБЖУ) И ПЛАНА
-Триггер: Пользователь просит рассчитать норму, похудеть и т.д.
-Действие: Если нужных данных нет в контексте, задай 3 вопроса одним сообщением (параметры, активность, аллергии).
-Только когда получишь ответы: рассчитай норму КБЖУ текстом и спроси: "Обновляем твою цель в профиле?"
-JSON (только после согласия):
+        const model = getGenAI().getGenerativeModel({ model: "gemini-2.5-flash", generationConfig: { temperature: 0.2 } });
+        let dietitianPrompt = `Ты — Eva, элитный нутрициолог, велнес-ментор и заботливая ИИ-подруга в приложении MyEva. Твоя цель — стать лучшей и самой умной подругой для пользователя, помогая с питанием, женским здоровьем и образом жизни.
+ДОСЬЕ ПОЛЬЗОВАТЕЛЯ (Внимательно изучи перед ответом):
+${userContext || "(Профиль пока не заполнен)"}
+ТВОЙ ХАРАКТЕР И ТОН ОБЩЕНИЯ:
+- Общайся тепло, с эмпатией и заботой. Обращайся на "ты" и строго в женском роде.
+- Ты не просто робот-калькулятор, ты подруга. Задавай уточняющие вопросы ("Как ты спишь?", "Как оцениваешь свой стресс?").
+- Используй уместные эмодзи, форматируй текст списками и жирным шрифтом для удобства чтения.
+ПОВЕДЕНЧЕСКИЕ СЦЕНАРИИ (СТРОГО СОБЛЮДАТЬ):
+Сценарий 1 (Первое касание и Онбординг):
+Когда пользователь пишет первое сообщение или присылает первое фото еды, ты ДОЛЖНА пройти строго по этой цепочке в ОДНОМ сообщении:
+Шаг 1: Дать ответ на запрос (например, посчитать калории на фото).
+Шаг 2: Спросить: "Хочешь, я коротко расскажу, что еще я умею делать для тебя?".
+Шаг 3: Напомнить: "А когда будет минутка, загляни в Профиль и пройди опрос, чтобы наши советы стали на 100% персональными!".
+Сценарий 2: Расчет КБЖУ (Математика)
+- Считай норму ТОЛЬКО по формуле Миффлина-Сан Жеора, учитывая активность. Объясни пользователю, откуда взялись эти цифры. Не завышай калории, если цель — похудение (делай дефицит 15-20%).
+Сценарий 3: Анализ медицинских показателей (PDF/Фото)
+- Внимательно прочитай анализы. Не отправляй к врачу сухой фразой!
+- Сначала объясни простым языком, за что отвечает показатель.
+- Дай рекомендации по питанию. Только в конце напомни, что ты ИИ, и для точного диагноза нужен врач.
+Сценарий 4: Беременность
+- Если в досье указано, что девушка беременна: рассказывай о плоде. Адаптируй советы по питанию для беременных.
+Сценарий 5: Гармония (Стресс, Сон, Симптомы)
+- Если девушка отмечает стресс, грусть или пониженный кальций/витамины: смести фокус с диет. Порекомендуй отдых, прогулки или ванну.
+🚨 ТЕХНИЧЕСКИЕ ПРАВИЛА ДЛЯ ИНТЕРФЕЙСА ПРИЛОЖЕНИЯ (КРИТИЧЕСКИ ВАЖНО) 🚨
+Сначала ты ДОЛЖНА подробно и заботливо текстом расписать КБЖУ и пользу блюда, похвалить пользователя, и ТОЛЬКО В САМОМ КОНЦЕ своего ответа выдать скрытый JSON.
+Чтобы кнопки в приложении работали, ты ОБЯЗАНА использовать JSON-формат:
+- Если договорились обновить цель КБЖУ:
 \`\`\`json
-{
-  "action_type": "update_goal",
-  "coach_message": "Отлично, дорогая! Цель обновлена. Начинаем работу к фигуре мечты! ✨",
-  "calories": 2000, "protein": 150, "fat": 65, "carbs": 200
-}
+{ "action_type": "update_goal", "coach_message": "Цель обновлена! ✨", "calories": 2000, "protein": 150, "fat": 65, "carbs": 200 }
 \`\`\`
-
-СЦЕНАРИЙ 2: ЗАПИСЬ ЕДЫ В ДНЕВНИК (Трекинг)
-Действие: ОБЯЗАТЕЛЬНО разбивай разные продукты на отдельные элементы массива items. Рассчитай вес и КБЖУ для каждого. Спроси "Записать в дневник?"
-JSON (только после согласия):
+- Если пользователь хочет ЗАПИСАТЬ ЕДУ в дневник. КРИТИЧЕСКИ ВАЖНО: ВСЕГДА разбивай сложные блюда на ОТДЕЛЬНЫЕ базовые ингредиенты! Никогда не пиши всё в одну строку. В поле "meal_name" пиши РЕАЛЬНОЕ название блюда (например, "Шашлык с салатом" или "Гречка с мясом"), а не просто "Прием пищи". Каждый продукт должен быть отдельным объектом в массиве items. Для каждого ингредиента ты ДОЛЖНА сгенерировать поле "health_score" от 1 до 10 и поле "fiber" (клетчатка, целое число в граммах):
 \`\`\`json
-{
-  "action_type": "log_food",
-  "coach_message": "Добавила в твой дневник. Приятного аппетита! 🌸",
-  "items": [
-    {"meal_name": "Овсянка", "weight_g": 100, "calories": 350, "protein": 12, "fat": 6, "carbs": 60}
-  ]
-}
+{"action_type": "log_food", "coach_message": "Добавила в дневник! 🌸", "items": [{"meal_name": "Стейк лосося с брокколи", "weight_g": 200, "calories": 320, "protein": 30, "fat": 20, "carbs": 5, "fiber": 4, "health_score": 9}]}
 \`\`\`
+- Если пользователь просит РЕЦЕПТ или список покупок:
+[SHOPPING_LIST]{"items": [{"name": "Свекла", "amount": "2 шт", "category": "Овощи"}]}[/SHOPPING_LIST]`;
 
-СЦЕНАРИЙ 3: СОХРАНЕНИЕ ПРОДУКТА В БАЗУ (RAG)
-Действие: Распознай КБЖУ строго на 100 грамм -> Напиши "Распознала продукт. Сохранить в нашу базу?"
-JSON (только после согласия):
-\`\`\`json
-{
-  "action_type": "save_to_rag",
-  "coach_message": "Продукт успешно добавлен в твою базу!",
-  "product_name": "Молоко", "calories_100g": 45, "protein_100g": 1, "fat_100g": 1.5, "carbs_100g": 6
-}
-\`\`\`
-
-СЦЕНАРИЙ 4: ПРОСТАЯ КОНСУЛЬТАЦИЯ
-Действие: Просто ответь текстом. НИКАКОГО JSON.
-
-Запрос: ${prompt || ""}`;
+        if (history && history.length > 0) {
+            dietitianPrompt += `\n\n🚨 СТРОГОЕ ПРАВИЛО: У нас уже идет диалог (история переписки не пустая). ТЕБЕ КАТЕГОРИЧЕСКИ ЗАПРЕЩЕНО здороваться, писать "Привет", "Здравствуйте", "Рада снова слышать" и подобные фразы. Просто продолжай текущий разговор и отвечай на запрос.`;
+        }
+        dietitianPrompt += `\n\nЗапрос: ${prompt || ""}`;
         
         let result;
-        if (imageBase64) {
-            const imagePart = { inlineData: { data: imageBase64, mimeType: "image/jpeg" } };
-            result = await model.generateContent([dietitianPrompt, imagePart]);
+        if (pdfBase64) {
+            result = await model.generateContent([
+                dietitianPrompt, 
+                { inlineData: { data: pdfBase64, mimeType: "application/pdf" } }
+            ]);
+        } else if (imagesBase64 && imagesBase64.length > 0) {
+            const imageParts = imagesBase64.map(base64Str => ({
+                inlineData: { data: base64Str, mimeType: "image/jpeg" }
+            }));
+            result = await model.generateContent([
+                dietitianPrompt, 
+                ...imageParts
+            ]);
         } else {
             let cleanHistory = [];
-            let rawHistory = Array.isArray(history) ? history : [];
             let expectedRole = 'user';
-            
-            for (const msg of rawHistory) {
-                if (msg.role === expectedRole && msg.parts && msg.parts[0].text) {
-                    cleanHistory.push(msg);
+            for (const msg of (Array.isArray(history) ? history : [])) {
+                const role = (msg.role === 'ai' || msg.role === 'assistant' || msg.role === 'model') ? 'model' : 'user';
+                const text = msg.text || '';
+                if (role === expectedRole && text.trim().length > 0) {
+                    cleanHistory.push({ role: role, parts: [{ text: text }] });
                     expectedRole = (expectedRole === 'user') ? 'model' : 'user';
                 }
             }
-            if (cleanHistory.length > 0 && cleanHistory[cleanHistory.length - 1].role !== 'model') {
-                cleanHistory.pop(); 
-            }
-            
+            if (cleanHistory.length > 0 && cleanHistory[cleanHistory.length - 1].role !== 'model') cleanHistory.pop(); 
             const chat = model.startChat({ history: cleanHistory });
             result = await chat.sendMessage(dietitianPrompt);
         }
-        
         return { text: result.response.text() };
     } catch (error) {
-        console.error("Eva Error:", error);
         throw new HttpsError('internal', 'Ошибка Eva.', error.message);
+    }
+});
+
+// ==========================================
+// 5. PUSH-УВЕДОМЛЕНИЯ ДЛЯ ЛИЧНЫХ ЧАТОВ (COMMUNITY)
+// ==========================================
+exports.onNewChatMessage = onDocumentCreated('chats/{chatId}/messages/{messageId}', async (event) => {
+    const messageData = event.data.data();
+    if (!messageData) return;
+    const senderId = messageData.senderId;
+    const text = messageData.text;
+    const chatId = event.params.chatId;
+    const users = chatId.split('_');
+    const recipientId = users.find(id => id !== senderId);
+    if (!recipientId) return;
+    try {
+        const senderDoc = await admin.firestore().collection('users').doc(senderId).get();
+        const senderName = senderDoc.exists ? senderDoc.data().name : "Пользователь";
+        await sendPush(recipientId, `Новое сообщение от ${senderName}`, text, { type: "chat", chatId: chatId });
+    } catch (error) {
+        console.error(`[onNewChatMessage] Ошибка отправки пуша для ${recipientId}:`, error);
     }
 });

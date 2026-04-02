@@ -1,21 +1,25 @@
 import 'dart:io';
-import 'dart:convert';
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
-import 'package:intl/intl.dart'; 
+import 'package:firebase_auth/firebase_auth.dart';
+import 'package:firebase_storage/firebase_storage.dart';
+import 'package:intl/intl.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:cached_network_image/cached_network_image.dart';
-import '../services/chat_service.dart';
+
+import '../services/database_service.dart';
+import '../services/local_notification_service.dart';
 
 class P2PChatScreen extends StatefulWidget {
   final String otherUserId;
   final String otherUserName;
+  final String? customCollection;
 
   const P2PChatScreen({
-    super.key,
-    required this.otherUserId,
+    super.key, 
+    required this.otherUserId, 
     required this.otherUserName,
+    this.customCollection, 
   });
 
   @override
@@ -25,374 +29,342 @@ class P2PChatScreen extends StatefulWidget {
 class _P2PChatScreenState extends State<P2PChatScreen> {
   final TextEditingController _messageController = TextEditingController();
   final ScrollController _scrollController = ScrollController();
-  final ChatService _chatService = ChatService();
+  final ImagePicker _picker = ImagePicker(); 
   
-  String? _chatRoomId;
-  bool _isSending = false;
-  String? _editingMessageId; 
-  
-  // Новые цвета NutriBalance
+  bool _isUploading = false; 
+
   static const Color _accentColor = Color(0xFFB76E79);
-  static const Color _bgColor = Color(0xFF1A1A1C);
+  static const Color _textColor = Color(0xFF2D2D2D);
+  static const Color _subTextColor = Color(0xFF8E8E93);
+
+  String get currentUserId => FirebaseAuth.instance.currentUser!.uid;
+  String get _collectionName => 'chats';
+
+  String get _chatId {
+    return currentUserId.compareTo(widget.otherUserId) < 0
+        ? '${currentUserId}_${widget.otherUserId}'
+        : '${widget.otherUserId}_$currentUserId';
+  }
 
   @override
   void initState() {
     super.initState();
-    _initializeChat();
+    _resetMyUnreadCount();
+    LocalNotificationService().cancelAll();
   }
 
   @override
   void dispose() {
+    _resetMyUnreadCount(); 
     _messageController.dispose();
     _scrollController.dispose();
     super.dispose();
   }
 
-  Future<void> _initializeChat() async {
-    _chatRoomId = await _chatService.getOrCreateChat(widget.otherUserId);
-    await _chatService.resetUnreadCount(widget.otherUserId);
-    if (mounted) setState(() {}); 
+  void _resetMyUnreadCount() async {
+    await FirebaseFirestore.instance.collection(_collectionName).doc(_chatId).set({
+      'unread_$currentUserId': 0,
+    }, SetOptions(merge: true));
   }
 
-  void _setEditingMode(String messageId, String text) {
-    setState(() {
-      _editingMessageId = messageId;
-      _messageController.text = text;
-    });
-  }
-
-  void _cancelEditing() {
-    setState(() {
-      _editingMessageId = null;
-      _messageController.clear();
-    });
-  }
-
-  Future<void> _updateMessage() async {
-    final newText = _messageController.text.trim();
-    if (newText.isEmpty || _editingMessageId == null || _chatRoomId == null) return;
-
-    final String msgId = _editingMessageId!;
-    _cancelEditing(); 
-
-    try {
-      await FirebaseFirestore.instance
-          .collection('chats')
-          .doc(_chatRoomId)
-          .collection('messages')
-          .doc(msgId)
-          .update({
-        'text': newText,
-        'isEdited': true,
-        'editTimestamp': FieldValue.serverTimestamp(),
-      });
-    } catch (e) {
-      debugPrint("Ошибка обновления: $e");
-    }
-  }
-
-  Future<void> _deleteMessage(String messageId, String? imageUrl) async {
-    if (_chatRoomId == null) return;
-    try {
-      await _chatService.deleteMessage(_chatRoomId!, messageId, imageUrl: imageUrl);
-    } catch (e) {
-      debugPrint("Ошибка удаления: $e");
-    }
-  }
-
-  void _showAttachmentOptions() {
-    showModalBottomSheet(
+  Future<void> _pickAndUploadImage() async {
+    final String? action = await showModalBottomSheet<String>(
       context: context,
-      backgroundColor: const Color(0xFFF9F9F9),
+      backgroundColor: Colors.white,
       shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(20))),
-      builder: (ctx) => SafeArea(
-        child: Wrap(
-          children: [
-            ListTile(
-              leading: const Icon(Icons.camera_alt, color: Colors.white),
-              title: const Text('Сделать фото', style: TextStyle(color: Colors.white)),
-              onTap: () { Navigator.pop(ctx); _pickAndSendImage(ImageSource.camera); },
+      builder: (BuildContext ctx) {
+        return SafeArea(
+          child: Padding(
+            padding: const EdgeInsets.symmetric(vertical: 12.0),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                ListTile(leading: const Icon(Icons.camera_alt, color: _textColor, size: 28), title: const Text("Сделать фото", style: TextStyle(color: _textColor, fontSize: 16, fontWeight: FontWeight.w500)), onTap: () => Navigator.pop(ctx, 'camera')),
+                ListTile(leading: const Icon(Icons.photo_library, color: _textColor, size: 28), title: const Text("Выбрать из галереи", style: TextStyle(color: _textColor, fontSize: 16, fontWeight: FontWeight.w500)), onTap: () => Navigator.pop(ctx, 'gallery')),
+              ],
             ),
-            ListTile(
-              leading: const Icon(Icons.photo_library, color: Colors.white),
-              title: const Text('Выбрать из галереи', style: TextStyle(color: Colors.white)),
-              onTap: () { Navigator.pop(ctx); _pickAndSendImage(ImageSource.gallery); },
-            ),
-          ],
-        ),
-      ),
+          ),
+        );
+      },
     );
-  }
 
-  Future<void> _pickAndSendImage(ImageSource source) async {
-    final picker = ImagePicker();
-    final pickedFile = await picker.pickImage(source: source, imageQuality: 85, maxWidth: 1080, maxHeight: 1080);
-    if (pickedFile != null) {
-      setState(() => _isSending = true);
-      try {
-        final File imageFile = File(pickedFile.path);
-        await _chatService.sendMessage(widget.otherUserId, "", imageFile: imageFile);
-      } catch (e) {
-      } finally {
-        if (mounted) setState(() => _isSending = false);
-      }
-    }
-  }
-
-  void _sendMessage() async {
-    final text = _messageController.text.trim();
-    if (text.isEmpty || _chatRoomId == null) return;
-
-    setState(() { _messageController.clear(); _isSending = true; });
+    if (action == null) return; 
+    final ImageSource source = action == 'camera' ? ImageSource.camera : ImageSource.gallery;
 
     try {
-      await _chatService.sendMessage(widget.otherUserId, text);
-      if (_scrollController.hasClients) {
-        _scrollController.animateTo(0.0, duration: const Duration(milliseconds: 300), curve: Curves.easeOut);
-      }
+      final XFile? pickedFile = await _picker.pickImage(source: source, imageQuality: 70, maxWidth: 1200);
+      if (pickedFile == null) return;
+      setState(() => _isUploading = true); 
+
+      final File imageFile = File(pickedFile.path);
+      final String fileName = '${DateTime.now().millisecondsSinceEpoch}.jpg';
+      final Reference storageRef = FirebaseStorage.instance.ref().child('chats_media').child(_chatId).child(fileName);
+
+      final UploadTask uploadTask = storageRef.putFile(imageFile);
+      final TaskSnapshot snapshot = await uploadTask;
+      final String downloadUrl = await snapshot.ref.getDownloadURL();
+      _sendMessage(imageUrl: downloadUrl);
+
     } catch (e) {
+      if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Ошибка загрузки: $e'), backgroundColor: Colors.redAccent));
     } finally {
-      if (mounted) setState(() => _isSending = false);
+      if (mounted) setState(() => _isUploading = false); 
     }
   }
 
-  void _showContextMenu(String messageId, String text, bool isMe, bool isTextOnly, String? imageUrl) {
+  void _sendMessage({String? imageUrl}) async {
+    final text = _messageController.text.trim();
+    if (text.isEmpty && imageUrl == null) return; 
+
+    _messageController.clear();
+    final lastMessageText = imageUrl != null ? '📷 Изображение' : text;
+
+    await FirebaseFirestore.instance.collection(_collectionName).doc(_chatId).collection('messages').add({
+      if (text.isNotEmpty) 'text': text,
+      if (imageUrl != null) 'imageUrl': imageUrl, 
+      'senderId': currentUserId,
+      'timestamp': FieldValue.serverTimestamp(),
+    });
+
+    await FirebaseFirestore.instance.collection(_collectionName).doc(_chatId).set({
+      'lastMessage': lastMessageText,
+      'lastUpdated': FieldValue.serverTimestamp(),
+      'users': [currentUserId, widget.otherUserId],
+      'unread_${widget.otherUserId}': FieldValue.increment(1), 
+    }, SetOptions(merge: true));
+  }
+
+  // === МЕНЮ LONG PRESS ДЛЯ P2P ===
+  void _showOptionsSheet(String docId, String currentText, bool hasMedia, String? mediaUrl) {
     showModalBottomSheet(
       context: context,
-      backgroundColor: const Color(0xFFF9F9F9),
+      backgroundColor: Colors.white,
       shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(20))),
       builder: (ctx) => SafeArea(
-        child: Wrap(
-          children: [
-            ListTile(
-              leading: const Icon(Icons.copy, color: Colors.white),
-              title: const Text('Копировать текст', style: TextStyle(color: Colors.white)),
-              onTap: () { Clipboard.setData(ClipboardData(text: text)); Navigator.pop(ctx); },
-            ),
-            if (isMe && isTextOnly)
+        child: Padding(
+          padding: const EdgeInsets.symmetric(vertical: 12.0),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              if (!hasMedia)
+                ListTile(
+                  leading: const Icon(Icons.edit_rounded, color: _textColor, size: 26),
+                  title: const Text("Редактировать", style: TextStyle(color: _textColor, fontSize: 16, fontWeight: FontWeight.w500)),
+                  onTap: () {
+                    Navigator.pop(ctx);
+                    _showEditDialog(docId, currentText);
+                  },
+                ),
               ListTile(
-                leading: const Icon(Icons.edit, color: Colors.white),
-                title: const Text('Редактировать', style: TextStyle(color: Colors.white)),
-                onTap: () { Navigator.pop(ctx); _setEditingMode(messageId, text); },
+                leading: const Icon(Icons.delete_rounded, color: Colors.redAccent, size: 26),
+                title: const Text("Удалить", style: TextStyle(color: Colors.redAccent, fontSize: 16, fontWeight: FontWeight.w600)),
+                onTap: () async {
+                  Navigator.pop(ctx);
+                  try {
+                    await DatabaseService().deleteP2PMessage(_chatId, docId, mediaUrl);
+                  } catch (e) {
+                    if (mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Ошибка удаления'), backgroundColor: Colors.redAccent));
+                  }
+                },
               ),
-            if (isMe)
-              ListTile(
-                leading: const Icon(Icons.delete, color: Colors.redAccent),
-                title: const Text('Удалить у всех', style: TextStyle(color: Colors.redAccent)),
-                onTap: () { Navigator.pop(ctx); _deleteMessage(messageId, imageUrl); },
-              ),
-          ],
+            ],
+          ),
         ),
-      ),
+      )
     );
   }
 
-  void _showImageFullScreen(String imageUrl) {
+  void _showEditDialog(String docId, String currentText) {
+    final TextEditingController editController = TextEditingController(text: currentText);
     showDialog(
       context: context,
-      builder: (_) => Dialog(
-        backgroundColor: Colors.transparent,
-        insetPadding: EdgeInsets.zero,
-        child: Stack(
-          alignment: Alignment.center,
-          children: [
-            InteractiveViewer(
-              minScale: 0.5, maxScale: 4.0,
-              child: CachedNetworkImage(
-                imageUrl: imageUrl,
-                placeholder: (context, url) => const CircularProgressIndicator(color: _accentColor),
-                errorWidget: (context, url, error) => const Icon(Icons.error, color: Colors.white, size: 50),
-              ),
-            ),
-            Positioned(top: 40, right: 20, child: IconButton(icon: const Icon(Icons.close, color: Colors.white, size: 30), onPressed: () => Navigator.pop(context))),
-          ],
+      builder: (context) => AlertDialog(
+        backgroundColor: Colors.white,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+        title: const Text("Редактировать", style: TextStyle(color: _textColor, fontWeight: FontWeight.w800)),
+        content: TextField(
+          controller: editController,
+          maxLines: null,
+          style: const TextStyle(color: _textColor),
+          decoration: const InputDecoration(
+            border: OutlineInputBorder(borderRadius: BorderRadius.all(Radius.circular(12))),
+            focusedBorder: OutlineInputBorder(borderRadius: BorderRadius.all(Radius.circular(12)), borderSide: BorderSide(color: _accentColor, width: 2)),
+          ),
+          cursorColor: _accentColor,
         ),
-      ),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(context), child: const Text("Отмена", style: TextStyle(color: _subTextColor, fontWeight: FontWeight.w600))),
+          ElevatedButton(
+            style: ElevatedButton.styleFrom(backgroundColor: _accentColor, shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)), elevation: 0),
+            onPressed: () async {
+              final newText = editController.text.trim();
+              if (newText.isNotEmpty && newText != currentText) {
+                await DatabaseService().updateP2PMessage(_chatId, docId, newText);
+              }
+              if (mounted) Navigator.pop(context);
+            },
+            child: const Text("Сохранить", style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
+          ),
+        ],
+      )
     );
   }
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: _bgColor,
+      backgroundColor: const Color(0xFFF9F9F9),
       appBar: AppBar(
-        title: Row(
-          children: [
-            FutureBuilder<DocumentSnapshot>(
-              future: FirebaseFirestore.instance.collection('users').doc(widget.otherUserId).get(),
-              builder: (context, snapshot) {
-                final photoUrl = (snapshot.hasData && snapshot.data!.exists) 
-                    ? (snapshot.data!.data() as Map<String, dynamic>)['photoUrl'] as String? 
-                    : null;
-
-                ImageProvider? avatarProvider;
-                if (photoUrl != null && photoUrl.isNotEmpty) {
-                  if (photoUrl.startsWith('http')) avatarProvider = CachedNetworkImageProvider(photoUrl);
-                  else { try { avatarProvider = MemoryImage(base64Decode(photoUrl)); } catch (_) {} }
-                }
-
-                return CircleAvatar(
-                  radius: 18, backgroundColor: Colors.grey[800], backgroundImage: avatarProvider,
-                  child: avatarProvider == null ? Text(widget.otherUserName.isNotEmpty ? widget.otherUserName[0].toUpperCase() : '?', style: const TextStyle(color: Colors.white, fontSize: 16, fontWeight: FontWeight.bold)) : null,
-                );
-              }
-            ),
-            const SizedBox(width: 12),
-            Expanded(child: Text(widget.otherUserName, style: const TextStyle(fontWeight: FontWeight.bold), overflow: TextOverflow.ellipsis)),
-          ],
-        ),
-        backgroundColor: _bgColor,
+        title: Text(widget.otherUserName, style: const TextStyle(color: _textColor, fontWeight: FontWeight.w900, fontSize: 20)),
+        backgroundColor: Colors.white,
         elevation: 0,
-        leading: const BackButton(color: Colors.white),
+        iconTheme: const IconThemeData(color: _textColor),
+        actions: _isUploading 
+            ? const [Padding(padding: EdgeInsets.only(right: 16.0), child: SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2, color: _accentColor)))] 
+            : null,
       ),
       body: Column(
         children: [
           Expanded(
-            child: _chatRoomId == null 
-              ? const Center(child: CircularProgressIndicator(color: _accentColor))
-              : StreamBuilder<QuerySnapshot>(
-                  stream: FirebaseFirestore.instance
-                      .collection('chats').doc(_chatRoomId)
-                      .collection('messages').orderBy('timestamp', descending: true) 
-                      .snapshots(),
-                  builder: (context, snapshot) {
-                    if (snapshot.connectionState == ConnectionState.waiting) return const Center(child: CircularProgressIndicator(color: _accentColor));
-                    if (!snapshot.hasData || snapshot.data!.docs.isEmpty) return Center(child: Text('Нет сообщений', style: TextStyle(color: Colors.white.withOpacity(0.3))));
+            child: StreamBuilder<QuerySnapshot>(
+              stream: FirebaseFirestore.instance.collection(_collectionName).doc(_chatId).collection('messages').orderBy('timestamp', descending: true).snapshots(),
+              builder: (context, snapshot) {
+                if (snapshot.connectionState == ConnectionState.waiting && !snapshot.hasData) return const Center(child: CircularProgressIndicator(color: _accentColor));
+                if (!snapshot.hasData || snapshot.data!.docs.isEmpty) {
+                  return Center(
+                    child: Column(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        Icon(Icons.waving_hand, size: 64, color: _subTextColor.withValues(alpha: 0.3)),
+                        const SizedBox(height: 16),
+                        const Text("Напишите первое сообщение ✨", style: TextStyle(color: _subTextColor, fontSize: 16, fontWeight: FontWeight.w600)),
+                      ],
+                    ),
+                  );
+                }
 
-                    return ListView.builder(
-                      controller: _scrollController,
-                      reverse: true, 
-                      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 20),
-                      itemCount: snapshot.data!.docs.length,
-                      itemBuilder: (context, index) {
-                        final doc = snapshot.data!.docs[index];
-                        final data = doc.data() as Map<String, dynamic>;
-                        final isMe = data['senderId'] == _chatService.currentUserId;
-                        final String text = data['text'] ?? '';
-                        final String? imageUrl = data['imageUrl'];
-                        final bool isEdited = data['isEdited'] ?? false;
-                        
-                        final Timestamp? ts = data['timestamp'] as Timestamp?;
-                        final String timeStr = ts != null ? DateFormat('HH:mm').format(ts.toDate()) : '...';
+                final messages = snapshot.data!.docs;
+                if (messages.isNotEmpty && messages.first['senderId'] != currentUserId) _resetMyUnreadCount();
 
-                        return Align(
-                          alignment: isMe ? Alignment.centerRight : Alignment.centerLeft,
-                          child: GestureDetector(
-                            onLongPress: () => _showContextMenu(doc.id, text, isMe, imageUrl == null, imageUrl),
-                            child: Container(
-                              margin: const EdgeInsets.only(bottom: 6),
-                              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
-                              constraints: BoxConstraints(maxWidth: MediaQuery.of(context).size.width * 0.75),
-                              decoration: BoxDecoration(
-                                color: isMe ? _accentColor : const Color(0xFFF9F9F9),
-                                borderRadius: BorderRadius.only(
-                                  topLeft: const Radius.circular(20), topRight: const Radius.circular(20),
-                                  bottomLeft: Radius.circular(isMe ? 20 : 4), bottomRight: Radius.circular(isMe ? 4 : 20),
-                                ),
-                              ),
-                              child: Column(
-                                crossAxisAlignment: CrossAxisAlignment.end,
-                                children: [
-                                  if (imageUrl != null)
-                                    GestureDetector(
-                                      onTap: () => _showImageFullScreen(imageUrl),
-                                      child: Padding(
-                                        padding: EdgeInsets.only(bottom: text.isNotEmpty ? 8.0 : 0),
-                                        child: ClipRRect(
-                                          borderRadius: BorderRadius.circular(16),
-                                          child: CachedNetworkImage(
-                                            imageUrl: imageUrl, width: 200, fit: BoxFit.cover,
-                                            placeholder: (context, url) => const SizedBox(height: 150, child: Center(child: CircularProgressIndicator(color: _accentColor))),
-                                            errorWidget: (context, url, error) => const Icon(Icons.broken_image, color: Colors.white, size: 40),
-                                          ),
+                return ListView.builder(
+                  controller: _scrollController,
+                  reverse: true, 
+                  padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 24),
+                  itemCount: messages.length,
+                  itemBuilder: (context, index) {
+                    final data = messages[index].data() as Map<String, dynamic>;
+                    final bool isMe = data['senderId'] == currentUserId;
+                    final Timestamp? ts = data['timestamp'] as Timestamp?;
+                    final String timeStr = ts != null ? DateFormat('HH:mm').format(ts.toDate()) : '';
+                    
+                    final String textMessage = data['text'] ?? '';
+                    final String? imageUrlMessage = data['imageUrl'];
+                    final bool hasImage = imageUrlMessage != null && imageUrlMessage.isNotEmpty;
+
+                    return GestureDetector(
+                      onLongPress: () {
+                        if (isMe) _showOptionsSheet(messages[index].id, textMessage, hasImage, imageUrlMessage);
+                      },
+                      child: Align(
+                        alignment: isMe ? Alignment.centerRight : Alignment.centerLeft,
+                        child: Container(
+                          margin: const EdgeInsets.only(bottom: 12),
+                          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10), 
+                          constraints: BoxConstraints(maxWidth: MediaQuery.of(context).size.width * 0.75),
+                          decoration: BoxDecoration(
+                            color: isMe ? _accentColor : Colors.white,
+                            borderRadius: BorderRadius.only(
+                              topLeft: const Radius.circular(20),
+                              topRight: const Radius.circular(20),
+                              bottomLeft: isMe ? const Radius.circular(20) : const Radius.circular(4),
+                              bottomRight: isMe ? const Radius.circular(4) : const Radius.circular(20),
+                            ),
+                            boxShadow: [BoxShadow(color: Colors.black.withValues(alpha: 0.04), blurRadius: 16, offset: const Offset(0, 4))],
+                          ),
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.end,
+                            children: [
+                              if (hasImage) 
+                                Padding(
+                                  padding: const EdgeInsets.only(bottom: 6.0),
+                                  child: ClipRRect(
+                                    borderRadius: BorderRadius.circular(12),
+                                    child: GestureDetector(
+                                      onTap: () { Navigator.push(context, MaterialPageRoute(builder: (_) => Scaffold(backgroundColor: Colors.black, appBar: AppBar(backgroundColor: Colors.black, iconTheme: const IconThemeData(color: Colors.white)), body: Center(child: Hero(tag: imageUrlMessage, child: Image.network(imageUrlMessage)))))); },
+                                      child: Hero(
+                                        tag: imageUrlMessage,
+                                        child: CachedNetworkImage(
+                                          imageUrl: imageUrlMessage, fit: BoxFit.cover,
+                                          placeholder: (context, url) => const SizedBox(width: 200, height: 150, child: Center(child: CircularProgressIndicator(color: _accentColor, strokeWidth: 2))),
+                                          errorWidget: (context, url, error) => const SizedBox(width: 200, height: 150, child: Center(child: Icon(Icons.broken_image_outlined, size: 40, color: Colors.grey))),
                                         ),
                                       ),
                                     ),
-                                  if (text.isNotEmpty || imageUrl == null)
-                                    Wrap(
-                                      alignment: WrapAlignment.end,
-                                      crossAxisAlignment: WrapCrossAlignment.end,
-                                      children: [
-                                        if (text.isNotEmpty)
-                                          Text(text, style: const TextStyle(color: Colors.white, fontSize: 16)),
-                                        const SizedBox(width: 8),
-                                        Padding(
-                                          padding: const EdgeInsets.only(bottom: 2.0),
-                                          child: Row(
-                                            mainAxisSize: MainAxisSize.min,
-                                            children: [
-                                              if (isEdited)
-                                                const Padding(
-                                                  padding: EdgeInsets.only(right: 4),
-                                                  child: Text('изм.', style: TextStyle(color: Colors.white54, fontSize: 10, fontWeight: FontWeight.bold)),
-                                                ),
-                                              Text(timeStr, style: const TextStyle(color: Colors.white54, fontSize: 10, fontWeight: FontWeight.bold)),
-                                            ],
-                                          ),
-                                        ),
-                                      ],
-                                    ),
-                                ],
+                                  ),
+                                ),
+                              
+                              if (textMessage.isNotEmpty)
+                                Padding(
+                                  padding: const EdgeInsets.symmetric(horizontal: 4.0, vertical: 2),
+                                  child: Text(textMessage, style: TextStyle(color: isMe ? Colors.white : _textColor, fontSize: 15, fontWeight: FontWeight.w500, height: 1.3)),
+                                ),
+                              
+                              const SizedBox(height: 2),
+                              Padding(
+                                padding: const EdgeInsets.only(right: 2.0, bottom: 0),
+                                child: Text(timeStr, style: TextStyle(color: isMe ? Colors.white.withValues(alpha: 0.7) : _subTextColor, fontSize: 10, fontWeight: FontWeight.bold)),
                               ),
-                            ),
+                            ],
                           ),
-                        );
-                      },
+                        ),
+                      ),
                     );
                   },
-                ),
+                );
+              },
+            ),
           ),
           
           Container(
-            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
-            decoration: const BoxDecoration(color: Color(0xFF1A1A1C), border: Border(top: BorderSide(color: Colors.white10))),
+            padding: const EdgeInsets.fromLTRB(16, 12, 16, 12),
+            decoration: BoxDecoration(color: Colors.white, boxShadow: [BoxShadow(color: Colors.black.withValues(alpha: 0.04), blurRadius: 24, offset: const Offset(0, -8))]),
             child: SafeArea(
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
+              bottom: true,
+              child: Row(
+                crossAxisAlignment: CrossAxisAlignment.end,
                 children: [
-                  if (_editingMessageId != null)
-                    Padding(
-                      padding: const EdgeInsets.only(bottom: 8, left: 8, right: 8),
-                      child: Row(
-                        children: [
-                          const Icon(Icons.edit, color: _accentColor, size: 16),
-                          const SizedBox(width: 8),
-                          const Expanded(child: Text('Редактирование', style: TextStyle(color: _accentColor, fontSize: 13, fontWeight: FontWeight.bold))),
-                          GestureDetector(onTap: _cancelEditing, child: const Icon(Icons.close, color: Colors.grey, size: 18)),
-                        ],
+                  Padding(
+                    padding: const EdgeInsets.only(bottom: 2.0), 
+                    child: GestureDetector(
+                      onTap: _isUploading ? null : _pickAndUploadImage, 
+                      child: Container(
+                        padding: const EdgeInsets.all(14),
+                        child: const Icon(Icons.attach_file_rounded, color: _accentColor, size: 26),
                       ),
                     ),
-                  
-                  Row(
-                    crossAxisAlignment: CrossAxisAlignment.end,
-                    children: [
-                      IconButton(icon: const Icon(Icons.attach_file, color: Colors.grey), onPressed: _editingMessageId != null ? null : _showAttachmentOptions),
-                      Expanded(
-                        child: Container(
-                          padding: const EdgeInsets.symmetric(horizontal: 16),
-                          decoration: BoxDecoration(color: const Color(0xFFF9F9F9), borderRadius: BorderRadius.circular(20)),
-                          child: TextField(
-                            controller: _messageController,
-                            keyboardType: TextInputType.multiline,
-                            maxLines: 5, minLines: 1, textCapitalization: TextCapitalization.sentences,
-                            style: const TextStyle(color: Colors.white),
-                            decoration: InputDecoration(hintText: 'Сообщение...', hintStyle: TextStyle(color: Colors.white.withOpacity(0.4)), border: InputBorder.none),
-                          ),
-                        ),
+                  ),
+                  Expanded(
+                    child: TextField(
+                      controller: _messageController,
+                      textCapitalization: TextCapitalization.sentences,
+                      maxLines: 4, minLines: 1,
+                      decoration: const InputDecoration(
+                        hintText: "Сообщение...", hintStyle: TextStyle(color: Color(0xFFC7C7CC)),
+                        border: OutlineInputBorder(borderRadius: BorderRadius.all(Radius.circular(24)), borderSide: BorderSide.none),
+                        filled: true, fillColor: Color(0xFFF2F2F7),
+                        contentPadding: EdgeInsets.symmetric(horizontal: 20, vertical: 14),
                       ),
-                      const SizedBox(width: 8),
-                      GestureDetector(
-                        onTap: _isSending ? null : (_editingMessageId != null ? _updateMessage : _sendMessage),
-                        child: Container(
-                          padding: const EdgeInsets.all(12),
-                          margin: const EdgeInsets.only(bottom: 2), 
-                          decoration: const BoxDecoration(color: _accentColor, shape: BoxShape.circle),
-                          child: _isSending 
-                            ? const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2))
-                            : Icon(_editingMessageId != null ? Icons.check : Icons.send, color: Colors.white, size: 20),
-                        ),
-                      ),
-                    ],
+                    ),
+                  ),
+                  const SizedBox(width: 12),
+                  GestureDetector(
+                    onTap: _isUploading ? null : () => _sendMessage(), 
+                    child: Container(
+                      padding: const EdgeInsets.all(14),
+                      margin: const EdgeInsets.only(bottom: 2),
+                      decoration: const BoxDecoration(color: _accentColor, shape: BoxShape.circle),
+                      child: const Icon(Icons.send_rounded, color: Colors.white, size: 22),
+                    ),
                   ),
                 ],
               ),

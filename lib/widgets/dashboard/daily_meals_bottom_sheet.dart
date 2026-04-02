@@ -9,9 +9,10 @@ class DailyMealsBottomSheet extends StatelessWidget {
     showModalBottomSheet(
       context: context,
       isScrollControlled: true,
-      backgroundColor: const Color(0xFF1C1C1E),
+      // ФИКС ТЕМЫ: Светлый премиум фон
+      backgroundColor: Colors.white,
       shape: const RoundedRectangleBorder(
-        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+        borderRadius: BorderRadius.vertical(top: Radius.circular(32)), // Глубокое скругление
       ),
       builder: (context) => const DailyMealsBottomSheet(),
     );
@@ -21,20 +22,21 @@ class DailyMealsBottomSheet extends StatelessWidget {
     final TextEditingController weightController = TextEditingController(
       text: item['weight_g'].toString(),
     );
-    bool isSaving = false; // Состояние загрузки
+    bool isSaving = false;
 
     showDialog(
       context: context,
-      barrierDismissible: false, // Запрещаем закрывать, пока идет сохранение
+      barrierDismissible: false, 
       builder: (ctx) => StatefulBuilder(
         builder: (context, setStateDialog) {
           return AlertDialog(
-            backgroundColor: const Color(0xFF2C2C2E),
+            backgroundColor: Colors.white, // Светлая тема диалога
+            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(24)),
             title: const Text(
               'Изменить порцию',
               style: TextStyle(
-                color: Colors.white,
-                fontWeight: FontWeight.bold,
+                color: Color(0xFF2D2D2D), // Темно-серый текст
+                fontWeight: FontWeight.w900,
               ),
             ),
             content: Column(
@@ -44,8 +46,9 @@ class DailyMealsBottomSheet extends StatelessWidget {
                 Text(
                   item['name'],
                   style: const TextStyle(
-                    color: Color(0xFFB76E79),
+                    color: Color(0xFFB76E79), // Rose Gold
                     fontSize: 16,
+                    fontWeight: FontWeight.w600,
                   ),
                 ),
                 const SizedBox(height: 16),
@@ -53,22 +56,23 @@ class DailyMealsBottomSheet extends StatelessWidget {
                   controller: weightController,
                   keyboardType: TextInputType.number,
                   style: const TextStyle(
-                    color: Colors.white,
+                    color: Color(0xFF2D2D2D),
                     fontSize: 24,
-                    fontWeight: FontWeight.bold,
+                    fontWeight: FontWeight.w900,
                   ),
                   decoration: const InputDecoration(
                     labelText: 'Вес (граммы)',
-                    labelStyle: TextStyle(color: Colors.grey),
+                    labelStyle: TextStyle(color: Color(0xFF8E8E93)),
                     enabledBorder: UnderlineInputBorder(
-                      borderSide: BorderSide(color: Colors.white24),
+                      borderSide: BorderSide(color: Color(0xFFE5E5EA)),
                     ),
                     focusedBorder: UnderlineInputBorder(
-                      borderSide: BorderSide(color: Color(0xFFB76E79)),
+                      borderSide: BorderSide(color: Color(0xFFB76E79), width: 2),
                     ),
                     suffixText: 'г',
-                    suffixStyle: TextStyle(color: Colors.white, fontSize: 20),
+                    suffixStyle: TextStyle(color: Color(0xFF2D2D2D), fontSize: 20),
                   ),
+                  cursorColor: const Color(0xFFB76E79),
                 ),
               ],
             ),
@@ -77,56 +81,37 @@ class DailyMealsBottomSheet extends StatelessWidget {
                 onPressed: isSaving ? null : () => Navigator.pop(ctx),
                 child: const Text(
                   'Отмена',
-                  style: TextStyle(color: Colors.grey),
+                  style: TextStyle(color: Color(0xFF8E8E93), fontWeight: FontWeight.bold),
                 ),
               ),
               ElevatedButton(
                 style: ElevatedButton.styleFrom(
                   backgroundColor: const Color(0xFFB76E79),
-                  foregroundColor: Colors.black,
+                  foregroundColor: Colors.white,
+                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12))
                 ),
                 onPressed: isSaving
                     ? null
                     : () async {
-                        final newWeight = int.tryParse(
-                          weightController.text.trim(),
-                        );
+                        final newWeight = int.tryParse(weightController.text.trim());
                         if (newWeight != null && newWeight > 0) {
                           setStateDialog(() => isSaving = true);
                           try {
-                            // Ждем завершения транзакции
-                            await DatabaseService().updateMealItemWeight(
-                              item,
-                              newWeight,
-                            );
-                            if (context.mounted)
-                              Navigator.pop(ctx); // Закрываем только при успехе
+                            await DatabaseService().updateMealItemWeight(item, newWeight);
+                            if (context.mounted) Navigator.pop(ctx); 
                           } catch (e) {
                             setStateDialog(() => isSaving = false);
                             if (context.mounted) {
                               ScaffoldMessenger.of(context).showSnackBar(
-                                SnackBar(
-                                  content: Text('Ошибка: $e'),
-                                  backgroundColor: Colors.redAccent,
-                                ),
+                                SnackBar(content: Text('Ошибка: $e'), backgroundColor: Colors.redAccent),
                               );
                             }
                           }
                         }
                       },
                 child: isSaving
-                    ? const SizedBox(
-                        width: 16,
-                        height: 16,
-                        child: CircularProgressIndicator(
-                          color: Colors.black,
-                          strokeWidth: 2,
-                        ),
-                      )
-                    : const Text(
-                        'Сохранить',
-                        style: TextStyle(fontWeight: FontWeight.bold),
-                      ),
+                    ? const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2))
+                    : const Text('Сохранить', style: TextStyle(fontWeight: FontWeight.bold)),
               ),
             ],
           );
@@ -138,26 +123,31 @@ class DailyMealsBottomSheet extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return FractionallySizedBox(
-      heightFactor: 0.8, // Занимает 80% экрана
+      heightFactor: 0.85, 
       child: Column(
         children: [
+          // Элегантный ползунок сверху
           Container(
-            margin: const EdgeInsets.symmetric(vertical: 12),
-            width: 40,
-            height: 4,
+            margin: const EdgeInsets.only(top: 12, bottom: 20),
+            width: 48,
+            height: 5,
             decoration: BoxDecoration(
-              color: Colors.white24,
-              borderRadius: BorderRadius.circular(2),
+              color: const Color(0xFFE5E5EA),
+              borderRadius: BorderRadius.circular(10),
             ),
           ),
           const Padding(
-            padding: EdgeInsets.all(16.0),
-            child: Text(
-              "Дневник питания (Сегодня)",
-              style: TextStyle(
-                color: Colors.white,
-                fontSize: 20,
-                fontWeight: FontWeight.bold,
+            padding: EdgeInsets.symmetric(horizontal: 24.0, vertical: 8.0),
+            child: Align(
+              alignment: Alignment.centerLeft,
+              child: Text(
+                "Дневник питания",
+                style: TextStyle(
+                  color: Color(0xFF2D2D2D),
+                  fontSize: 24,
+                  fontWeight: FontWeight.w900,
+                  letterSpacing: -0.5,
+                ),
               ),
             ),
           ),
@@ -172,10 +162,23 @@ class DailyMealsBottomSheet extends StatelessWidget {
                 }
 
                 if (!snapshot.hasData || !snapshot.data!.exists) {
-                  return const Center(
-                    child: Text(
-                      "Вы еще ничего не записали сегодня",
-                      style: TextStyle(color: Colors.grey),
+                  return Center(
+                    child: Column(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        Icon(Icons.restaurant_menu, size: 64, color: const Color(0xFF8E8E93).withValues(alpha: 0.3)),
+                        const SizedBox(height: 16),
+                        const Text(
+                          "Дневник пуст",
+                          style: TextStyle(color: Color(0xFF2D2D2D), fontSize: 18, fontWeight: FontWeight.w800),
+                        ),
+                        const SizedBox(height: 8),
+                        const Text(
+                          "Отправь Еве фото своей еды,\nчтобы записать первый прием",
+                          textAlign: TextAlign.center,
+                          style: TextStyle(color: Color(0xFF8E8E93), fontSize: 14, fontWeight: FontWeight.w500),
+                        ),
+                      ],
                     ),
                   );
                 }
@@ -184,19 +187,29 @@ class DailyMealsBottomSheet extends StatelessWidget {
                 final List<dynamic> items = data['items'] ?? [];
 
                 if (items.isEmpty) {
-                  return const Center(
-                    child: Text(
-                      "Дневник пуст",
-                      style: TextStyle(color: Colors.grey),
+                  return Center(
+                    child: Column(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        Icon(Icons.restaurant_menu, size: 64, color: const Color(0xFF8E8E93).withValues(alpha: 0.3)),
+                        const SizedBox(height: 16),
+                        const Text(
+                          "Дневник пуст",
+                          style: TextStyle(color: Color(0xFF2D2D2D), fontSize: 18, fontWeight: FontWeight.w800),
+                        ),
+                        const SizedBox(height: 8),
+                        const Text(
+                          "Отправь Еве фото своей еды,\nчтобы записать первый прием",
+                          textAlign: TextAlign.center,
+                          style: TextStyle(color: Color(0xFF8E8E93), fontSize: 14, fontWeight: FontWeight.w500),
+                        ),
+                      ],
                     ),
                   );
                 }
 
                 return ListView.builder(
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: 16,
-                    vertical: 8,
-                  ),
+                  padding: const EdgeInsets.only(left: 24, right: 24, top: 16, bottom: 40),
                   itemCount: items.length,
                   itemBuilder: (context, index) {
                     final item = items[index] as Map<String, dynamic>;
@@ -206,18 +219,20 @@ class DailyMealsBottomSheet extends StatelessWidget {
                       direction: DismissDirection.endToStart,
                       background: Container(
                         alignment: Alignment.centerRight,
-                        padding: const EdgeInsets.only(right: 20),
+                        padding: const EdgeInsets.only(right: 24),
+                        margin: const EdgeInsets.only(bottom: 12),
                         decoration: BoxDecoration(
-                          color: Colors.redAccent,
-                          borderRadius: BorderRadius.circular(12),
+                          color: Colors.redAccent.withValues(alpha: 0.1), // Нежный красный фон для удаления
+                          borderRadius: BorderRadius.circular(20),
                         ),
-                        child: const Icon(Icons.delete, color: Colors.white),
+                        child: const Icon(Icons.delete_outline, color: Colors.redAccent, size: 28),
                       ),
                       onDismissed: (_) {
                         DatabaseService().deleteMealItem(item);
                         ScaffoldMessenger.of(context).showSnackBar(
                           const SnackBar(
-                            content: Text('Удалено из дневника'),
+                            content: Text('Блюдо удалено из дневника ✨', style: TextStyle(fontWeight: FontWeight.bold)),
+                            backgroundColor: Colors.teal,
                             duration: Duration(seconds: 2),
                           ),
                         );
@@ -228,11 +243,10 @@ class DailyMealsBottomSheet extends StatelessWidget {
                           margin: const EdgeInsets.only(bottom: 12),
                           padding: const EdgeInsets.all(16),
                           decoration: BoxDecoration(
-                            color: Colors.black.withOpacity(0.5),
-                            borderRadius: BorderRadius.circular(12),
-                            border: Border.all(
-                              color: Colors.white.withOpacity(0.05),
-                            ),
+                            color: Colors.white,
+                            borderRadius: BorderRadius.circular(20),
+                            boxShadow: [BoxShadow(color: Colors.black.withValues(alpha: 0.03), blurRadius: 16, offset: const Offset(0, 4))],
+                            border: Border.all(color: const Color(0xFFB76E79).withValues(alpha: 0.1)),
                           ),
                           child: Row(
                             children: [
@@ -243,17 +257,18 @@ class DailyMealsBottomSheet extends StatelessWidget {
                                     Text(
                                       item['name'] ?? 'Блюдо',
                                       style: const TextStyle(
-                                        color: Colors.white,
+                                        color: Color(0xFF2D2D2D),
                                         fontSize: 16,
-                                        fontWeight: FontWeight.bold,
+                                        fontWeight: FontWeight.w800,
                                       ),
                                     ),
-                                    const SizedBox(height: 4),
+                                    const SizedBox(height: 6),
                                     Text(
                                       "Б: ${item['protein']}г  •  Ж: ${item['fat']}г  •  У: ${item['carbs']}г",
                                       style: const TextStyle(
-                                        color: Colors.grey,
+                                        color: Color(0xFF8E8E93),
                                         fontSize: 12,
+                                        fontWeight: FontWeight.w600
                                       ),
                                     ),
                                   ],
@@ -267,14 +282,24 @@ class DailyMealsBottomSheet extends StatelessWidget {
                                     style: const TextStyle(
                                       color: Color(0xFFB76E79),
                                       fontSize: 18,
-                                      fontWeight: FontWeight.bold,
+                                      fontWeight: FontWeight.w900,
+                                      letterSpacing: -0.5
                                     ),
                                   ),
-                                  Text(
-                                    "${item['weight_g']} г",
-                                    style: const TextStyle(
-                                      color: Colors.white70,
-                                      fontSize: 12,
+                                  const SizedBox(height: 4),
+                                  Container(
+                                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                                    decoration: BoxDecoration(
+                                      color: const Color(0xFFF2F2F7),
+                                      borderRadius: BorderRadius.circular(8)
+                                    ),
+                                    child: Text(
+                                      "${item['weight_g']} г",
+                                      style: const TextStyle(
+                                        color: Color(0xFF8E8E93),
+                                        fontSize: 11,
+                                        fontWeight: FontWeight.bold
+                                      ),
                                     ),
                                   ),
                                 ],

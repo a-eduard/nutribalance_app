@@ -107,7 +107,7 @@ class _AuthScreenState extends State<AuthScreen> {
               crossAxisAlignment: CrossAxisAlignment.center,
               children: [
                 const Text(
-                  'NutriBalance',
+                  'MyEva',
                   style: TextStyle(color: _accentColor, fontSize: 32, fontWeight: FontWeight.w900, letterSpacing: 1.5),
                 ),
                 const SizedBox(height: 8),

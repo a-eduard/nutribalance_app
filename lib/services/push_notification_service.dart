@@ -1,5 +1,3 @@
-import 'dart:convert';
-import 'package:http/http.dart' as http;
 import 'package:flutter/material.dart';
 import 'package:firebase_messaging/firebase_messaging.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
@@ -9,6 +7,8 @@ import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 class PushNotificationService {
   final FirebaseMessaging _fcm = FirebaseMessaging.instance;
   final FlutterLocalNotificationsPlugin _localNotifications = FlutterLocalNotificationsPlugin();
+
+  static String? currentActiveChatId;
 
   Future<void> initialize() async {
     NotificationSettings settings = await _fcm.requestPermission(
@@ -25,7 +25,9 @@ class PushNotificationService {
         android: androidSettings, 
         iOS: DarwinInitializationSettings()
       );
-      await _localNotifications.initialize(initSettings);
+      
+      // ФИКС: Используем именованный параметр
+      await _localNotifications.initialize(settings: initSettings);
 
       const AndroidNotificationChannel channel = AndroidNotificationChannel(
         'high_importance_channel', 
@@ -41,19 +43,37 @@ class PushNotificationService {
       String? token = await _fcm.getToken();
       if (token != null) _saveTokenToDatabase(token);
       
-      // Слушатель обновления токена в фоне
       _fcm.onTokenRefresh.listen(_saveTokenToDatabase);
 
       FirebaseMessaging.onMessage.listen((RemoteMessage message) {
         RemoteNotification? notification = message.notification;
         AndroidNotification? android = message.notification?.android;
 
+        final currentUserId = FirebaseAuth.instance.currentUser?.uid;
+        final senderId = message.data['senderId']; 
+        
+        if (currentUserId != null && senderId == currentUserId) return;
+
+        String? incomingChatId = message.data['chatId'] ?? message.data['botType'];
+        
+        if (incomingChatId == null && senderId != null && currentUserId != null) {
+          List<String> ids = [currentUserId, senderId.toString()];
+          ids.sort();
+          incomingChatId = ids.join('_');
+        }
+
+        if (incomingChatId != null && incomingChatId == currentActiveChatId) {
+          debugPrint("Пуш заглушен: пользователь уже находится в чате $incomingChatId");
+          return;
+        }
+
         if (notification != null && android != null) {
+          // ФИКС: Используем именованные параметры
           _localNotifications.show(
-            notification.hashCode,
-            notification.title,
-            notification.body,
-            NotificationDetails(
+            id: notification.hashCode,
+            title: notification.title,
+            body: notification.body,
+            notificationDetails: NotificationDetails(
               android: AndroidNotificationDetails(
                 channel.id,
                 channel.name,
@@ -61,12 +81,17 @@ class PushNotificationService {
                 icon: '@mipmap/ic_launcher',
                 importance: Importance.max,
                 priority: Priority.high,
+                color: const Color(0xFFB76E79), 
               ),
             ),
           );
         }
       });
     }
+  }
+
+  Future<void> clearAllNotifications() async {
+    await _localNotifications.cancelAll();
   }
 
   Future<void> forceUpdateToken() async {
@@ -86,7 +111,6 @@ class PushNotificationService {
     }
   }
 
-  // --- ЗАДАЧА 1: Очистка токена при логауте ---
   Future<void> clearToken() async {
     String? uid = FirebaseAuth.instance.currentUser?.uid;
     if (uid != null) {

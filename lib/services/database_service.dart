@@ -3,6 +3,7 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:firebase_storage/firebase_storage.dart';
 import 'package:flutter/foundation.dart';
+import 'package:cloud_functions/cloud_functions.dart';
 
 class DatabaseService {
   final FirebaseFirestore _db = FirebaseFirestore.instance;
@@ -29,6 +30,65 @@ class DatabaseService {
     }
   }
 
+  Future<Map<String, String>> getSpecialistInfo() async {
+    try {
+      final doc = await _db.collection('app_settings').doc('globals').get();
+      
+      if (doc.exists && doc.data() != null) {
+        final data = doc.data()!;
+        return {
+          'uid': data['specialist_uid'] ?? 'VlTTLh2o7GVaXUzw32sNUtQ6alD3',
+          'name': data['specialist_name'] ?? 'Личный Специалист',
+        };
+      }
+    } catch (e) {
+      debugPrint("Ошибка получения данных специалиста: $e");
+    }
+    
+    return {
+      'uid': 'VlTTLh2o7GVaXUzw32sNUtQ6alD3', 
+      'name': 'Личный Специалист'
+    };
+  }
+
+  Future<bool> isAppInReview() async {
+    try {
+      final doc = await _db.collection('app_config').doc('settings').get();
+      if (doc.exists && doc.data() != null) {
+        return doc.data()!['isAppInReview'] == true;
+      }
+    } catch (e) {
+      debugPrint("Ошибка получения статуса модерации: $e");
+    }
+    return false;
+  }
+
+  Future<String?> createYookassaPayment({
+    required double amount,
+    required String description,
+    required String paymentType, 
+    int? durationDays,
+  }) async {
+    try {
+      final user = _auth.currentUser;
+      if (user == null) return null;
+      
+      final String idempotencyKey = '${user.uid}_${DateTime.now().millisecondsSinceEpoch}';
+
+      final result = await FirebaseFunctions.instance.httpsCallable('createPayment').call({
+        'amount': amount,
+        'description': description,
+        'paymentType': paymentType,
+        'durationDays': durationDays,
+        'idempotencyKey': idempotencyKey, 
+      });
+      return result.data['confirmationUrl'] as String?;
+    } catch (e) {
+      debugPrint('Ошибка создания платежа: $e');
+      return null;
+    }
+  }
+
   Future<bool> isNicknameUnique(String nickname) async {
     if (nickname.isEmpty) return true;
     final user = _auth.currentUser;
@@ -48,8 +108,18 @@ class DatabaseService {
       return false;
     }
   }
-
-  // --- ВОДА И ЦИКЛ ---
+  
+  Future<void> savePeriodData({required DateTime start, int cycleLength = 28, int periodDuration = 5}) async {
+    final user = _auth.currentUser;
+    if (user == null) return;
+    
+    await _db.collection('users').doc(user.uid).set({
+      'lastPeriodStartDate': Timestamp.fromDate(start),
+      'cycleLength': cycleLength,
+      'periodDuration': periodDuration,
+    }, SetOptions(merge: true));
+  }
+  
   Future<void> updateWaterGlasses(int count) async {
     final user = _auth.currentUser;
     if (user == null) return;
@@ -79,7 +149,6 @@ class DatabaseService {
     return const Stream.empty();
   }
 
-  // --- ИИ ЧАТ И ФАЙЛЫ ---
   Future<String?> uploadChatImage(File imageFile, String chatId) async {
     final user = _auth.currentUser;
     if (user == null) return null;
@@ -96,13 +165,14 @@ class DatabaseService {
 
   Stream<QuerySnapshot> getBotChatMessages(String botType) {
     final user = _auth.currentUser;
-    if (user != null)
+    if (user != null) {
       return _db
           .collection('users')
           .doc(user.uid)
           .collection('ai_chats_$botType')
           .orderBy('timestamp', descending: true)
           .snapshots();
+    }
     return const Stream.empty();
   }
 
@@ -166,7 +236,6 @@ class DatabaseService {
     }).toList();
   }
 
-  // --- ПИТАНИЕ И ДНЕВНИК ---
   Future<void> saveNutritionGoal(Map<String, dynamic> data) async {
     final user = _auth.currentUser;
     if (user == null) return;
@@ -186,32 +255,39 @@ class DatabaseService {
 
     Map<String, dynamic> profileUpdates = {};
     if (data['bmr'] != null) profileUpdates['bmr'] = data['bmr'];
-    if (data['maintenanceCalories'] != null)
+    if (data['maintenanceCalories'] != null) {
       profileUpdates['maintenanceCalories'] = data['maintenanceCalories'];
-    if (profileUpdates.isNotEmpty)
+    }
+    if (profileUpdates.isNotEmpty) {
       await _db
           .collection('users')
           .doc(user.uid)
           .set(profileUpdates, SetOptions(merge: true));
+    }
   }
 
   Future<void> _updateWeeklyNutritionCache(String uid) async {
-    final weekAgoTs = Timestamp.fromDate(
-      DateTime.now().subtract(const Duration(days: 7)),
-    );
-    final snap = await _db
-        .collection('users')
-        .doc(uid)
-        .collection('meals')
-        .where('date', isGreaterThanOrEqualTo: weekAgoTs)
-        .get();
-    int totalCals = 0;
-    for (var doc in snap.docs)
-      totalCals += (doc.data()['calories'] as num?)?.toInt() ?? 0;
-    int avgCals = snap.docs.isEmpty ? 0 : totalCals ~/ 7;
-    await _db.collection('users').doc(uid).set({
-      'weeklyAvgCals': avgCals,
-    }, SetOptions(merge: true));
+    try {
+      final weekAgoTs = Timestamp.fromDate(
+        DateTime.now().subtract(const Duration(days: 7)),
+      );
+      final snap = await _db
+          .collection('users')
+          .doc(uid)
+          .collection('meals')
+          .where('date', isGreaterThanOrEqualTo: weekAgoTs)
+          .get();
+      int totalCals = 0;
+      for (var doc in snap.docs) {
+        totalCals += (doc.data()['calories'] as num?)?.toInt() ?? 0;
+      }
+      int avgCals = snap.docs.isEmpty ? 0 : totalCals ~/ 7;
+      await _db.collection('users').doc(uid).set({
+        'weeklyAvgCals': avgCals,
+      }, SetOptions(merge: true));
+    } catch (e) {
+      debugPrint("Фоновая ошибка кэширования: $e");
+    }
   }
 
   Future<void> logMeal(Map<String, dynamic> data) async {
@@ -220,65 +296,183 @@ class DatabaseService {
 
     final String docId = getTodayDocId();
     List<dynamic> rawItems = data['items'] ?? [];
-    if (rawItems.isEmpty && data['meal_name'] != null) {
+    
+    if (rawItems.isEmpty && (data['meal_name'] != null || data['name'] != null)) {
       rawItems = [data];
     }
 
-    int totalCals = 0, totalProt = 0, totalFat = 0, totalCarbs = 0;
+    int _safeInt(dynamic val) {
+      if (val is num) return val.toInt();
+      if (val is String) return double.tryParse(val.replaceAll(RegExp(r'[^0-9.]'), ''))?.toInt() ?? 0;
+      return 0;
+    }
+
+    double _safeDouble(dynamic val, [double def = 100.0]) {
+      if (val is num) return val.toDouble();
+      if (val is String) return double.tryParse(val.replaceAll(RegExp(r'[^0-9.]'), '')) ?? def;
+      return def;
+    }
+
+    int totalCals = 0, totalProt = 0, totalFat = 0, totalCarbs = 0, totalFiber = 0;
+    List<Map<String, dynamic>> ingredients = [];
 
     for (int i = 0; i < rawItems.length; i++) {
       final item = rawItems[i];
-      final int c = (item['calories'] as num?)?.toInt() ?? 0;
-      final int p = (item['protein'] as num?)?.toInt() ?? 0;
-      final int f = (item['fat'] as num?)?.toInt() ?? 0;
-      final int carb = (item['carbs'] as num?)?.toInt() ?? 0;
-      final double grams =
-          (item['weight_g'] as num?)?.toDouble() ??
-          (item['grams'] as num?)?.toDouble() ??
-          100.0;
-      final String name = item['meal_name'] ?? item['name'] ?? 'Блюдо';
+      
+      final int c = _safeInt(item['calories']);
+      final int p = _safeInt(item['protein']);
+      final int f = _safeInt(item['fat']);
+      final int carb = _safeInt(item['carbs']);
+      final int fib = _safeInt(item['fiber']); // <-- Клетчатка
+      final double grams = _safeDouble(item['weight_g'] ?? item['grams'], 100.0);
+      
+      // Строгий приоритет названия: берем meal_name, если он есть
+      final String name = item['meal_name'] ?? item['name'] ?? item['product_name'] ?? 'Ингредиент';
 
-      final String itemId = '${DateTime.now().millisecondsSinceEpoch}_$i';
+      int healthScore = _safeInt(item['health_score']);
+      if (healthScore == 0) healthScore = 5;
 
-      await _db
-          .collection('users')
-          .doc(user.uid)
-          .collection('meals')
-          .doc(docId)
-          .collection('items')
-          .doc(itemId)
-          .set({
-            'name': name,
-            'calories': c,
-            'protein': p,
-            'fat': f,
-            'carbs': carb,
-            'grams': grams,
-            'timestamp': FieldValue.serverTimestamp(),
-          });
+      ingredients.add({
+        'id': '${DateTime.now().millisecondsSinceEpoch}_$i', 
+        'name': name,
+        'calories': c,
+        'protein': p,
+        'fat': f,
+        'carbs': carb,
+        'fiber': fib, // <-- Сохраняем клетчатку
+        'weight_g': grams,
+        'health_score': healthScore, 
+      });
 
       totalCals += c;
       totalProt += p;
       totalFat += f;
       totalCarbs += carb;
+      totalFiber += fib; // <-- Плюсуем общую клетчатку
     }
 
-    if (totalCals == 0 && totalProt == 0) return;
+    if (ingredients.isEmpty) {
+      debugPrint("Ошибка: ИИ вернул пустой список ингредиентов");
+      return;
+    }
 
+    double avgHealthScore = 0;
+    for (var ing in ingredients) {
+      avgHealthScore += (ing['health_score'] as int);
+    }
+    avgHealthScore = ingredients.isNotEmpty ? avgHealthScore / ingredients.length : 5.0;
+
+    final String mealId = DateTime.now().millisecondsSinceEpoch.toString();
+    final mealEntry = {
+      'id': mealId,
+      'name': data['meal_name'] ?? data['name'] ?? 'Прием пищи',
+      'calories': totalCals,
+      'protein': totalProt,
+      'fat': totalFat,
+      'carbs': totalCarbs,
+      'fiber': totalFiber, // <-- Сохраняем общую клетчатку в блюдо
+      'health_score': avgHealthScore.round(), 
+      'timestamp': Timestamp.now(),
+      'is_grouped': true, 
+      'ingredients': ingredients,
+    };
+
+    // Set с merge: true гарантированно создаст документ для новичка, если его еще нет
     await _db
         .collection('users')
         .doc(user.uid)
         .collection('meals')
         .doc(docId)
         .set({
+          'items': FieldValue.arrayUnion([mealEntry]), 
           'calories': FieldValue.increment(totalCals),
           'protein': FieldValue.increment(totalProt),
           'fat': FieldValue.increment(totalFat),
           'carbs': FieldValue.increment(totalCarbs),
+          'fiber': FieldValue.increment(totalFiber), // <-- Инкремент клетчатки
           'date': Timestamp.fromDate(_getLogicalNow()),
         }, SetOptions(merge: true));
 
-    await _updateWeeklyNutritionCache(user.uid);
+    _updateWeeklyNutritionCache(user.uid);
+  }
+
+  Future<void> updateIngredientWeight(String mealId, Map<String, dynamic> oldIngredient, int newWeightG) async {
+    final user = _auth.currentUser;
+    if (user == null) return;
+    final String docId = getTodayDocId();
+    final docRef = _db.collection('users').doc(user.uid).collection('meals').doc(docId);
+
+    await _db.runTransaction((transaction) async {
+      final snapshot = await transaction.get(docRef);
+      if (!snapshot.exists) return;
+
+      List<dynamic> items = snapshot.data()?['items'] ?? [];
+      final mealIndex = items.indexWhere((m) => m['id'] == mealId);
+      if (mealIndex == -1) return;
+
+      Map<String, dynamic> meal = Map<String, dynamic>.from(items[mealIndex]);
+      List<dynamic> ingredients = List.from(meal['ingredients'] ?? []);
+      final ingIndex = ingredients.indexWhere((i) => i['id'] == oldIngredient['id']);
+      if (ingIndex == -1) return;
+
+      double oldWeight = (oldIngredient['weight_g'] as num?)?.toDouble() ?? 100.0;
+      if (oldWeight <= 0) oldWeight = 100.0; 
+      final double ratio = newWeightG / oldWeight;
+
+      final int newC = ((oldIngredient['calories'] as num) * ratio).round();
+      final int newP = ((oldIngredient['protein'] as num) * ratio).round();
+      final int newF = ((oldIngredient['fat'] as num) * ratio).round();
+      final int newCarb = ((oldIngredient['carbs'] as num) * ratio).round();
+      final int newFib = ((oldIngredient['fiber'] ?? 0 as num) * ratio).round(); // <-- Пересчет клетчатки
+      
+      final int hScore = oldIngredient['health_score'] ?? 5;
+
+      final int diffC = newC - (oldIngredient['calories'] as int);
+      final int diffP = newP - (oldIngredient['protein'] as int);
+      final int diffF = newF - (oldIngredient['fat'] as int);
+      final int diffCarb = newCarb - (oldIngredient['carbs'] as int);
+      final int diffFib = newFib - ((oldIngredient['fiber'] ?? 0) as int); // <-- Разница клетчатки
+
+      ingredients[ingIndex] = {
+        ...oldIngredient,
+        'weight_g': newWeightG,
+        'calories': newC,
+        'protein': newP,
+        'fat': newF,
+        'carbs': newCarb,
+        'fiber': newFib, // <-- Сохраняем новую клетчатку
+        'health_score': hScore,
+      };
+
+      meal['ingredients'] = ingredients;
+      meal['calories'] = (meal['calories'] as int) + diffC;
+      meal['protein'] = (meal['protein'] as int) + diffP;
+      meal['fat'] = (meal['fat'] as int) + diffF;
+      meal['carbs'] = (meal['carbs'] as int) + diffCarb;
+      meal['fiber'] = ((meal['fiber'] ?? 0) as int) + diffFib; // <-- Обновляем клетчатку блюда
+
+      items[mealIndex] = meal;
+
+      int totalCals = 0, totalProt = 0, totalFat = 0, totalCarbs = 0, totalFiber = 0;
+      for (var i in items) {
+        totalCals += (i['calories'] as num?)?.toInt() ?? 0;
+        totalProt += (i['protein'] as num?)?.toInt() ?? 0;
+        totalFat += (i['fat'] as num?)?.toInt() ?? 0;
+        totalCarbs += (i['carbs'] as num?)?.toInt() ?? 0;
+        totalFiber += (i['fiber'] as num?)?.toInt() ?? 0;
+      }
+
+      transaction.update(docRef, {
+        'items': items, 
+        'calories': totalCals, 
+        'protein': totalProt, 
+        'fat': totalFat, 
+        'carbs': totalCarbs,
+        'fiber': totalFiber, // <-- Обновляем общий документ
+      });
+    });
+    
+    _updateWeeklyNutritionCache(user.uid);
   }
 
   Future<void> saveMealDraft(Map<String, dynamic> data) async {
@@ -330,64 +524,92 @@ class DatabaseService {
     });
   }
 
-  // --- КОНТЕКСТ ДЛЯ ИИ (ПРОМПТЫ) ---
   Future<String> getAIContextSummary() async {
     final user = _auth.currentUser;
     if (user == null) return "Данные пользователя недоступны.";
 
     try {
+      final String todayDocId = getTodayDocId();
+
       final results = await Future.wait([
         _db.collection('users').doc(user.uid).get(),
-        _db
-            .collection('users')
-            .doc(user.uid)
-            .collection('nutrition_goal')
-            .doc('current')
-            .get(),
+        _db.collection('users').doc(user.uid).collection('nutrition_goal').doc('current').get(),
         _db.collection('users').doc(user.uid).collection('custom_foods').get(),
+        _db.collection('users').doc(user.uid).collection('cycle_logs').doc(todayDocId).get(),
       ]);
 
       final userDoc = results[0] as DocumentSnapshot;
       final goalDoc = results[1] as DocumentSnapshot;
       final foodsSnap = results[2] as QuerySnapshot;
+      final harmonyDoc = results[3] as DocumentSnapshot; 
 
       final userData = userDoc.data() as Map<String, dynamic>? ?? {};
 
-      final bool hasNutritionPlan =
-          goalDoc.exists &&
-          ((goalDoc.data() as Map<String, dynamic>?)?['calories'] ?? 0) > 0;
-      final String planStatus = hasNutritionPlan
-          ? "has_nutrition_plan == true"
-          : "has_nutrition_plan == false";
+      final bool hasNutritionPlan = goalDoc.exists && ((goalDoc.data() as Map<String, dynamic>?)?['calories'] ?? 0) > 0;
+      final String planStatus = hasNutritionPlan ? "has_nutrition_plan == true" : "has_nutrition_plan == false";
 
       final int avgCals = (userData['weeklyAvgCals'] as num?)?.toInt() ?? 0;
 
       String cyclePhase = 'Не указано';
-      final Timestamp? lastPeriod =
-          userData['lastPeriodStartDate'] as Timestamp?;
-      final int cycleLength = (userData['cycleLength'] as num?)?.toInt() ?? 28;
+      
+      final bool isPregnant = userData['isPregnant'] ?? false;
+      final Timestamp? pregStart = userData['pregnancyStartDate'] as Timestamp?;
+      String pregnancyContext = "";
 
-      if (lastPeriod != null) {
-        final start = DateTime(
-          lastPeriod.toDate().year,
-          lastPeriod.toDate().month,
-          lastPeriod.toDate().day,
-        );
-        final today = DateTime.now();
-        final now = DateTime(today.year, today.month, today.day);
-        final int diff = now.difference(start).inDays;
-
-        if (diff >= 0) {
-          final int dayOfCycle = (diff % cycleLength) + 1;
-          if (dayOfCycle <= 5)
-            cyclePhase = 'Менструация ($dayOfCycle-й день)';
-          else if (dayOfCycle <= 13)
-            cyclePhase = 'Фолликулярная фаза ($dayOfCycle-й день)';
-          else if (dayOfCycle <= 15)
-            cyclePhase = 'Овуляция ($dayOfCycle-й день)';
-          else
-            cyclePhase = 'Лютеиновая фаза / ПМС ($dayOfCycle-й день)';
+      if (isPregnant) {
+        int weeks = 0;
+        if (pregStart != null) {
+          weeks = DateTime.now().difference(pregStart.toDate()).inDays ~/ 7;
+          if (weeks > 42) weeks = 42;
         }
+        pregnancyContext = "ПОЛЬЗОВАТЕЛЬ БЕРЕМЕННА (Срок: $weeks недель). Категорически запрещены жесткие диеты для похудения. Давай советы, адаптированные для беременных. Тон: максимально бережный и заботливый.";
+        cyclePhase = "Беременность ($weeks недель)";
+      } else {
+        final Timestamp? lastPeriod = userData['lastPeriodStartDate'] as Timestamp?;
+        final int cycleLength = (userData['cycleLength'] as num?)?.toInt() ?? 28;
+
+        if (lastPeriod != null) {
+          final start = DateTime(lastPeriod.toDate().year, lastPeriod.toDate().month, lastPeriod.toDate().day);
+          final now = DateTime(DateTime.now().year, DateTime.now().month, DateTime.now().day);
+          final int diff = now.difference(start).inDays;
+
+          if (diff >= 0) {
+            final int dayOfCycle = (diff % cycleLength) + 1;
+            if (dayOfCycle <= 5) cyclePhase = 'Менструация ($dayOfCycle-й день)';
+            else if (dayOfCycle <= 13) cyclePhase = 'Фолликулярная фаза ($dayOfCycle-й день)';
+            else if (dayOfCycle <= 15) cyclePhase = 'Овуляция ($dayOfCycle-й день)';
+            else cyclePhase = 'Лютеиновая фаза / ПМС ($dayOfCycle-й день)';
+          }
+        }
+      }
+
+      String harmonyContextText = "Сегодня данные в раздел Гармония не вносились.";
+      if (harmonyDoc.exists) {
+        final hData = harmonyDoc.data() as Map<String, dynamic>? ?? {};
+        final symptomsList = List<String>.from(hData['symptoms'] ?? []);
+        final String symptoms = symptomsList.isEmpty ? 'Нет' : symptomsList.join(', ');
+        final String mood = hData['mood'] ?? 'Не отмечено';
+        final String sleep = hData['sleep'] ?? 'Не отмечено';
+        
+        harmonyContextText = """
+СЕГОДНЯШНЕЕ САМОЧУВСТВИЕ (из раздела Гармония):
+- Симптомы: $symptoms
+- Настроение: $mood
+- Сон: $sleep
+""";
+      }
+      
+      final Map<String, dynamic> qData = userData['questionnaire'] ?? {};
+      String questionnaireContext = "";
+      if (qData.isNotEmpty) {
+        questionnaireContext = "\n[ПОДРОБНАЯ АНКЕТА ПОЛЬЗОВАТЕЛЯ (Изучи внимательно)]:\n";
+        qData.forEach((key, value) {
+          if (value is List) {
+            questionnaireContext += "- $key: ${value.join(', ')}\n";
+          } else {
+            questionnaireContext += "- $key: $value\n";
+          }
+        });
       }
 
       String customFoodsContext = "";
@@ -395,45 +617,24 @@ class DatabaseService {
         customFoodsContext = "\n[ЛИЧНАЯ БАЗА ПРОДУКТОВ ПОЛЬЗОВАТЕЛЯ]:\n";
         for (var doc in foodsSnap.docs) {
           final f = doc.data() as Map<String, dynamic>;
-          customFoodsContext +=
-              "- ${f['name']}: ${f['calories']} ккал (Б:${f['protein']} Ж:${f['fat']} У:${f['carbs']})\n";
+          customFoodsContext += "- ${f['name']}: ${f['calories']} ккал (Б:${f['protein']} Ж:${f['fat']} У:${f['carbs']})\n";
         }
       }
 
       return """
 [СЕКРЕТНЫЙ СИСТЕМНЫЙ КОНТЕКСТ]
 Статус: $planStatus
-Пол: ${userData['gender'] ?? 'не указан'} | Возраст: ${userData['age'] ?? 'не указан'} | Вес: ${userData['weight'] ?? 'не указан'} кг | Цель: ${userData['goal'] ?? 'не указана'}
+$pregnancyContext
+Пол: ${userData['gender'] ?? 'не указан'} | Возраст: ${userData['age'] ?? 'не указан'} | Рост: ${userData['height'] ?? 'не указан'} см | Вес: ${userData['weight'] ?? 'не указан'} кг | Цель: ${userData['goals'] ?? userData['goal'] ?? 'не указана'}
+$questionnaireContext
 
 ИНСТРУКЦИЯ ПО ЦИКЛУ:
 Фаза цикла: $cyclePhase. Адаптируй советы по питанию под эту фазу. Если 'Лютеиновая фаза / ПМС', проявляй особую заботу.
 
-👑 ПРЕМИУМ ПРАВИЛА И СЦЕНАРИИ (ONBOARDING, GUILT-FREE, РЕЦЕПТЫ И ПОКУПКИ):
+$harmonyContextText
+ВНИМАНИЕ: Ты ВИДИШЬ раздел Гармония (он передан тебе в тексте выше). НИКОГДА не говори пользователю "Я не вижу раздел Гармония". Если пользователь просит проанализировать его показатели, используй данные из блока "СЕГОДНЯШНЕЕ САМОЧУВСТВИЕ" и дай заботливую обратную связь.
 
-0. СЦЕНАРИЙ ЗНАКОМСТВА (ONBOARDING): 
-Триггер: Если пользователь отвечает согласием на твое стартовое приветственное сообщение (например: "Да", "Расскажи", "Что ты умеешь?").
-Действие: Ответь тепло и дружелюбно. Перечисли свои главные суперспособности строго этим текстом:
-«Я могу заменить тебе сразу несколько приложений! Вот что мы можем делать вместе:
-📸 Дневник питания без рутины: Просто сфоткай свою тарелку или напиши мне текстом «съела сырники и латте», и я сама посчитаю КБЖУ.
-🌸 Синхронизация с циклом: Я учитываю твой гормональный фон. В ПМС я предложу больше сложных углеводов и шоколад, чтобы снять отеки и поднять настроение.
-🥑 Магия холодильника: Сфоткай то, что осталось на полке, и я за 5 секунд придумаю из этого вкусный и полезный рецепт!
-🛒 Списки покупок: Я могу составить меню на неделю и выдать готовый чек-лист для супермаркета.
-🩺 Чтение анализов: Пришли мне результаты своих анализов (например, ферритин или витамин D), и я подскажу, как скорректировать рацион.
-
-Никакого чувства вины и стресса. С чего начнем? Хочешь записать свой первый прием пищи или посмотрим, что у тебя в холодильнике? ✨»
-
-1. БЕЗ ЧУВСТВА ВИНЫ: Если пользователь превышает лимит калорий, НИКОГДА не ругай его. Поддержи: "Мы немного вышли за норму, но это абсолютно нормально! Главное — баланс. ✨"
-2. МАГИЯ ХОЛОДИЛЬНИКА: Если присылают фото сырых продуктов, предложи 1 быстрый рецепт из них (с КБЖУ). Спроси: "Приготовим это? Я запишу в дневник". Выдай JSON `log_food` если согласны.
-3. СПИСОК ПОКУПОК (action_type: "shopping_list"): Если просят составить список покупок, ОБЯЗАТЕЛЬНО выдай JSON:
-```json
-{
-  "type": "shopping_list",
-  "coach_message": "Вот твой список покупок! Отмечай купленное здесь 👇",
-  "categories": [
-    {"name": "Овощи", "items": [{"name": "Авокадо", "amount": "2 шт"}]}
-  ]
-}
-Данные: В среднем съедено $avgCals ккал/день.
+Данные по калориям: В среднем за неделю съедено $avgCals ккал/день.
 $customFoodsContext
 """;
     } catch (e) {
@@ -441,12 +642,8 @@ $customFoodsContext
     }
   }
 
-  // --- МЕТОДЫ-ЗАГЛУШКИ ДЛЯ ТРЕНИРОВОК ---
-  // Я оставил их пустыми/базовыми, чтобы не было ошибок компиляции, если они где-то вызываются
   Future<void> saveAIWorkoutProgram(Map<String, dynamic> data) async {}
   Future<void> saveAIDietPlan(Map<String, dynamic> data) async {}
-
-  // --- ВОССТАНОВЛЕННЫЕ МЕТОДЫ ДЛЯ ПОДПИСКИ И СТАТИСТИКИ ---
 
   Future<Map<String, dynamic>?> checkPromoCode(String rawCode) async {
     final String cleanCode = rawCode.trim().toUpperCase();
@@ -472,14 +669,41 @@ $customFoodsContext
     final user = _auth.currentUser;
     if (user == null) return;
     final String docId = getTodayDocId();
-    await _db.collection('users').doc(user.uid).collection('meals').doc(docId).update({
-      'items': FieldValue.arrayRemove([item]),
-      'calories': FieldValue.increment(-(item['calories'] as int)),
-      'protein': FieldValue.increment(-(item['protein'] as int)),
-      'fat': FieldValue.increment(-(item['fat'] as int)),
-      'carbs': FieldValue.increment(-(item['carbs'] as int)),
+    final docRef = _db.collection('users').doc(user.uid).collection('meals').doc(docId);
+
+    await _db.runTransaction((transaction) async {
+      final snapshot = await transaction.get(docRef);
+      if (!snapshot.exists) return;
+
+      List<dynamic> items = snapshot.data()?['items'] ?? [];
+      final originalLength = items.length;
+      
+      // Ищем строго по ID, чтобы избежать проблем с Timestamp
+      items.removeWhere((i) => i['id'] == item['id']);
+
+      if (items.length == originalLength) return; // Блюдо не найдено
+
+      // Пересчитываем итоги с нуля для надежности
+      int totalCals = 0, totalProt = 0, totalFat = 0, totalCarbs = 0, totalFiber = 0;
+      for (var i in items) {
+        totalCals += (i['calories'] as num?)?.toInt() ?? 0;
+        totalProt += (i['protein'] as num?)?.toInt() ?? 0;
+        totalFat += (i['fat'] as num?)?.toInt() ?? 0;
+        totalCarbs += (i['carbs'] as num?)?.toInt() ?? 0;
+        totalFiber += (i['fiber'] as num?)?.toInt() ?? 0;
+      }
+
+      transaction.update(docRef, {
+        'items': items,
+        'calories': totalCals,
+        'protein': totalProt,
+        'fat': totalFat,
+        'carbs': totalCarbs,
+        'fiber': totalFiber,
+      });
     });
-    await _updateWeeklyNutritionCache(user.uid);
+
+    _updateWeeklyNutritionCache(user.uid);
   }
 
   Future<void> updateMealItemWeight(Map<String, dynamic> oldItem, int newWeightG) async {
@@ -523,16 +747,15 @@ $customFoodsContext
         'items': items, 'calories': totalCals, 'protein': totalProt, 'fat': totalFat, 'carbs': totalCarbs,
       });
     });
-    await _updateWeeklyNutritionCache(user.uid);
+    
+    // ФИКС СПРИНТА 3: Убран await
+    _updateWeeklyNutritionCache(user.uid);
   }
-  // --- СПИСОК ПОКУПОК ---
+
   Future<void> saveShoppingList(Map<String, dynamic> jsonData) async {
     final user = _auth.currentUser;
     if (user == null) return;
-    
     final categories = jsonData['categories'] ?? [];
-    
-    // Форматируем список, добавляя поле isChecked: false ко всем продуктам
     List<dynamic> parsedCategories = [];
     for (var cat in categories) {
       List<dynamic> items = cat['items'] ?? [];
@@ -541,30 +764,40 @@ $customFoodsContext
         'amount': item['amount'] ?? '',
         'isChecked': false,
       }).toList();
-      
-      parsedCategories.add({
-        'name': cat['name'] ?? 'Категория',
-        'items': parsedItems,
-      });
+      parsedCategories.add({'name': cat['name'] ?? 'Категория', 'items': parsedItems});
     }
+    await _db.collection('users').doc(user.uid).collection('shopping_list').doc('current').set({'categories': parsedCategories, 'updatedAt': FieldValue.serverTimestamp()});
+  }
 
-    // Сохраняем в коллекцию пользователя
-    await _db.collection('users').doc(user.uid).collection('shopping_list').doc('current').set({
-      'categories': parsedCategories,
-      'updatedAt': FieldValue.serverTimestamp(),
+  Future<void> clearCheckedShoppingItems() async {
+    final user = _auth.currentUser;
+    if (user == null) return;
+    final docRef = _db.collection('users').doc(user.uid).collection('shopping_list').doc('current');
+    
+    await _db.runTransaction((transaction) async {
+      final snapshot = await transaction.get(docRef);
+      if (!snapshot.exists) return;
+      List<dynamic> categories = snapshot.data()?['categories'] ?? [];
+      List<dynamic> updatedCategories = [];
+      for (var cat in categories) {
+        List<dynamic> items = cat['items'] ?? [];
+        List<dynamic> remainingItems = items.where((item) => item['isChecked'] != true).toList();
+        if (remainingItems.isNotEmpty) {
+          updatedCategories.add({'name': cat['name'], 'items': remainingItems});
+        }
+      }
+      transaction.update(docRef, {'categories': updatedCategories});
     });
   }
 
   Future<void> toggleShoppingListItem(String categoryName, String itemName, bool isChecked) async {
     final user = _auth.currentUser;
     if (user == null) return;
-    
     final docRef = _db.collection('users').doc(user.uid).collection('shopping_list').doc('current');
     
     await _db.runTransaction((transaction) async {
       final snapshot = await transaction.get(docRef);
       if (!snapshot.exists) return;
-      
       List<dynamic> categories = snapshot.data()?['categories'] ?? [];
       for (var cat in categories) {
         if (cat['name'] == categoryName) {
@@ -578,5 +811,194 @@ $customFoodsContext
       }
       transaction.update(docRef, {'categories': categories});
     });
+  }
+
+  Future<void> syncCatalogShoppingList(Set<String> selectedNames, Map<String, String> productCategories) async {
+    final user = _auth.currentUser;
+    if (user == null) return;
+    final docRef = _db.collection('users').doc(user.uid).collection('shopping_list').doc('current');
+
+    await _db.runTransaction((transaction) async {
+      final snapshot = await transaction.get(docRef);
+      List<dynamic> existingCategories = snapshot.exists ? (snapshot.data()?['categories'] ?? []) : [];
+
+      Map<String, Map<String, dynamic>> oldItemData = {};
+      for (var cat in existingCategories) {
+        for (var item in (cat['items'] ?? [])) {
+          oldItemData[item['name']] = {'isChecked': item['isChecked'] ?? false, 'amount': item['amount'] ?? ''};
+        }
+      }
+
+      Map<String, List<Map<String, dynamic>>> newCategoriesMap = {};
+      for (String name in selectedNames) {
+        String catName = productCategories[name] ?? 'Разное';
+        if (!newCategoriesMap.containsKey(catName)) newCategoriesMap[catName] = [];
+        newCategoriesMap[catName]!.add({'name': name, 'amount': oldItemData[name]?['amount'] ?? '', 'isChecked': oldItemData[name]?['isChecked'] ?? false});
+      }
+
+      List<Map<String, dynamic>> finalCategories = [];
+      newCategoriesMap.forEach((key, value) { finalCategories.add({'name': key, 'items': value}); });
+
+      transaction.set(docRef, {'categories': finalCategories, 'updatedAt': FieldValue.serverTimestamp()}, SetOptions(merge: true));
+    });
+  }
+
+  Future<void> addIngredientsToShoppingList(List<dynamic> newItems) async {
+    final user = _auth.currentUser;
+    if (user == null) return;
+    final docRef = _db.collection('users').doc(user.uid).collection('shopping_list').doc('current');
+
+    await _db.runTransaction((transaction) async {
+      final snapshot = await transaction.get(docRef);
+      List<dynamic> categories = snapshot.exists ? (snapshot.data()?['categories'] ?? []) : [];
+
+      for (var newItem in newItems) {
+        String catName = newItem['category'] ?? 'Из рецептов';
+        String itemName = newItem['name'] ?? 'Продукт';
+        String amount = newItem['amount'] ?? '';
+
+        int catIndex = categories.indexWhere((c) => c['name'] == catName);
+        if (catIndex == -1) {
+          categories.add({'name': catName, 'items': [{'name': itemName, 'amount': amount, 'isChecked': false}]});
+        } else {
+          List<dynamic> items = categories[catIndex]['items'];
+          if (!items.any((i) => i['name'].toString().toLowerCase() == itemName.toLowerCase())) {
+            items.add({'name': itemName, 'amount': amount, 'isChecked': false});
+          }
+        }
+      }
+
+      transaction.set(docRef, {'categories': categories, 'updatedAt': FieldValue.serverTimestamp()}, SetOptions(merge: true));
+    });
+  }
+
+  Future<void> saveDailySymptoms(DateTime date, List<String> symptoms) async {
+    final user = _auth.currentUser;
+    if (user == null) return;
+    final String docId = "${date.year}-${date.month.toString().padLeft(2, '0')}-${date.day.toString().padLeft(2, '0')}";
+    await _db.collection('users').doc(user.uid).collection('cycle_logs').doc(docId).set({'symptoms': symptoms, 'updatedAt': FieldValue.serverTimestamp()}, SetOptions(merge: true));
+  }
+  
+  Future<void> deleteBotChatMessage(String botType, String docId, String? imageUrl) async {
+    final user = _auth.currentUser;
+    if (user == null) return;
+
+    try {
+      if (imageUrl != null && imageUrl.isNotEmpty) {
+        try {
+          final ref = FirebaseStorage.instance.refFromURL(imageUrl);
+          await ref.delete();
+          debugPrint("Картинка успешно удалена из Storage");
+        } catch (e) {
+          debugPrint("Ошибка удаления картинки из Storage: $e");
+        }
+      }
+
+      await _db
+          .collection('users')
+          .doc(user.uid)
+          .collection('ai_chats_$botType')
+          .doc(docId)
+          .delete();
+      
+      debugPrint("Документ сообщения успешно удален");
+    } catch (e) {
+      debugPrint("Ошибка удаления сообщения: $e");
+      rethrow;
+    }
+  }
+
+  Future<void> updateActivityAndRecalculate(String activityLevel) async {
+    final user = _auth.currentUser;
+    if (user == null) return;
+
+    try {
+      final doc = await _db.collection('users').doc(user.uid).get();
+      if (!doc.exists) return;
+
+      final data = doc.data()!;
+      final double weight = (data['weight'] as num?)?.toDouble() ?? 65.0;
+      final double height = (data['height'] as num?)?.toDouble() ?? 165.0;
+      final int age = (data['age'] as num?)?.toInt() ?? 25;
+      final String gender = data['gender'] ?? 'female';
+      final String goal = data['goal'] ?? 'Похудеть';
+
+      double bmr = (10 * weight) + (6.25 * height) - (5 * age);
+      bmr = gender == 'male' ? bmr + 5 : bmr - 161;
+
+      double multiplier = 1.2; 
+      if (activityLevel.contains('Умеренная')) multiplier = 1.375;
+      else if (activityLevel.contains('Высокая')) multiplier = 1.55;
+      else if (activityLevel.contains('Очень высокая')) multiplier = 1.725;
+
+      int maintenance = (bmr * multiplier).round();
+      int targetCals = maintenance;
+
+      if (goal == 'Похудеть') targetCals = (maintenance * 0.85).round(); 
+      else if (goal == 'Набрать массу') targetCals = (maintenance * 1.15).round(); 
+
+      int protein = (weight * 1.8).round();
+      int fat = (weight * 1.0).round();
+      int carbs = ((targetCals - (protein * 4) - (fat * 9)) / 4).round();
+
+      await _db.collection('users').doc(user.uid).update({
+        'activityLevel': activityLevel,
+        'bmr': bmr.round(),
+        'maintenanceCalories': maintenance,
+      });
+
+      await saveNutritionGoal({
+        'calories': targetCals,
+        'protein': protein,
+        'fat': fat,
+        'carbs': carbs > 0 ? carbs : 0,
+      });
+
+    } catch (e) {
+      debugPrint("Ошибка пересчета КБЖУ: $e");
+    }
+  }
+  
+  Future<void> addCheatMealBonus(int bonusCalories) async {
+    final user = _auth.currentUser;
+    if (user == null) return;
+    final String docId = getTodayDocId();
+    
+    await _db.collection('users').doc(user.uid).collection('meals').doc(docId).set({
+      'bonus_calories': FieldValue.increment(bonusCalories),
+      'date': Timestamp.fromDate(_getLogicalNow()),
+    }, SetOptions(merge: true));
+  }
+  
+  Future<void> updateBotChatMessage(String botType, String docId, String newText) async {
+    final user = _auth.currentUser;
+    if (user == null) return;
+    await _db
+        .collection('users')
+        .doc(user.uid)
+        .collection('ai_chats_$botType')
+        .doc(docId)
+        .update({'text': newText});
+  }
+
+  Future<void> deleteP2PMessage(String chatId, String docId, String? imageUrl) async {
+    try {
+      if (imageUrl != null && imageUrl.isNotEmpty) {
+        try {
+          final ref = FirebaseStorage.instance.refFromURL(imageUrl);
+          await ref.delete();
+        } catch (e) {
+          debugPrint("Ошибка удаления фото P2P из Storage: $e");
+        }
+      }
+      await _db.collection('chats').doc(chatId).collection('messages').doc(docId).delete();
+    } catch (e) {
+      debugPrint("Ошибка удаления P2P сообщения: $e");
+      rethrow;
+    }
+  }
+
+  Future<void> updateP2PMessage(String chatId, String docId, String newText) async {
+    await _db.collection('chats').doc(chatId).collection('messages').doc(docId).update({'text': newText});
   }
 }

@@ -7,11 +7,16 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:intl/intl.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:cached_network_image/cached_network_image.dart';
+import 'package:file_picker/file_picker.dart';
+import 'package:cloud_functions/cloud_functions.dart';
+import 'package:firebase_storage/firebase_storage.dart';
 
 import '../services/ai_service.dart';
 import '../services/database_service.dart';
 import '../widgets/shopping_list_widget.dart';
 import '../widgets/ai_chat_parser.dart';
+import '../services/push_notification_service.dart';
+import 'shopping_list_screen.dart';
 
 class AIChatScreen extends StatefulWidget {
   final String botType;
@@ -26,9 +31,19 @@ class _AIChatScreenState extends State<AIChatScreen> {
   final Set<String> _savedMessageIds = {};
   bool _isTyping = false;
   String _fullUserContext = "";
-  File? _selectedImage;
 
-  Color get themeColor => const Color(0xFFB76E79); // Единый цвет Rose Gold
+  List<File> _selectedImages = [];
+  final ImagePicker _picker = ImagePicker();
+  static const int _maxImages = 5;
+
+  File? _selectedPdf;
+  String? _pdfFileName;
+
+  static const Color _themeColor = Color(0xFFB76E79);
+  static const Color _bgColor = Color(0xFFF9F9F9);
+  static const Color _textColor = Color(0xFF2D2D2D);
+  static const Color _subTextColor = Color(0xFF8E8E93);
+
   String get botTitle => 'Eva — твой помощник';
 
   @override
@@ -41,35 +56,19 @@ class _AIChatScreenState extends State<AIChatScreen> {
   void dispose() {
     _controller.dispose();
     _scrollController.dispose();
+    PushNotificationService.currentActiveChatId = null;
     super.dispose();
   }
 
   Future<void> _initChatAndContext() async {
+    PushNotificationService.currentActiveChatId = widget.botType;
+    PushNotificationService().clearAllNotifications();
+
     final uid = FirebaseAuth.instance.currentUser?.uid;
     if (uid == null) return;
-    try {
-      final doc = await FirebaseFirestore.instance
-          .collection('users')
-          .doc(uid)
-          .get();
-      if (doc.exists && mounted) {
-        final d = doc.data()!;
-        setState(() {
-          // СТРОГИЙ ПРОМПТ: Запрещаем ИИ переспрашивать данные
-          _fullUserContext =
-              """
-[БАЗОВЫЕ ДАННЫЕ ПОЛЬЗОВАТЕЛЯ]
-Пол: ${d['gender'] ?? 'не указано'}
-Возраст: ${d['age'] ?? 'не указано'}
-Вес: ${d['weight'] ?? 'не указано'} кг
-Рост: ${d['height'] ?? 'не указано'} см
-Цель: ${d['goal'] ?? 'не указано'}
-Активность: ${d['activityLevel'] ?? 'не указано'}
 
-СТРОГОЕ ПРАВИЛО: Я уже передал тебе эти данные. НИКОГДА не проси пользователя заполнить анкету и не спрашивай его рост, вес, возраст или цель заново, если они здесь указаны (не равны 'не указано'). Сразу переходи к делу и отвечай на его запрос!
-""";
-        });
-      }
+    try {
+      _fullUserContext = await DatabaseService().getAIContextSummary();
 
       final historyCheck = await FirebaseFirestore.instance
           .collection('users')
@@ -80,131 +79,85 @@ class _AIChatScreenState extends State<AIChatScreen> {
 
       if (historyCheck.docs.isEmpty) {
         String welcome =
-            "Привет! Я Ева — твой личный ИИ-помощник, нутрициолог и подруга. ✨ Я здесь не для того, чтобы сажать тебя на жесткие диеты, а чтобы помочь обрести гармонию с телом. Хочешь, я расскажу, что я умею и как могу сделать твою жизнь легче?";
+            '''Привет! 🥰 Я Ева — твой личный ИИ-нутрициолог и заботливая подруга.✨
+Ты можешь скидывать мне всё, что касается твоего здоровья. Например:
+📸 Фото твоей тарелки — я сама посчитаю калории и БЖУ.
+📑 Результаты анализов — я объясню их простым языком без паники.
+❤️ Любой вопрос — я поддержу, когда тревожно или нужен совет.
+Хочешь, я расскажу подробнее, с чего начать? 😉''';
 
-        if (widget.botType == 'trainer') {
-          welcome = "Привет! Я твой ИИ-Тренер. 💪 Какая у тебя цель?";
-        } else if (widget.botType == 'coach_mentor') {
-          welcome =
-              "Приветствую, коллега! 🧠 Я ИИ-Ментор по биомеханике, медицине и тренировкам. Какой сложный случай клиента разберем сегодня?";
-        }
-
-        await DatabaseService().saveBotChatMessage(
-          widget.botType,
-          welcome,
-          'ai',
-        );
+        await DatabaseService().saveBotChatMessage(widget.botType, welcome, 'ai');
       }
     } catch (e) {
-      debugPrint("Ошибка инициализации: $e");
+      debugPrint("Ошибка инициализации контекста: $e");
     }
   }
 
-  Future<void> _pickImage(ImageSource source) async {
+  Future<void> _pickImages() async {
     try {
-      final picker = ImagePicker();
-      final pickedFile = await picker.pickImage(
-        source: source,
-        imageQuality: 70,
-      );
-      if (pickedFile != null)
-        setState(() => _selectedImage = File(pickedFile.path));
+      if (_selectedPdf != null) setState(() { _selectedPdf = null; _pdfFileName = null; });
+      final List<XFile> pickedFiles = await _picker.pickMultiImage(imageQuality: 70);
+
+      if (pickedFiles.isNotEmpty) {
+        if (pickedFiles.length > _maxImages) {
+          if (mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("Ой, многовато! 😅 Можно выбрать максимум 5 фото за раз.", style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)), backgroundColor: Colors.orangeAccent));
+          setState(() => _selectedImages = pickedFiles.take(_maxImages).map((file) => File(file.path)).toList());
+        } else {
+          setState(() => _selectedImages = pickedFiles.map((file) => File(file.path)).toList());
+        }
+      }
     } catch (e) {
-      if (mounted)
-        ScaffoldMessenger.of(
-          context,
-        ).showSnackBar(SnackBar(content: Text("Ошибка выбора фото: $e")));
+      if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text("Ошибка выбора фото: $e")));
+    }
+  }
+
+  Future<void> _pickPdf() async {
+    try {
+      FilePickerResult? result = await FilePicker.platform.pickFiles(type: FileType.custom, allowedExtensions: ['pdf']);
+      if (result != null) {
+        final file = result.files.single;
+        if (file.size > 5 * 1024 * 1024) {
+          if (mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("Файл слишком большой 🙅‍♀️ Максимум 5 МБ", style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)), backgroundColor: Colors.redAccent));
+          return;
+        }
+        setState(() { _selectedPdf = File(file.path!); _pdfFileName = file.name; _selectedImages = []; });
+      }
+    } catch (e) {
+      if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text("Ошибка: $e")));
     }
   }
 
   void _showAttachmentOptions() {
     showModalBottomSheet(
       context: context,
-      backgroundColor: const Color(0xFF1C1C1E),
-      shape: const RoundedRectangleBorder(
-        borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
-      ),
+      backgroundColor: Colors.white,
+      shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(20))),
       builder: (ctx) => SafeArea(
-        child: Wrap(
-          children: [
-            ListTile(
-              leading: const Icon(Icons.camera_alt, color: Colors.white),
-              title: const Text(
-                'Сделать фото',
-                style: TextStyle(color: Colors.white),
-              ),
-              onTap: () {
-                Navigator.pop(ctx);
-                _pickImage(ImageSource.camera);
-              },
-            ),
-            ListTile(
-              leading: const Icon(Icons.photo_library, color: Colors.white),
-              title: const Text(
-                'Выбрать из галереи',
-                style: TextStyle(color: Colors.white),
-              ),
-              onTap: () {
-                Navigator.pop(ctx);
-                _pickImage(ImageSource.gallery);
-              },
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-
-  void _showLongPressMenu(String docId, String text, bool isUser) {
-    showModalBottomSheet(
-      context: context,
-      backgroundColor: const Color(0xFF1C1C1E),
-      builder: (ctx) => SafeArea(
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            ListTile(
-              leading: const Icon(Icons.copy, color: Colors.white),
-              title: const Text(
-                'Копировать текст',
-                style: TextStyle(color: Colors.white),
-              ),
-              onTap: () {
-                Clipboard.setData(ClipboardData(text: text));
-                Navigator.pop(ctx);
-              },
-            ),
-            if (isUser)
+        child: Padding(
+          padding: const EdgeInsets.symmetric(vertical: 12.0),
+          child: Wrap(
+            children: [
               ListTile(
-                leading: const Icon(Icons.edit, color: Colors.white),
-                title: const Text(
-                  'Редактировать',
-                  style: TextStyle(color: Colors.white),
-                ),
-                onTap: () {
+                leading: const Icon(Icons.camera_alt, color: _textColor, size: 28),
+                title: const Text('Сделать фото', style: TextStyle(color: _textColor, fontSize: 16, fontWeight: FontWeight.w500)),
+                onTap: () async {
                   Navigator.pop(ctx);
-                  _controller.text = text;
+                  final XFile? photo = await _picker.pickImage(source: ImageSource.camera, imageQuality: 70);
+                  if (photo != null) setState(() { _selectedPdf = null; _pdfFileName = null; _selectedImages = [File(photo.path)]; });
                 },
               ),
-            ListTile(
-              leading: const Icon(Icons.delete, color: Colors.redAccent),
-              title: const Text(
-                'Удалить сообщение',
-                style: TextStyle(color: Colors.redAccent),
+              ListTile(
+                leading: const Icon(Icons.photo_library, color: _textColor, size: 28),
+                title: const Text('Выбрать из галереи (до 5 шт.)', style: TextStyle(color: _textColor, fontSize: 16, fontWeight: FontWeight.w500)),
+                onTap: () { Navigator.pop(ctx); _pickImages(); },
               ),
-              onTap: () async {
-                Navigator.pop(ctx);
-                final uid = FirebaseAuth.instance.currentUser?.uid;
-                if (uid != null)
-                  await FirebaseFirestore.instance
-                      .collection('users')
-                      .doc(uid)
-                      .collection('ai_chats_${widget.botType}')
-                      .doc(docId)
-                      .delete();
-              },
-            ),
-          ],
+              ListTile(
+                leading: const Icon(Icons.picture_as_pdf, color: Colors.redAccent, size: 28),
+                title: const Text('Медицинские анализы (PDF)', style: TextStyle(color: _textColor, fontSize: 16, fontWeight: FontWeight.w500)),
+                onTap: () { Navigator.pop(ctx); _pickPdf(); },
+              ),
+            ],
+          ),
         ),
       ),
     );
@@ -217,63 +170,81 @@ class _AIChatScreenState extends State<AIChatScreen> {
 
   Future<void> _sendMessage() async {
     final text = _controller.text.trim();
-    if (text.isEmpty && _selectedImage == null) return;
+    if (text.isEmpty && _selectedImages.isEmpty && _selectedPdf == null) return;
 
-    final File? imageToSend = _selectedImage;
+    final List<File> imagesToSend = List.from(_selectedImages);
+    final File? pdfToSend = _selectedPdf;
+    final String? pdfName = _pdfFileName;
+
     setState(() {
       _controller.clear();
-      _selectedImage = null;
+      _selectedImages = [];
+      _selectedPdf = null;
+      _pdfFileName = null;
       _isTyping = true;
     });
 
     try {
-      String? imageUrl;
-      String? localBase64;
+      final uid = FirebaseAuth.instance.currentUser?.uid;
+      if (uid == null) return;
 
-      if (imageToSend != null) {
-        imageUrl = await DatabaseService().uploadChatImage(
-          imageToSend,
-          'ai_chat_${widget.botType}',
-        );
-        localBase64 = base64Encode(await imageToSend.readAsBytes());
+      List<String> imageUrls = [];
+      List<String> localImagesBase64 = [];
+      String? pdfUrl;
+      String? localPdfBase64;
+      final timestamp = DateTime.now().millisecondsSinceEpoch;
+
+      if (imagesToSend.isNotEmpty) {
+        List<Future<void>> uploadTasks = imagesToSend.asMap().entries.map((entry) async {
+          int index = entry.key;
+          File file = entry.value;
+          final path = 'chats/ai_chat_${widget.botType}/${timestamp}_${uid}_$index.jpg';
+          final ref = FirebaseStorage.instance.ref().child(path);
+          await Future.wait([
+            ref.putFile(file),
+            file.readAsBytes().then((bytes) => localImagesBase64.add(base64Encode(bytes))),
+          ]);
+          String url = await ref.getDownloadURL();
+          imageUrls.add(url);
+        }).toList();
+        await Future.wait(uploadTasks);
       }
 
-      await DatabaseService().saveBotChatMessage(
-        widget.botType,
-        text,
-        'user',
-        imageUrl: imageUrl,
-      );
-
-      String aiResponse = "";
-      if (localBase64 != null && widget.botType == 'dietitian') {
-        aiResponse = await AIService().sendMultimodalMessage(
-          userMessage: text,
-          base64Image: localBase64,
-          userContext: _fullUserContext,
-        );
-      } else {
-        final history = await DatabaseService().getChatHistoryForAI(
-          widget.botType,
-        );
-        aiResponse = await AIService().sendChatMessage(
-          botType: widget.botType,
-          userMessage: text,
-          userContext: _fullUserContext,
-          chatHistory: history,
-        );
+      if (pdfToSend != null) {
+        final safePdfName = pdfName?.replaceAll(RegExp(r'[^a-zA-Z0-9.\-_]'), '_') ?? 'document.pdf';
+        final path = 'chats/ai_chat_${widget.botType}/${timestamp}_$safePdfName';
+        final ref = FirebaseStorage.instance.ref().child(path);
+        await ref.putFile(pdfToSend);
+        pdfUrl = await ref.getDownloadURL();
+        localPdfBase64 = base64Encode(await pdfToSend.readAsBytes());
       }
 
-      await DatabaseService().saveBotChatMessage(
-        widget.botType,
-        aiResponse,
-        'ai',
-      );
+      await FirebaseFirestore.instance.collection('users').doc(uid).collection('ai_chats_${widget.botType}').add({
+        'text': text,
+        'role': 'user',
+        'imageUrls': imageUrls,
+        'pdfUrl': pdfUrl,
+        'fileName': pdfName,
+        'timestamp': FieldValue.serverTimestamp(),
+        'isActionCompleted': false,
+      });
+
+      final history = await DatabaseService().getChatHistoryForAI(widget.botType);
+      _fullUserContext = await DatabaseService().getAIContextSummary();
+      final HttpsCallable callable = FirebaseFunctions.instance.httpsCallable('askDietitian');
+
+      final result = await callable.call({
+        'prompt': text,
+        'history': history,
+        'userContext': _fullUserContext,
+        'imagesBase64': localImagesBase64,
+        'pdfBase64': localPdfBase64,
+      });
+
+      final String aiResponse = result.data['text'] as String;
+      await DatabaseService().saveBotChatMessage(widget.botType, aiResponse, 'ai');
     } catch (e) {
-      if (mounted)
-        ScaffoldMessenger.of(
-          context,
-        ).showSnackBar(SnackBar(content: Text("Ошибка ИИ: $e")));
+      if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text("Ошибка ИИ: $e", style: const TextStyle(color: Colors.white)), backgroundColor: Colors.redAccent));
     } finally {
       if (mounted) setState(() => _isTyping = false);
     }
@@ -282,383 +253,448 @@ class _AIChatScreenState extends State<AIChatScreen> {
   Map<String, dynamic>? _tryParseJson(String text) {
     try {
       String jsonString = text;
-
-      // 1. Извлекаем сырой текст
-      final exp = RegExp(
-        r"```(?:json)?\s*([\s\S]*?)\s*```",
-        caseSensitive: false,
-      );
+      final String tick = String.fromCharCode(96);
+      final String tripleTick = tick + tick + tick;
+      final exp = RegExp(tripleTick + r"(?:json)?\s*([\s\S]*?)\s*" + tripleTick, caseSensitive: false);
       final match = exp.firstMatch(text);
       if (match != null) {
         jsonString = match.group(1)!;
       } else {
         final startIdx = text.indexOf('{');
         final endIdx = text.lastIndexOf('}');
-        if (startIdx != -1 && endIdx != -1 && endIdx > startIdx) {
-          jsonString = text.substring(startIdx, endIdx + 1);
-        } else {
-          return null;
-        }
+        if (startIdx != -1 && endIdx != -1 && endIdx > startIdx) jsonString = text.substring(startIdx, endIdx + 1);
+        else return null;
       }
-
-      // 2. ХИРУРГИЧЕСКАЯ ОЧИСТКА ГАЛЛЮЦИНАЦИЙ ИИ
-      // Убираем висячие запятые перед закрывающими скобками (частая ошибка Gemini)
-      jsonString = jsonString.replaceAll(RegExp(r',\s*\}'), '}');
-      jsonString = jsonString.replaceAll(RegExp(r',\s*\]'), ']');
-      jsonString = jsonString.trim();
-
       return jsonDecode(jsonString);
-    } catch (e) {
-      debugPrint("Parse Error: $e");
-      return null;
-    }
+    } catch (e) { return null; }
   }
 
   String _cleanText(String text, Map<String, dynamic>? jsonData) {
     if (jsonData == null) return text.trim();
-
-    String stripped = text
-        .replaceAll(
-          RegExp(r"```(?:json)?\s*([\s\S]*?)\s*```", caseSensitive: false),
-          '',
-        )
-        .trim();
-
-    if (stripped.startsWith('{') && stripped.endsWith('}')) {
-      stripped = '';
+    final String tick = String.fromCharCode(96);
+    final String tripleTick = tick + tick + tick;
+    String stripped = text.replaceAll(RegExp(tripleTick + r"(?:json)?\s*([\s\S]*?)\s*" + tripleTick, caseSensitive: false), '').trim();
+    final startIdx = stripped.indexOf('{');
+    final endIdx = stripped.lastIndexOf('}');
+    if (startIdx != -1 && endIdx != -1 && endIdx > startIdx) {
+      String possibleJson = stripped.substring(startIdx, endIdx + 1);
+      try { jsonDecode(possibleJson); stripped = stripped.replaceRange(startIdx, endIdx + 1, '').trim(); } catch (_) {}
     }
-
-    if (stripped.isEmpty &&
-        jsonData.containsKey('coach_message') &&
-        jsonData['coach_message'].toString().isNotEmpty) {
+    if (stripped.isEmpty && jsonData.containsKey('coach_message') && jsonData['coach_message'].toString().isNotEmpty) {
       return jsonData['coach_message'].toString().trim();
     }
-
     return stripped;
+  }
+
+  // === ОБНОВЛЕННОЕ МЕНЮ (LONG PRESS) ===
+  void _showOptionsSheet(String docId, String currentText, bool hasMedia, String? mediaUrl) {
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: Colors.white,
+      shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(20))),
+      builder: (ctx) => SafeArea(
+        child: Padding(
+          padding: const EdgeInsets.symmetric(vertical: 12.0),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              if (!hasMedia)
+                ListTile(
+                  leading: const Icon(Icons.edit_rounded, color: _textColor, size: 26),
+                  title: const Text("Редактировать", style: TextStyle(color: _textColor, fontSize: 16, fontWeight: FontWeight.w500)),
+                  onTap: () {
+                    Navigator.pop(ctx);
+                    _showEditDialog(docId, currentText);
+                  },
+                ),
+              ListTile(
+                leading: const Icon(Icons.delete_rounded, color: Colors.redAccent, size: 26),
+                title: const Text("Удалить", style: TextStyle(color: Colors.redAccent, fontSize: 16, fontWeight: FontWeight.w600)),
+                onTap: () async {
+                  Navigator.pop(ctx);
+                  try {
+                    await DatabaseService().deleteBotChatMessage(widget.botType, docId, mediaUrl);
+                  } catch (e) {
+                    if (mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Ошибка удаления'), backgroundColor: Colors.redAccent));
+                  }
+                },
+              ),
+            ],
+          ),
+        ),
+      )
+    );
+  }
+
+  void _showEditDialog(String docId, String currentText) {
+    final TextEditingController editController = TextEditingController(text: currentText);
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        backgroundColor: Colors.white,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+        title: const Text("Редактировать", style: TextStyle(color: _textColor, fontWeight: FontWeight.w800)),
+        content: TextField(
+          controller: editController,
+          maxLines: null,
+          style: const TextStyle(color: _textColor),
+          decoration: const InputDecoration(
+            border: OutlineInputBorder(borderRadius: BorderRadius.all(Radius.circular(12))),
+            focusedBorder: OutlineInputBorder(borderRadius: BorderRadius.all(Radius.circular(12)), borderSide: BorderSide(color: _themeColor, width: 2)),
+          ),
+          cursorColor: _themeColor,
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(context), child: const Text("Отмена", style: TextStyle(color: _subTextColor, fontWeight: FontWeight.w600))),
+          ElevatedButton(
+            style: ElevatedButton.styleFrom(backgroundColor: _themeColor, shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)), elevation: 0),
+            onPressed: () async {
+              final newText = editController.text.trim();
+              if (newText.isNotEmpty && newText != currentText) {
+                await DatabaseService().updateBotChatMessage(widget.botType, docId, newText);
+              }
+              if (mounted) Navigator.pop(context);
+            },
+            child: const Text("Сохранить", style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
+          ),
+        ],
+      )
+    );
   }
 
   @override
   Widget build(BuildContext context) {
-    return Container(
-      decoration: BoxDecoration(
-        color: Colors.black,
-        image: DecorationImage(
-          image: const AssetImage('assets/images/app_bg_silhouette.png'),
-          fit: BoxFit.cover,
-          colorFilter: ColorFilter.mode(
-            Colors.black.withValues(alpha: 0.8),
-            BlendMode.darken,
-          ),
-        ),
+    return Scaffold(
+      backgroundColor: _bgColor, // Светлый премиальный фон
+      appBar: AppBar(
+        title: Text(botTitle, style: const TextStyle(fontWeight: FontWeight.w900, color: _textColor)),
+        backgroundColor: Colors.white,
+        elevation: 0,
+        iconTheme: const IconThemeData(color: _textColor),
       ),
-      child: Scaffold(
-        backgroundColor: Colors.transparent,
-        appBar: AppBar(
-          title: Text(
-            botTitle,
-            style: const TextStyle(
-              fontWeight: FontWeight.bold,
-              color: Colors.white,
-            ),
-          ),
-          backgroundColor: Colors.transparent,
-          elevation: 0,
-          iconTheme: const IconThemeData(color: Colors.white),
-        ),
-        body: Column(
-          children: [
-            Expanded(
-              child: StreamBuilder<QuerySnapshot>(
-                stream: DatabaseService().getBotChatMessages(widget.botType),
-                builder: (context, snapshot) {
-                  if (snapshot.connectionState == ConnectionState.waiting)
-                    return Center(
-                      child: CircularProgressIndicator(color: themeColor),
-                    );
-                  final docs = snapshot.data?.docs ?? [];
-                  return ListView.builder(
-                    controller: _scrollController,
-                    reverse: true,
-                    padding: const EdgeInsets.all(16),
-                    itemCount: docs.length,
-                    itemBuilder: (context, index) {
-                      final doc = docs[index];
-                      final data = doc.data() as Map<String, dynamic>;
-                      final isUser = data['role'] == 'user';
-                      final rawText = data['text'] ?? '';
+      body: Column(
+        children: [
+          Expanded(
+            child: StreamBuilder<QuerySnapshot>(
+              stream: DatabaseService().getBotChatMessages(widget.botType),
+              builder: (context, snapshot) {
+                if (snapshot.connectionState == ConnectionState.waiting) return const Center(child: CircularProgressIndicator(color: _themeColor));
+                final docs = snapshot.data?.docs ?? [];
+                
+                return ListView.builder(
+                  controller: _scrollController,
+                  reverse: true,
+                  padding: const EdgeInsets.all(16),
+                  itemCount: docs.length,
+                  itemBuilder: (context, index) {
+                    final doc = docs[index];
+                    final data = doc.data() as Map<String, dynamic>;
+                    final isUser = data['role'] == 'user';
+                    final rawText = data['text'] ?? '';
+                    final bool isActionCompleted = data['isActionCompleted'] == true;
 
-                      // QA FIX: Читаем состояние из БД (State Management)
-                      final bool isActionCompleted =
-                          data['isActionCompleted'] == true;
+                    String cleanRawText = rawText.replaceAll(RegExp(r'<thinking>[\s\S]*?<\/thinking>'), '').trim();
+                    Map<String, dynamic>? shoppingListData;
 
-                      final cleanRawText = rawText
-                          .replaceAll(
-                            RegExp(r'<thinking>[\s\S]*?<\/thinking>'),
-                            '',
-                          )
-                          .trim();
+                    if (!isUser) {
+                      final shopExp = RegExp(r'\[SHOPP?ING_LIST\]([\s\S]*?)\[\/SHOPP?ING_LIST\]', caseSensitive: false);
+                      final shopMatch = shopExp.firstMatch(cleanRawText);
 
-                      final imageUrl = data['imageUrl'] as String?;
-                      final jsonData = isUser
-                          ? null
-                          : _tryParseJson(cleanRawText);
-                      final displayText = isUser
-                          ? rawText
-                          : _cleanText(cleanRawText, jsonData);
+                      if (shopMatch != null) {
+                        String jsonStr = shopMatch.group(1) ?? '';
+                        final String tick = String.fromCharCode(96);
+                        final String tripleTick = tick + tick + tick;
+                        final RegExp mdRegex = RegExp(tripleTick + r'(?:json)?|' + tripleTick);
+                        jsonStr = jsonStr.replaceAll(mdRegex, '').trim();
+                        if (jsonStr.isNotEmpty) {
+                          try { shoppingListData = jsonDecode(jsonStr); } catch (_) {}
+                        }
+                        cleanRawText = cleanRawText.replaceAll(shopExp, '').trim();
+                      }
+                      cleanRawText = cleanRawText.replaceAll(RegExp(r'\[\/?SHOPP?ING_LIST\]', caseSensitive: false), '').trim();
+                    }
 
-                      final Timestamp? ts = data['timestamp'] as Timestamp?;
-                      final String timeStr = ts != null
-                          ? DateFormat('HH:mm').format(ts.toDate())
-                          : '';
-                      final bool isEdited = data['isEdited'] == true;
+                    final rawImageUrls = data['imageUrls'] as List<dynamic>?;
+                    final List<String> imageUrls = rawImageUrls?.map((e) => e.toString()).toList() ?? [];
+                    final oldImageUrl = data['imageUrl'] as String?;
+                    if (imageUrls.isEmpty && oldImageUrl != null) imageUrls.add(oldImageUrl);
 
-                      return Column(
-                        crossAxisAlignment: isUser
-                            ? CrossAxisAlignment.end
-                            : CrossAxisAlignment.start,
+                    final pdfUrl = data['pdfUrl'] as String?;
+                    final pdfName = data['fileName'] as String? ?? 'Анализы.pdf';
+
+                    final jsonData = isUser ? null : _tryParseJson(cleanRawText);
+                    final displayText = isUser ? rawText : _cleanText(cleanRawText, jsonData);
+                    final Timestamp? ts = data['timestamp'] as Timestamp?;
+                    final String timeStr = ts != null ? DateFormat('HH:mm').format(ts.toDate()) : '';
+
+                    return GestureDetector(
+                      onLongPress: () {
+                        if (isUser) {
+                          final bool hasMedia = imageUrls.isNotEmpty || pdfUrl != null;
+                          String? mediaToDelete = imageUrls.isNotEmpty ? imageUrls.first : pdfUrl;
+                          _showOptionsSheet(doc.id, displayText, hasMedia, mediaToDelete);
+                        }
+                      },
+                      child: Column(
+                        crossAxisAlignment: isUser ? CrossAxisAlignment.end : CrossAxisAlignment.start,
                         children: [
-                          if (displayText.isNotEmpty || imageUrl != null)
+                          if (displayText.isNotEmpty || imageUrls.isNotEmpty || pdfUrl != null)
                             Align(
-                              alignment: isUser
-                                  ? Alignment.centerRight
-                                  : Alignment.centerLeft,
-                              child: GestureDetector(
-                                onLongPress: () => _showLongPressMenu(
-                                  doc.id,
-                                  displayText,
-                                  isUser,
+                              alignment: isUser ? Alignment.centerRight : Alignment.centerLeft,
+                              child: Container(
+                                margin: const EdgeInsets.symmetric(vertical: 6),
+                                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                                constraints: BoxConstraints(maxWidth: MediaQuery.of(context).size.width * 0.8),
+                                decoration: BoxDecoration(
+                                  color: isUser ? _themeColor : Colors.white, // Акцентный розовый для нас, белый для ИИ
+                                  borderRadius: BorderRadius.only(
+                                    topLeft: const Radius.circular(20),
+                                    topRight: const Radius.circular(20),
+                                    bottomLeft: isUser ? const Radius.circular(20) : const Radius.circular(4),
+                                    bottomRight: isUser ? const Radius.circular(4) : const Radius.circular(20),
+                                  ),
+                                  boxShadow: [BoxShadow(color: Colors.black.withValues(alpha: 0.04), blurRadius: 16, offset: const Offset(0, 4))],
                                 ),
-                                child: Container(
-                                  margin: const EdgeInsets.symmetric(
-                                    vertical: 6,
-                                  ),
-                                  padding: const EdgeInsets.all(14),
-                                  constraints: BoxConstraints(
-                                    maxWidth:
-                                        MediaQuery.of(context).size.width *
-                                        0.85,
-                                  ),
-                                  decoration: BoxDecoration(
-                                    color: isUser
-                                        ? themeColor.withValues(alpha: 0.1)
-                                        : const Color(
-                                            0xFF1E1E1E,
-                                          ).withValues(alpha: 0.9),
-                                    borderRadius: BorderRadius.circular(16),
-                                    border: Border.all(
-                                      color: isUser
-                                          ? themeColor.withValues(alpha: 0.3)
-                                          : themeColor.withValues(alpha: 0.1),
-                                      width: 1,
-                                    ),
-                                  ),
-                                  child: Column(
-                                    crossAxisAlignment: isUser
-                                        ? CrossAxisAlignment.end
-                                        : CrossAxisAlignment.start,
-                                    children: [
-                                      if (imageUrl != null)
-                                        Padding(
-                                          padding: EdgeInsets.only(
-                                            bottom: displayText.isNotEmpty
-                                                ? 8.0
-                                                : 0,
-                                          ),
-                                          child: ClipRRect(
-                                            borderRadius: BorderRadius.circular(
-                                              12,
-                                            ),
-                                            child: CachedNetworkImage(
-                                              imageUrl: imageUrl,
-                                              width: 200,
-                                              fit: BoxFit.cover,
-                                              placeholder: (c, u) =>
-                                                  const CircularProgressIndicator(),
-                                            ),
-                                          ),
-                                        ),
-                                      if (displayText.isNotEmpty ||
-                                          imageUrl == null)
-                                        Wrap(
-                                          alignment: WrapAlignment.end,
-                                          crossAxisAlignment:
-                                              WrapCrossAlignment.end,
+                                child: Column(
+                                  crossAxisAlignment: isUser ? CrossAxisAlignment.end : CrossAxisAlignment.start,
+                                  children: [
+                                    if (imageUrls.isNotEmpty)
+                                      Padding(padding: EdgeInsets.only(bottom: displayText.isNotEmpty ? 8.0 : 0), child: imageUrls.length == 1 ? _buildSingleImage(imageUrls.first) : _buildImageGrid(imageUrls)),
+                                    if (pdfUrl != null)
+                                      Container(
+                                        margin: EdgeInsets.only(bottom: displayText.isNotEmpty ? 8.0 : 0),
+                                        padding: const EdgeInsets.all(12),
+                                        decoration: BoxDecoration(color: isUser ? Colors.white.withValues(alpha: 0.2) : const Color(0xFFF2F2F7), borderRadius: BorderRadius.circular(12)),
+                                        child: Row(
+                                          mainAxisSize: MainAxisSize.min,
                                           children: [
-                                            if (displayText.isNotEmpty)
-                                              Text(
-                                                displayText,
-                                                style: const TextStyle(
-                                                  color: Colors.white,
-                                                  fontSize: 15,
-                                                  height: 1.4,
-                                                ),
-                                              ),
-                                            const SizedBox(width: 8),
-                                            Padding(
-                                              padding: const EdgeInsets.only(
-                                                bottom: 2.0,
-                                              ),
-                                              child: Row(
-                                                mainAxisSize: MainAxisSize.min,
-                                                children: [
-                                                  if (isEdited)
-                                                    const Padding(
-                                                      padding: EdgeInsets.only(
-                                                        right: 4,
-                                                      ),
-                                                      child: Text(
-                                                        'изм.',
-                                                        style: TextStyle(
-                                                          color: Colors.white54,
-                                                          fontSize: 10,
-                                                          fontWeight:
-                                                              FontWeight.bold,
-                                                        ),
-                                                      ),
-                                                    ),
-                                                  Text(
-                                                    timeStr,
-                                                    style: const TextStyle(
-                                                      color: Colors.white54,
-                                                      fontSize: 10,
-                                                      fontWeight:
-                                                          FontWeight.bold,
-                                                    ),
-                                                  ),
-                                                ],
-                                              ),
-                                            ),
+                                            const Icon(Icons.picture_as_pdf, color: Colors.redAccent, size: 28),
+                                            const SizedBox(width: 12),
+                                            Flexible(child: Text(pdfName, style: TextStyle(color: isUser ? Colors.white : _textColor, fontWeight: FontWeight.bold), overflow: TextOverflow.ellipsis)),
                                           ],
                                         ),
-                                    ],
-                                  ),
+                                      ),
+                                    if (displayText.isNotEmpty)
+                                      Wrap(
+                                        alignment: WrapAlignment.end, crossAxisAlignment: WrapCrossAlignment.end,
+                                        children: [
+                                          Text(displayText, style: TextStyle(color: isUser ? Colors.white : _textColor, fontSize: 15, height: 1.4, fontWeight: FontWeight.w500)),
+                                          const SizedBox(width: 8),
+                                          Padding(padding: const EdgeInsets.only(bottom: 2.0), child: Text(timeStr, style: TextStyle(color: isUser ? Colors.white.withValues(alpha: 0.7) : _subTextColor, fontSize: 10, fontWeight: FontWeight.bold))),
+                                        ],
+                                      ),
+                                  ],
                                 ),
                               ),
                             ),
-
-                          if (jsonData != null)
-                            AIChatSaveCardWidget(
-                              jsonData: jsonData,
-                              msgId: doc.id,
-                              botType: widget
-                                  .botType, // Передаем botType для сохранения состояния
-                              themeColor: themeColor,
-                              // QA FIX: Связываем локальный кэш и базу данных
-                              isInitiallySaved:
-                                  isActionCompleted ||
-                                  _savedMessageIds.contains(doc.id),
-                              onSaveSuccess: (id) =>
-                                  setState(() => _savedMessageIds.add(id)),
-                              onSendMessage: _triggerSendMessage,
-                            ),
+                          if (shoppingListData != null) RecipeShoppingCardWidget(data: shoppingListData, msgId: doc.id),
+                          if (jsonData != null) AIChatSaveCardWidget(jsonData: jsonData, msgId: doc.id, botType: widget.botType, themeColor: _themeColor, isInitiallySaved: isActionCompleted || _savedMessageIds.contains(doc.id), onSaveSuccess: (id) => setState(() => _savedMessageIds.add(id)), onSendMessage: _triggerSendMessage),
                         ],
-                      );
-                    },
-                  );
-                },
-              ),
+                      ),
+                    );
+                  },
+                );
+              },
             ),
-            if (_isTyping)
-              Padding(
-                padding: const EdgeInsets.all(8.0),
-                child: Text(
-                  "Бот печатает...",
-                  style: TextStyle(color: themeColor, fontSize: 12),
-                ),
-              ),
-            _buildInputArea(),
-          ],
-        ),
+          ),
+          if (_isTyping) Padding(padding: const EdgeInsets.all(8.0), child: Text("Ева печатает...", style: TextStyle(color: _themeColor, fontSize: 12, fontWeight: FontWeight.w600))),
+          _buildInputArea(),
+        ],
       ),
+    );
+  }
+
+  Widget _buildSingleImage(String url) {
+    return ClipRRect(borderRadius: BorderRadius.circular(12), child: CachedNetworkImage(imageUrl: url, width: 200, fit: BoxFit.cover, placeholder: (c, u) => const CircularProgressIndicator()));
+  }
+
+  Widget _buildImageGrid(List<String> urls) {
+    int crossAxisCount = urls.length >= 2 ? 2 : 1;
+    if (urls.length >= 3) crossAxisCount = 3;
+    if (urls.length == 4) crossAxisCount = 2;
+    double gridHeight = urls.length <= 3 ? 100 : 200;
+    return SizedBox(
+      width: 250, height: gridHeight,
+      child: GridView.builder(padding: EdgeInsets.zero, physics: const NeverScrollableScrollPhysics(), gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(crossAxisCount: crossAxisCount, crossAxisSpacing: 4, mainAxisSpacing: 4, childAspectRatio: 1.0), itemCount: urls.length, itemBuilder: (context, index) { return ClipRRect(borderRadius: BorderRadius.circular(8), child: CachedNetworkImage(imageUrl: urls[index], fit: BoxFit.cover, placeholder: (c, u) => Container(color: const Color(0xFFF2F2F7)))); }),
     );
   }
 
   Widget _buildInputArea() {
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
-      decoration: const BoxDecoration(
-        color: Color(0xFF1C1C1E),
-        border: Border(top: BorderSide(color: Colors.white10)),
+      padding: const EdgeInsets.fromLTRB(16, 12, 16, 12),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        boxShadow: [BoxShadow(color: Colors.black.withValues(alpha: 0.04), blurRadius: 24, offset: const Offset(0, -8))],
       ),
       child: SafeArea(
+        bottom: true,
         child: Column(
           mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            if (_selectedImage != null)
-              Stack(
-                children: [
-                  ClipRRect(
-                    borderRadius: BorderRadius.circular(12),
-                    child: Image.file(
-                      _selectedImage!,
-                      height: 80,
-                      width: 80,
-                      fit: BoxFit.cover,
-                    ),
-                  ),
-                  Positioned(
-                    right: 0,
-                    child: GestureDetector(
-                      onTap: () => setState(() => _selectedImage = null),
-                      child: const CircleAvatar(
-                        radius: 10,
-                        child: Icon(Icons.close, size: 12),
-                      ),
-                    ),
-                  ),
-                ],
+            if (_selectedImages.isNotEmpty)
+              Container(
+                height: 80, margin: const EdgeInsets.only(bottom: 12),
+                child: ListView.builder(scrollDirection: Axis.horizontal, itemCount: _selectedImages.length, itemBuilder: (context, index) { return Stack(children: [Container(margin: const EdgeInsets.only(right: 8, top: 8), width: 70, height: 70, decoration: BoxDecoration(borderRadius: BorderRadius.circular(12), image: DecorationImage(image: FileImage(_selectedImages[index]), fit: BoxFit.cover))), Positioned(right: 0, top: 0, child: GestureDetector(onTap: () => setState(() => _selectedImages.removeAt(index)), child: const CircleAvatar(radius: 10, backgroundColor: Colors.white, child: Icon(Icons.close, size: 14, color: Colors.black))))]); }),
+              ),
+            if (_selectedPdf != null)
+              Container(
+                margin: const EdgeInsets.only(bottom: 12), padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                decoration: BoxDecoration(color: const Color(0xFFF2F2F7), borderRadius: BorderRadius.circular(16)),
+                child: Row(mainAxisSize: MainAxisSize.min, children: [const Icon(Icons.picture_as_pdf, color: Colors.redAccent, size: 24), const SizedBox(width: 8), Expanded(child: Text(_pdfFileName ?? 'Документ.pdf', style: const TextStyle(color: _textColor, fontWeight: FontWeight.bold), overflow: TextOverflow.ellipsis)), GestureDetector(onTap: () => setState(() { _selectedPdf = null; _pdfFileName = null; }), child: const Icon(Icons.close, color: _subTextColor, size: 24))]),
               ),
             Row(
               crossAxisAlignment: CrossAxisAlignment.end,
               children: [
-                IconButton(
-                  icon: const Icon(Icons.attach_file, color: Colors.grey),
-                  onPressed: _showAttachmentOptions,
+                Padding(
+                  padding: const EdgeInsets.only(bottom: 2.0),
+                  child: GestureDetector(
+                    onTap: _showAttachmentOptions, 
+                    child: Container(padding: const EdgeInsets.all(14), child: const Icon(Icons.attach_file_rounded, color: _themeColor, size: 26)),
+                  ),
                 ),
                 Expanded(
-                  child: Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 16),
-                    decoration: BoxDecoration(
-                      color: const Color(0xFF2C2C2E),
-                      borderRadius: BorderRadius.circular(20),
-                    ),
-                    child: TextField(
-                      controller: _controller,
-                      keyboardType: TextInputType.multiline,
-                      maxLines: 5,
-                      minLines: 1,
-                      style: const TextStyle(color: Colors.white),
-                      decoration: InputDecoration(
-                        hintText: "Сообщение...",
-                        hintStyle: TextStyle(
-                          color: Colors.white.withOpacity(0.4),
-                        ),
-                        border: InputBorder.none,
-                      ),
+                  child: TextField(
+                    controller: _controller,
+                    textCapitalization: TextCapitalization.sentences,
+                    maxLines: 4, minLines: 1,
+                    style: const TextStyle(color: _textColor),
+                    decoration: const InputDecoration(
+                      hintText: "Спроси Еву...", hintStyle: TextStyle(color: Color(0xFFC7C7CC)),
+                      border: OutlineInputBorder(borderRadius: BorderRadius.all(Radius.circular(24)), borderSide: BorderSide.none),
+                      filled: true, fillColor: Color(0xFFF2F2F7),
+                      contentPadding: EdgeInsets.symmetric(horizontal: 20, vertical: 14),
                     ),
                   ),
                 ),
-                const SizedBox(width: 8),
+                const SizedBox(width: 12),
                 GestureDetector(
                   onTap: _sendMessage,
-                  child: Container(
-                    padding: const EdgeInsets.all(12),
-                    margin: const EdgeInsets.only(bottom: 2),
-                    decoration: BoxDecoration(
-                      color: themeColor,
-                      shape: BoxShape.circle,
-                    ),
-                    child: const Icon(
-                      Icons.send,
-                      color: Colors.black,
-                      size: 20,
-                    ),
-                  ),
+                  child: Container(padding: const EdgeInsets.all(14), margin: const EdgeInsets.only(bottom: 2), decoration: const BoxDecoration(color: _themeColor, shape: BoxShape.circle), child: const Icon(Icons.send_rounded, color: Colors.white, size: 22)),
                 ),
               ],
             ),
           ],
         ),
+      ),
+    );
+  }
+}
+
+// === RecipeShoppingCardWidget остается прежним (розовый градиент вписывается в светлую тему идеально) ===
+class RecipeShoppingCardWidget extends StatefulWidget {
+  final Map<String, dynamic> data;
+  final String msgId;
+  const RecipeShoppingCardWidget({super.key, required this.data, required this.msgId});
+  @override
+  State<RecipeShoppingCardWidget> createState() => _RecipeShoppingCardWidgetState();
+}
+
+class _RecipeShoppingCardWidgetState extends State<RecipeShoppingCardWidget> {
+  bool _isLoading = false;
+  bool _isAdded = false;
+
+  @override
+  Widget build(BuildContext context) {
+    final items = widget.data['items'] as List<dynamic>? ?? [];
+    if (items.isEmpty) return const SizedBox.shrink();
+
+    final displayItems = items.take(3).toList();
+    final extraCount = items.length - 3;
+
+    return Container(
+      margin: const EdgeInsets.symmetric(vertical: 12),
+      padding: const EdgeInsets.all(20),
+      decoration: BoxDecoration(
+        gradient: const LinearGradient(colors: [Color(0xFFB76E79), Color(0xFFD49A89)], begin: Alignment.topLeft, end: Alignment.bottomRight),
+        borderRadius: BorderRadius.circular(24),
+        boxShadow: [BoxShadow(color: const Color(0xFFB76E79).withValues(alpha: 0.3), blurRadius: 16, offset: const Offset(0, 8))],
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Container(
+                padding: const EdgeInsets.all(8),
+                decoration: BoxDecoration(color: Colors.white.withValues(alpha: 0.2), shape: BoxShape.circle),
+                child: const Icon(Icons.shopping_bag_outlined, color: Colors.white, size: 20),
+              ),
+              const SizedBox(width: 12),
+              const Text("Ингредиенты для рецепта", style: TextStyle(color: Colors.white, fontWeight: FontWeight.w900, fontSize: 16)),
+            ],
+          ),
+          const SizedBox(height: 16),
+          ...displayItems.map((item) => Padding(
+            padding: const EdgeInsets.only(bottom: 6.0),
+            child: Row(
+              children: [
+                const Icon(Icons.circle, color: Colors.white, size: 6),
+                const SizedBox(width: 8),
+                Expanded(child: Text("${item['name']} - ${item['amount']}", style: const TextStyle(color: Colors.white, fontSize: 14, fontWeight: FontWeight.w500))),
+              ],
+            ),
+          )),
+          if (extraCount > 0)
+            Padding(
+              padding: const EdgeInsets.only(top: 4.0),
+              child: Text("...и еще $extraCount", style: TextStyle(color: Colors.white.withValues(alpha: 0.9), fontStyle: FontStyle.italic, fontSize: 13, fontWeight: FontWeight.w600)),
+            ),
+          const SizedBox(height: 20),
+          SizedBox(
+            width: double.infinity,
+            child: ElevatedButton(
+              style: ElevatedButton.styleFrom(
+                backgroundColor: _isAdded ? Colors.white.withValues(alpha: 0.2) : Colors.white,
+                foregroundColor: const Color(0xFFB76E79),
+                elevation: _isAdded ? 0 : 4,
+                shadowColor: Colors.black.withValues(alpha: 0.1),
+                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+                padding: const EdgeInsets.symmetric(vertical: 14),
+              ),
+              onPressed: (_isAdded || _isLoading) ? null : () async {
+                setState(() => _isLoading = true);
+                try {
+                  await DatabaseService().addIngredientsToShoppingList(items);
+                  if (mounted) {
+                    setState(() => _isAdded = true);
+                    final messenger = ScaffoldMessenger.of(context);
+                    messenger.showSnackBar(
+                      SnackBar(
+                        content: const Text("Ингредиенты добавлены в «Мой список» 🛒", style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
+                        backgroundColor: Colors.teal,
+                        duration: const Duration(seconds: 2),
+                        behavior: SnackBarBehavior.floating,
+                        action: SnackBarAction(
+                          label: 'Перейти', textColor: Colors.white,
+                          onPressed: () {
+                            messenger.hideCurrentSnackBar();
+                            Navigator.push(context, MaterialPageRoute(builder: (_) => const ShoppingListScreen()));
+                          },
+                        ),
+                      ),
+                    );
+                    Future.delayed(const Duration(seconds: 2), () { messenger.hideCurrentSnackBar(); });
+                  }
+                } catch (e) {
+                  if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text("Ошибка: $e"), backgroundColor: Colors.red));
+                } finally {
+                  if (mounted) setState(() => _isLoading = false);
+                }
+              },
+              child: _isLoading
+                  ? const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(color: Color(0xFFB76E79), strokeWidth: 2))
+                  : Row(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        Icon(_isAdded ? Icons.check : Icons.add, color: _isAdded ? Colors.white : const Color(0xFFB76E79), size: 18),
+                        const SizedBox(width: 8),
+                        Text(_isAdded ? "Добавлено ✓" : "Добавить в Мой список", style: TextStyle(color: _isAdded ? Colors.white : const Color(0xFFB76E79), fontWeight: FontWeight.w800, fontSize: 14)),
+                      ],
+                    ),
+            ),
+          ),
+        ],
       ),
     );
   }

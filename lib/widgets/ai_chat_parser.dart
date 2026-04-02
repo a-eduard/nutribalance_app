@@ -1,3 +1,4 @@
+import 'dart:convert';
 import 'package:flutter/material.dart';
 import '../services/database_service.dart';
 
@@ -27,34 +28,165 @@ class AIChatSaveCardWidget extends StatefulWidget {
 
 class _AIChatSaveCardWidgetState extends State<AIChatSaveCardWidget> {
   late bool _isSaved;
-  bool _isLoading = false;
+  late Map<String, dynamic> _editableData;
+  
+  static const Color _textColor = Color(0xFF2D2D2D);
+  static const Color _subTextColor = Color(0xFF8E8E93);
 
   @override
   void initState() {
     super.initState();
     _isSaved = widget.isInitiallySaved;
+    // Делаем глубокую копию JSON, чтобы безопасно редактировать макросы локально
+    _editableData = jsonDecode(jsonEncode(widget.jsonData));
   }
 
-  @override
-  Widget build(BuildContext context) {
-    final String actionType = widget.jsonData['action_type'] ?? widget.jsonData['type'] ?? '';
-    
-    if (actionType == 'advice') return const SizedBox.shrink();
+  // === ЛОГИКА РЕДАКТИРОВАНИЯ И ПЕРЕСЧЕТА МАКРОСОВ ===
+  void _editMacro(String macroType, int newValue, int oldCals, int oldP, int oldF, int oldC) {
+    List<dynamic> items = _editableData['items'] ?? [];
+    if (items.isEmpty && (_editableData['meal_name'] != null || _editableData['name'] != null)) {
+      items = [_editableData]; // Оборачиваем в массив, если пришел плоский объект
+    }
+    if (items.isEmpty) return;
 
-    if (actionType == 'needs_plan') {
-      final draft = widget.jsonData['draft_meal'] ?? {};
-      return Container(
-        margin: const EdgeInsets.symmetric(vertical: 8),
-        padding: const EdgeInsets.all(16),
+    setState(() {
+      if (macroType == 'calories') {
+        if (oldCals == 0) return;
+        double ratio = newValue / oldCals;
+        for (var item in items) {
+          item['calories'] = (((item['calories'] as num?)?.toDouble() ?? 0) * ratio).round();
+          item['protein'] = (((item['protein'] as num?)?.toDouble() ?? 0) * ratio).round();
+          item['fat'] = (((item['fat'] as num?)?.toDouble() ?? 0) * ratio).round();
+          item['carbs'] = (((item['carbs'] as num?)?.toDouble() ?? 0) * ratio).round();
+          if (item['fiber'] != null) {
+            item['fiber'] = (((item['fiber'] as num).toDouble()) * ratio).round();
+          }
+        }
+      } else {
+        int diff = 0;
+        int calDiff = 0;
+        if (macroType == 'protein') {
+          diff = newValue - oldP;
+          calDiff = diff * 4; // 1г белка = 4 ккал
+        } else if (macroType == 'fat') {
+          diff = newValue - oldF;
+          calDiff = diff * 9; // 1г жира = 9 ккал
+        } else if (macroType == 'carbs') {
+          diff = newValue - oldC;
+          calDiff = diff * 4; // 1г углеводов = 4 ккал
+        }
+
+        // Применяем разницу к первому ингредиенту, чтобы сохранить структуру и суммы
+        var first = items.first;
+        int currentMacro = (first[macroType] as num?)?.toInt() ?? 0;
+        int currentCals = (first['calories'] as num?)?.toInt() ?? 0;
+
+        int newMacroValue = currentMacro + diff;
+        int newCalsValue = currentCals + calDiff;
+
+        first[macroType] = newMacroValue < 0 ? 0 : newMacroValue;
+        first['calories'] = newCalsValue < 0 ? 0 : newCalsValue;
+      }
+    });
+  }
+
+  void _showEditDialog(String label, int currentValue, String macroType, int oldC, int oldP, int oldF, int oldCarb) {
+    if (_isSaved) return; // Запрещаем редактировать уже сохраненное блюдо
+    final TextEditingController ctrl = TextEditingController(text: currentValue.toString());
+    
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: Colors.white,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(24)),
+        title: Text('Изменить $label', style: const TextStyle(color: _textColor, fontWeight: FontWeight.w800)),
+        content: TextField(
+          controller: ctrl,
+          keyboardType: TextInputType.number,
+          style: const TextStyle(color: _textColor, fontSize: 24, fontWeight: FontWeight.w900),
+          decoration: InputDecoration(
+            focusedBorder: UnderlineInputBorder(borderSide: BorderSide(color: widget.themeColor, width: 2)),
+            suffixText: macroType == 'calories' ? 'ккал' : 'г',
+          ),
+          cursorColor: widget.themeColor,
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx), 
+            child: const Text('Отмена', style: TextStyle(color: _subTextColor, fontWeight: FontWeight.bold))
+          ),
+          ElevatedButton(
+            style: ElevatedButton.styleFrom(
+              backgroundColor: widget.themeColor, 
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12))
+            ),
+            onPressed: () {
+              final val = int.tryParse(ctrl.text.trim());
+              if (val != null && val >= 0) {
+                _editMacro(macroType, val, oldC, oldP, oldF, oldCarb);
+                Navigator.pop(ctx);
+              }
+            },
+            child: const Text('Сохранить', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
+          )
+        ],
+      )
+    );
+  }
+
+  Widget _buildMacroEditBtn(String label, int value, String type, int tc, int tp, int tf, int tcarb, Color color) {
+    return GestureDetector(
+      onTap: () => _showEditDialog(label, value, type, tc, tp, tf, tcarb),
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 10),
         decoration: BoxDecoration(
-          color: const Color(0xFF1C1C1E).withValues(alpha: 0.9), 
-          borderRadius: BorderRadius.circular(16), 
-          border: Border.all(color: Colors.orangeAccent.withValues(alpha: 0.3))
+          color: color.withValues(alpha: 0.1),
+          borderRadius: BorderRadius.circular(12),
+          border: Border.all(color: color.withValues(alpha: 0.3)),
         ),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            const Center(child: Text("⚠️ Нет плана питания", style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 16))),
+            Row(
+              children: [
+                Expanded(child: Text(label, style: const TextStyle(color: _textColor, fontSize: 11, fontWeight: FontWeight.bold), maxLines: 1, overflow: TextOverflow.ellipsis)),
+                if (!_isSaved) const Icon(Icons.edit_outlined, size: 16, color: _subTextColor),
+              ],
+            ),
+            const SizedBox(height: 4),
+            Text("${value}г", style: const TextStyle(color: _textColor, fontSize: 16, fontWeight: FontWeight.w900)),
+          ]
+        )
+      )
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final String actionType = _editableData['action_type'] ?? _editableData['type'] ?? '';
+    
+    if (actionType == 'advice') return const SizedBox.shrink();
+
+    if (actionType == 'needs_plan') {
+      final draft = _editableData['draft_meal'] ?? {};
+      return Container(
+        margin: const EdgeInsets.symmetric(vertical: 8),
+        padding: const EdgeInsets.all(16),
+        decoration: BoxDecoration(
+          color: Colors.white, 
+          borderRadius: BorderRadius.circular(16), 
+          boxShadow: [
+            BoxShadow(
+              color: Colors.black.withValues(alpha: 0.04), 
+              blurRadius: 24, 
+              offset: const Offset(0, 8)
+            )
+          ],
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Center(child: Text("⚠️ Нет плана питания", style: TextStyle(color: _textColor, fontWeight: FontWeight.bold, fontSize: 16))),
             Padding(
               padding: const EdgeInsets.only(top: 12.0, bottom: 16.0),
               child: Center(
@@ -66,31 +198,47 @@ class _AIChatSaveCardWidgetState extends State<AIChatSaveCardWidget> {
                 children: [
                   Expanded(
                     child: OutlinedButton(
-                      style: OutlinedButton.styleFrom(side: BorderSide(color: Colors.grey.withValues(alpha: 0.5)), shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12))),
-                      onPressed: (_isLoading || _isSaved) ? null : () async {
-                        setState(() => _isLoading = true);
+                      style: OutlinedButton.styleFrom(
+                        side: BorderSide(color: Colors.grey.withValues(alpha: 0.3)), 
+                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12))
+                      ),
+                      onPressed: _isSaved ? null : () {
+                        // === OPTIMISTIC UI: Мгновенное переключение ===
+                        setState(() => _isSaved = true);
+                        widget.onSaveSuccess(widget.msgId);
+                        
                         try {
-                          await DatabaseService().saveMealDraft(draft);
-                          await DatabaseService().markBotMessageAsActionCompleted(widget.botType, widget.msgId);
-                          setState(() => _isSaved = true);
-                          widget.onSaveSuccess(widget.msgId);
-                        } finally {
-                          if (mounted) setState(() => _isLoading = false);
+                          DatabaseService().saveMealDraft(draft);
+                          DatabaseService().markBotMessageAsActionCompleted(widget.botType, widget.msgId);
+                        } catch(e) {
+                          debugPrint("Ошибка фонового сохранения черновика: $e");
                         }
                       },
-                      child: _isLoading ? const CircularProgressIndicator(strokeWidth: 2) : const Text("ПОЗЖЕ", style: TextStyle(color: Colors.grey, fontSize: 12)),
+                      child: const Text("ПОЗЖЕ", style: TextStyle(color: _subTextColor, fontSize: 12)),
                     ),
                   ),
                   const SizedBox(width: 8),
                   Expanded(
                     flex: 2,
                     child: ElevatedButton(
-                      style: ElevatedButton.styleFrom(backgroundColor: widget.themeColor, foregroundColor: Colors.black, shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12))),
-                      onPressed: (_isLoading || _isSaved) ? null : () async {
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: widget.themeColor, 
+                        foregroundColor: Colors.white, 
+                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)), 
+                        elevation: 0
+                      ),
+                      onPressed: _isSaved ? null : () {
                         widget.onSendMessage("Помоги составить план питания и рассчитать норму КБЖУ");
-                        await DatabaseService().markBotMessageAsActionCompleted(widget.botType, widget.msgId);
+                        
+                        // === OPTIMISTIC UI ===
                         setState(() => _isSaved = true);
                         widget.onSaveSuccess(widget.msgId);
+                        
+                        try {
+                          DatabaseService().markBotMessageAsActionCompleted(widget.botType, widget.msgId);
+                        } catch(e) {
+                          debugPrint("Ошибка обновления статуса сообщения: $e");
+                        }
                       },
                       child: const Text("СОСТАВИТЬ ПЛАН", style: TextStyle(fontWeight: FontWeight.bold, fontSize: 12)),
                     ),
@@ -98,7 +246,7 @@ class _AIChatSaveCardWidgetState extends State<AIChatSaveCardWidget> {
                 ],
               )
             else
-              const Center(child: Text("ОБРАБОТАНО", style: TextStyle(color: Colors.grey, fontWeight: FontWeight.bold)))
+              const Center(child: Text("ОБРАБОТАНО", style: TextStyle(color: _subTextColor, fontWeight: FontWeight.bold)))
           ],
         ),
       );
@@ -108,6 +256,10 @@ class _AIChatSaveCardWidgetState extends State<AIChatSaveCardWidget> {
     String description = "";
     String buttonText = "СОХРАНИТЬ";
     Color cardAccentColor = widget.themeColor; 
+    
+    bool isLogFood = (actionType == 'log_food' || actionType == 'log_meal');
+    int totalCals = 0, totalP = 0, totalF = 0, totalC = 0;
+    String mealName = 'Прием пищи';
 
     if (actionType == 'shopping_list') {
       title = "🛒 Список покупок";
@@ -116,11 +268,25 @@ class _AIChatSaveCardWidgetState extends State<AIChatSaveCardWidget> {
       cardAccentColor = Colors.teal;
     } else if (actionType == 'update_goal' || actionType == 'set_goal') {
       title = "🎯 Ваша новая цель КБЖУ";
-      description = "${widget.jsonData['calories'] ?? 0} ккал\nБ: ${widget.jsonData['protein'] ?? 0}г | Ж: ${widget.jsonData['fat'] ?? 0}г | У: ${widget.jsonData['carbs'] ?? 0}г";
+      description = "${_editableData['calories'] ?? 0} ккал\nБ: ${_editableData['protein'] ?? 0}г | Ж: ${_editableData['fat'] ?? 0}г | У: ${_editableData['carbs'] ?? 0}г";
       buttonText = "ОБНОВИТЬ ЦЕЛЬ";
-    } else if (actionType == 'log_food' || actionType == 'log_meal') {
+    } else if (isLogFood) {
       title = "🍽 Добавление в дневник";
-      buttonText = "ЗАПИСАТЬ В ДНЕВНИК";  
+      buttonText = "ЗАПИСАТЬ В ДНЕВНИК";
+      
+      mealName = _editableData['meal_name'] ?? _editableData['name'] ?? 'Прием пищи';
+      
+      List<dynamic> items = _editableData['items'] ?? [];
+      if (items.isEmpty && (_editableData['meal_name'] != null || _editableData['name'] != null)) {
+        items = [_editableData];
+      }
+
+      for (var item in items) {
+        totalCals += (item['calories'] as num?)?.toInt() ?? 0;
+        totalP += (item['protein'] as num?)?.toInt() ?? 0;
+        totalF += (item['fat'] as num?)?.toInt() ?? 0;
+        totalC += (item['carbs'] as num?)?.toInt() ?? 0;
+      }
     } else if (actionType == 'save_to_rag' || actionType == 'save_food') {
       title = "📦 Новая этикетка";
       buttonText = "ЗАПИСАТЬ В БАЗУ ДАННЫХ";
@@ -131,46 +297,108 @@ class _AIChatSaveCardWidgetState extends State<AIChatSaveCardWidget> {
       margin: const EdgeInsets.symmetric(vertical: 8),
       padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
-        color: const Color(0xFF1C1C1E).withValues(alpha: 0.9), 
+        color: Colors.white, 
         borderRadius: BorderRadius.circular(16), 
-        border: Border.all(color: _isSaved ? Colors.grey.withValues(alpha: 0.2) : cardAccentColor.withValues(alpha: 0.5), width: 1.5)
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withValues(alpha: 0.04), 
+            blurRadius: 24, 
+            offset: const Offset(0, 8)
+          )
+        ],
+        border: Border.all(
+          color: _isSaved ? const Color(0xFFE5E5EA) : cardAccentColor.withValues(alpha: 0.3), 
+          width: 1.5
+        )
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Center(child: Text(title, style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 16))),
+          Center(child: Text(title, style: const TextStyle(color: _textColor, fontWeight: FontWeight.bold, fontSize: 16))),
+          
           if (description.isNotEmpty)
-            Padding(padding: const EdgeInsets.symmetric(vertical: 12.0), child: Center(child: Text(description, style: TextStyle(color: cardAccentColor, fontSize: 14), textAlign: TextAlign.center))),
+            Padding(
+              padding: const EdgeInsets.symmetric(vertical: 12.0), 
+              child: Center(
+                child: Text(
+                  description, 
+                  style: TextStyle(color: cardAccentColor, fontSize: 14, fontWeight: FontWeight.w600), 
+                  textAlign: TextAlign.center
+                )
+              )
+            ),
+            
+          if (isLogFood) ...[
+            const SizedBox(height: 16),
+            Center(
+              child: Text(mealName, style: const TextStyle(color: _textColor, fontSize: 16, fontWeight: FontWeight.w700), textAlign: TextAlign.center)
+            ),
+            const SizedBox(height: 12),
+            GestureDetector(
+              onTap: () => _showEditDialog('Калории', totalCals, 'calories', totalCals, totalP, totalF, totalC),
+              child: Row(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  Text("$totalCals ккал", style: TextStyle(color: widget.themeColor, fontSize: 24, fontWeight: FontWeight.w900, letterSpacing: -1.0)),
+                  if (!_isSaved) ...[
+                    const SizedBox(width: 8),
+                    const Icon(Icons.edit_outlined, size: 16, color: _subTextColor),
+                  ]
+                ],
+              ),
+            ),
+            const SizedBox(height: 16),
+            Row(
+              children: [
+                Expanded(child: _buildMacroEditBtn("Белки", totalP, "protein", totalCals, totalP, totalF, totalC, const Color(0xFFD49A89))),
+                const SizedBox(width: 8),
+                Expanded(child: _buildMacroEditBtn("Жиры", totalF, "fat", totalCals, totalP, totalF, totalC, const Color(0xFFE5C158))),
+                const SizedBox(width: 8),
+                Expanded(child: _buildMacroEditBtn("Углеводы", totalC, "carbs", totalCals, totalP, totalF, totalC, const Color(0xFF89CFF0))),
+              ],
+            ),
+          ],
+          
           const SizedBox(height: 16),
           SizedBox(
             width: double.infinity,
             child: OutlinedButton(
               style: OutlinedButton.styleFrom(
                 backgroundColor: _isSaved ? Colors.transparent : cardAccentColor.withValues(alpha: 0.1),
-                side: BorderSide(color: _isSaved ? Colors.grey.withValues(alpha: 0.3) : cardAccentColor.withValues(alpha: 0.5)),
+                side: BorderSide(color: _isSaved ? const Color(0xFFE5E5EA) : cardAccentColor.withValues(alpha: 0.5)),
                 padding: const EdgeInsets.symmetric(vertical: 14),
+                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
               ),
-              onPressed: (_isSaved || _isLoading) ? null : () async {
-                setState(() => _isLoading = true);
+              onPressed: _isSaved ? null : () {
+                // === OPTIMISTIC UI ===
+                setState(() => _isSaved = true);
+                widget.onSaveSuccess(widget.msgId);
+                
+                ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+                  content: Text('Успешно сохранено! ✨', style: TextStyle(fontWeight: FontWeight.bold)), 
+                  backgroundColor: Colors.teal,
+                  duration: Duration(seconds: 2),
+                ));
+
+                // Отправляем в базу именно _editableData
                 try {
                   if (actionType == 'update_goal' || actionType == 'set_goal') {
-                    await DatabaseService().saveNutritionGoal(widget.jsonData);
-                  } else if (actionType == 'log_food' || actionType == 'log_meal') {
-                    await DatabaseService().logMeal(widget.jsonData);
+                    DatabaseService().saveNutritionGoal(_editableData);
+                  } else if (isLogFood) {
+                    DatabaseService().logMeal(_editableData);
                   } else if (actionType == 'shopping_list') {
-                    await DatabaseService().saveShoppingList(widget.jsonData);
+                    DatabaseService().saveShoppingList(_editableData);
                   }
                   
-                  await DatabaseService().markBotMessageAsActionCompleted(widget.botType, widget.msgId);
-                  setState(() => _isSaved = true);
-                  widget.onSaveSuccess(widget.msgId);
+                  DatabaseService().markBotMessageAsActionCompleted(widget.botType, widget.msgId);
                 } catch (e) {
-                  // handle error
-                } finally {
-                  if (mounted) setState(() => _isLoading = false);
+                  debugPrint('Фоновая ошибка отправки в БД: $e');
                 }
               },
-              child: _isLoading ? SizedBox(width: 20, height: 20, child: CircularProgressIndicator(color: cardAccentColor)) : Text(_isSaved ? "✓ СОХРАНЕНО" : buttonText, style: TextStyle(color: _isSaved ? Colors.grey : cardAccentColor, fontWeight: FontWeight.bold)),
+              child: Text(
+                _isSaved ? "✓ СОХРАНЕНО" : buttonText, 
+                style: TextStyle(color: _isSaved ? _subTextColor : cardAccentColor, fontWeight: FontWeight.bold)
+              ),
             ),
           ),
         ],

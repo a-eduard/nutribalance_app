@@ -5,6 +5,7 @@ import 'package:image_picker/image_picker.dart';
 import '../../services/ai_service.dart';
 import '../../services/database_service.dart';
 import '../../screens/ai_chat_screen.dart';
+import 'package:firebase_storage/firebase_storage.dart';
 
 class FastFoodScannerSheet extends StatefulWidget {
   const FastFoodScannerSheet({super.key});
@@ -13,8 +14,9 @@ class FastFoodScannerSheet extends StatefulWidget {
     showModalBottomSheet(
       context: context,
       isScrollControlled: true,
-      backgroundColor: Colors.white,
-      shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(32))),
+      backgroundColor: Colors.transparent, // Убрали белый фон для плавающего эффекта
+      elevation: 0,
+      barrierColor: Colors.black.withValues(alpha: 0.1), // Легкое затемнение фона экрана
       builder: (context) => const FastFoodScannerSheet(),
     );
   }
@@ -103,7 +105,25 @@ class _FastFoodScannerSheetState extends State<FastFoodScannerSheet> with Single
     if (_resultData == null) return;
     setState(() => _isProcessing = true);
     try {
-      await DatabaseService().logMeal(_resultData!);
+      String? uploadedImageUrl;
+      
+      // === ЗАГРУЖАЕМ ФОТО НА СЕРВЕР ПЕРЕД СОХРАНЕНИЕМ ===
+      if (_image != null) {
+        try {
+          final uid = DatabaseService().currentUser?.uid ?? 'unknown';
+          final timestamp = DateTime.now().millisecondsSinceEpoch;
+          final ref = FirebaseStorage.instance.ref().child('meals/$uid/fast_scan_$timestamp.jpg');
+          
+          await ref.putFile(_image!); // Грузим в Storage
+          uploadedImageUrl = await ref.getDownloadURL(); // Получаем ссылку
+        } catch (e) {
+          debugPrint("Ошибка загрузки фото: $e");
+        }
+      }
+
+      // Передаем URL в наш новый параметр extraImageUrl
+      await DatabaseService().logMeal(_resultData!, extraImageUrl: uploadedImageUrl);
+      
       if (mounted) {
         Navigator.pop(context);
         ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Блюдо добавлено! ✨', style: TextStyle(fontWeight: FontWeight.bold)), backgroundColor: _accentColor));
@@ -203,9 +223,20 @@ class _FastFoodScannerSheetState extends State<FastFoodScannerSheet> with Single
   }
 
   @override
+  @override
   Widget build(BuildContext context) {
-    return Padding(
-      padding: EdgeInsets.only(left: 24, right: 24, top: 24, bottom: MediaQuery.of(context).viewInsets.bottom + 32),
+    return Container(
+      margin: const EdgeInsets.all(16), // Отступ от краев экрана
+      padding: EdgeInsets.only(left: 24, right: 24, top: 24, bottom: MediaQuery.of(context).viewInsets.bottom + 24),
+      decoration: BoxDecoration(
+        color: _isProcessing ? null : Colors.white,
+        gradient: _isProcessing 
+            ? LinearGradient(colors: [Colors.white, const Color(0xFFB76E79).withValues(alpha: 0.08)], begin: Alignment.topLeft, end: Alignment.bottomRight) 
+            : null, // Нежный розовый градиент при анализе
+        borderRadius: BorderRadius.circular(32),
+        border: _isProcessing ? Border.all(color: const Color(0xFFB76E79).withValues(alpha: 0.2), width: 1.5) : null,
+        boxShadow: [BoxShadow(color: Colors.black.withValues(alpha: 0.04), blurRadius: 24, offset: const Offset(0, 8))],
+      ),
       child: Column(
         mainAxisSize: MainAxisSize.min,
         children: [
@@ -260,9 +291,9 @@ class _FastFoodScannerSheetState extends State<FastFoodScannerSheet> with Single
         opacity: _pulseAnimation,
         child: const Column(
           children: [
-            Icon(Icons.auto_awesome, color: _accentColor, size: 56),
+            Icon(Icons.psychology_outlined, color: _accentColor, size: 64),
             SizedBox(height: 24),
-            Text("Ева анализирует блюдо ✨", style: TextStyle(color: _textColor, fontSize: 18, fontWeight: FontWeight.w800)),
+            Text("Ева анализирует блюдо ✨", textAlign: TextAlign.center, style: TextStyle(color: _accentColor, fontSize: 18, fontWeight: FontWeight.w800)),
           ],
         ),
       ),

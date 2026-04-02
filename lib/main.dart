@@ -24,8 +24,8 @@ Future<void> main() async {
     options: DefaultFirebaseOptions.currentPlatform,
   );
 
-  // === ИСПРАВЛЕНИЕ БАГА С ЗАВИСАНИЕМ (APP CHECK) ===
-  // Теперь Firebase сразу получает провайдер и не блокирует сетевые потоки
+  // === ВРЕМЕННО ОТКЛЮЧЕНО ДЛЯ РАЗРАБОТКИ ===
+  /*
   try {
     await FirebaseAppCheck.instance.activate(
       androidProvider: AndroidProvider.playIntegrity, 
@@ -35,6 +35,7 @@ Future<void> main() async {
   } catch (e) {
     debugPrint("Ошибка инициализации App Check: $e");
   }
+  */
 
   await LocalNotificationService().init();
   await EasyLocalization.ensureInitialized();

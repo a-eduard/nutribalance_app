@@ -8,6 +8,7 @@ class AIChatSaveCardWidget extends StatefulWidget {
   final String botType;
   final Color themeColor;
   final bool isInitiallySaved;
+  final String? imageUrl;
   final Function(String) onSaveSuccess;
   final Function(String) onSendMessage;
 
@@ -18,6 +19,7 @@ class AIChatSaveCardWidget extends StatefulWidget {
     required this.botType,
     required this.themeColor,
     required this.isInitiallySaved,
+    this.imageUrl,
     required this.onSaveSuccess,
     required this.onSendMessage,
   });
@@ -39,6 +41,9 @@ class _AIChatSaveCardWidgetState extends State<AIChatSaveCardWidget> {
     _isSaved = widget.isInitiallySaved;
     // Делаем глубокую копию JSON, чтобы безопасно редактировать макросы локально
     _editableData = jsonDecode(jsonEncode(widget.jsonData));
+    if (widget.imageUrl != null) {
+      _editableData['imageUrl'] = widget.imageUrl;
+    }
   }
 
   // === ЛОГИКА РЕДАКТИРОВАНИЯ И ПЕРЕСЧЕТА МАКРОСОВ ===
@@ -274,12 +279,13 @@ class _AIChatSaveCardWidgetState extends State<AIChatSaveCardWidget> {
       title = "🍽 Добавление в дневник";
       buttonText = "ЗАПИСАТЬ В ДНЕВНИК";
       
-      mealName = _editableData['meal_name'] ?? _editableData['name'] ?? 'Прием пищи';
-      
       List<dynamic> items = _editableData['items'] ?? [];
       if (items.isEmpty && (_editableData['meal_name'] != null || _editableData['name'] != null)) {
         items = [_editableData];
       }
+      
+      // УМНЫЙ ФОЛБЭК ДЛЯ UI КАРТОЧКИ В ЧАТЕ
+      mealName = _editableData['meal_name'] ?? _editableData['name'] ?? (items.isNotEmpty ? items.first['name'] : null) ?? 'Прием пищи';
 
       for (var item in items) {
         totalCals += (item['calories'] as num?)?.toInt() ?? 0;
@@ -373,6 +379,11 @@ class _AIChatSaveCardWidgetState extends State<AIChatSaveCardWidget> {
                 // === OPTIMISTIC UI ===
                 setState(() => _isSaved = true);
                 widget.onSaveSuccess(widget.msgId);
+                
+                // === ГАРАНТИРУЕМ ПЕРЕДАЧУ КАРТИНКИ В БД ===
+                if (widget.imageUrl != null) {
+                  _editableData['imageUrl'] = widget.imageUrl;
+                }
                 
                 ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
                   content: Text('Успешно сохранено! ✨', style: TextStyle(fontWeight: FontWeight.bold)), 

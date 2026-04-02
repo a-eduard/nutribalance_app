@@ -57,8 +57,8 @@ class AIService {
           'prompt': userMessage.isEmpty && base64Image != null ? "Оцени это блюдо." : userMessage,
           'history': formattedHistory,
           'userContext': userContext,
-          'imageBase64': base64Image,
-        }).timeout(const Duration(seconds: 40));
+          'imagesBase64': base64Image != null ? [base64Image] : [], // Исправлено на массив
+        }).timeout(const Duration(seconds: 20)); // === УСКОРЕНИЕ: Уменьшили таймаут до 20 сек ===
 
         return result.data['text']?.toString() ?? "Извините, Ева не смогла обработать запрос.";
       } catch (e) {

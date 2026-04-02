@@ -3,6 +3,7 @@ import 'package:flutter/services.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:intl/intl.dart';
+import 'package:cached_network_image/cached_network_image.dart';
 
 import '../services/database_service.dart';
 import 'shopping_list_screen.dart';
@@ -338,13 +339,14 @@ class _HomeTabState extends State<HomeTab> with AutomaticKeepAliveClientMixin {
         final int targetP = goalData?['protein'] ?? 0;
         final int targetF = goalData?['fat'] ?? 0;
         final int targetC = goalData?['carbs'] ?? 0;
+        final int targetFiber = 25; // Цель по клетчатке
 
         return StreamBuilder<DocumentSnapshot>(
           stream: FirebaseFirestore.instance.collection('users').doc(uid).collection('meals').doc(_docId).snapshots(),
           builder: (context, mealSnapshot) {
             if (mealSnapshot.hasError) return const Center(child: Text("Ошибка загрузки данных"));
 
-            int curC = 0, curP = 0, curF = 0, curCarb = 0, bonusCals = 0;
+            int curC = 0, curP = 0, curF = 0, curCarb = 0, bonusCals = 0, curFiber = 0;
             double totalHealthScore = 0;
             int mealsCount = 0;
 
@@ -355,6 +357,7 @@ class _HomeTabState extends State<HomeTab> with AutomaticKeepAliveClientMixin {
               curF = (data['fat'] as num?)?.toInt() ?? 0;
               curCarb = (data['carbs'] as num?)?.toInt() ?? 0;
               bonusCals = (data['bonus_calories'] as num?)?.toInt() ?? 0;
+              curFiber = (data['fiber'] as num?)?.toInt() ?? 0;
 
               // === БРОНЕБОЙНЫЙ ПАРСИНГ ИНДЕКСА ПОЛЬЗЫ ===
               final List<dynamic> items = data['items'] ?? [];
@@ -383,7 +386,7 @@ class _HomeTabState extends State<HomeTab> with AutomaticKeepAliveClientMixin {
                   Row(
                     mainAxisAlignment: MainAxisAlignment.spaceBetween,
                     children: [
-                      Text(isExceeded ? 'ФОКУС НА БАЛАНСЕ' : 'ОСТАЛОСЬ', style: TextStyle(color: activeColor, fontWeight: FontWeight.w800, fontSize: 11, letterSpacing: 1.2)),
+                      Text('КАЛОРИИ ЗА СЕГОДНЯ', style: TextStyle(color: activeColor, fontWeight: FontWeight.w800, fontSize: 11, letterSpacing: 1.2)),
                       if (mealsCount > 0)
                         Container(
                           padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
@@ -402,20 +405,25 @@ class _HomeTabState extends State<HomeTab> with AutomaticKeepAliveClientMixin {
                   ),
                   const SizedBox(height: 4),
                   Row(
-                    crossAxisAlignment: CrossAxisAlignment.end,
+                    crossAxisAlignment: CrossAxisAlignment.baseline,
+                    textBaseline: TextBaseline.alphabetic,
                     children: [
-                      Text(isExceeded ? 'Баланс' : '${leftCals.abs()}', style: TextStyle(color: _textColor, fontSize: isExceeded ? 28 : 40, fontWeight: FontWeight.w900, letterSpacing: -1.0)),
-                      if (!isExceeded) const Padding(padding: EdgeInsets.only(bottom: 6.0, left: 4.0), child: Text('ккал', style: TextStyle(color: _subTextColor, fontSize: 16, fontWeight: FontWeight.w600))),
+                      Text('$curC', style: TextStyle(color: isExceeded ? const Color(0xFFB6A6CA) : _textColor, fontSize: 40, fontWeight: FontWeight.w900, letterSpacing: -1.0)),
+                      Text(' / $targetCals ккал', style: const TextStyle(color: _subTextColor, fontSize: 18, fontWeight: FontWeight.w600)),
                     ],
                   ),
+                  const SizedBox(height: 4),
+                  Text(isExceeded ? 'Сверх нормы ✨' : 'Калорий употреблено', style: TextStyle(color: isExceeded ? const Color(0xFFB6A6CA) : _subTextColor, fontSize: 13, fontWeight: FontWeight.w600)),
                   const SizedBox(height: 24),
                   Row(
                     children: [
                       _buildMacroBar("Белки", curP, targetP, activeColor), 
-                      const SizedBox(width: 16),
+                      const SizedBox(width: 8),
                       _buildMacroBar("Жиры", curF, targetF, const Color(0xFFE5C158)),
-                      const SizedBox(width: 16),
+                      const SizedBox(width: 8),
                       _buildMacroBar("Углеводы", curCarb, targetC, const Color(0xFF89CFF0)),
+                      const SizedBox(width: 8),
+                      _buildMacroBar("Клетчатка", curFiber, targetFiber, Colors.green[300] ?? Colors.green),
                     ],
                   )
                 ],
@@ -427,13 +435,17 @@ class _HomeTabState extends State<HomeTab> with AutomaticKeepAliveClientMixin {
     );
   }
 
-  Widget _buildMacroBar(String label, int current, int target, Color activeColor) {
+ Widget _buildMacroBar(String label, int current, int target, Color activeColor) {
     double progress = target > 0 ? (current / target).clamp(0.0, 1.0) : 0;
     return Expanded(
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text(label, style: const TextStyle(color: _textColor, fontSize: 12, fontWeight: FontWeight.w700)),
+          FittedBox(
+            fit: BoxFit.scaleDown,
+            alignment: Alignment.centerLeft,
+            child: Text(label, style: const TextStyle(color: _textColor, fontSize: 12, fontWeight: FontWeight.w700)),
+          ),
           const SizedBox(height: 6),
           TweenAnimationBuilder<Color?>(
             tween: ColorTween(end: activeColor),
@@ -495,6 +507,28 @@ class _HomeTabState extends State<HomeTab> with AutomaticKeepAliveClientMixin {
               key: Key(item['id'] ?? index.toString()),
               direction: DismissDirection.endToStart,
               background: Container(alignment: Alignment.centerRight, padding: const EdgeInsets.only(right: 24), margin: const EdgeInsets.only(bottom: 12), decoration: BoxDecoration(color: Colors.redAccent.withValues(alpha: 0.1), borderRadius: BorderRadius.circular(20)), child: const Icon(Icons.delete_outline, color: Colors.redAccent, size: 28)),
+              confirmDismiss: (direction) async {
+                return await showDialog<bool>(
+                  context: context,
+                  builder: (BuildContext context) {
+                    return AlertDialog(
+                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(24)),
+                      title: const Text("Удалить запись?", style: TextStyle(color: _textColor, fontWeight: FontWeight.w900)),
+                      content: const Text("Ты уверена, что хочешь удалить этот прием пищи?", style: TextStyle(color: _subTextColor, fontSize: 15)),
+                      actions: [
+                        TextButton(
+                          onPressed: () => Navigator.of(context).pop(false),
+                          child: const Text("Отмена", style: TextStyle(color: Color(0xFF8E8E93), fontWeight: FontWeight.bold)),
+                        ),
+                        TextButton(
+                          onPressed: () => Navigator.of(context).pop(true),
+                          child: const Text("Удалить", style: TextStyle(color: Color(0xFFB76E79), fontWeight: FontWeight.bold)),
+                        ),
+                      ],
+                    );
+                  },
+                );
+              },
               onDismissed: (_) { DatabaseService().deleteMealItem(item); ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Блюдо удалено ✨'), backgroundColor: _accentColor)); },
               child: GestureDetector(
                 onTap: () {
@@ -508,7 +542,13 @@ class _HomeTabState extends State<HomeTab> with AutomaticKeepAliveClientMixin {
                   child: Row(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      Container(width: 56, height: 56, decoration: BoxDecoration(color: _bgColor, borderRadius: BorderRadius.circular(16)), child: const Icon(Icons.restaurant, color: Color(0xFFC7C7CC), size: 28)),
+                      Container(
+                        width: 56, height: 56, 
+                        decoration: BoxDecoration(color: _bgColor, borderRadius: BorderRadius.circular(16)), 
+                        child: (item['imageUrl'] != null && item['imageUrl'].toString().isNotEmpty)
+                            ? ClipRRect(borderRadius: BorderRadius.circular(16), child: CachedNetworkImage(imageUrl: item['imageUrl'], fit: BoxFit.cover))
+                            : const Icon(Icons.restaurant, color: Color(0xFFC7C7CC), size: 28),
+                      ),
                       const SizedBox(width: 16),
                       Expanded(
                         child: Column(
@@ -517,7 +557,8 @@ class _HomeTabState extends State<HomeTab> with AutomaticKeepAliveClientMixin {
                             Row(
                               mainAxisAlignment: MainAxisAlignment.spaceBetween,
                               children: [
-                                Expanded(child: Text(item['name'] ?? 'Прием пищи', maxLines: 1, overflow: TextOverflow.ellipsis, style: const TextStyle(color: _subTextColor, fontSize: 13, fontWeight: FontWeight.w600))),
+                                // Сделали текст более ярким и крупным
+                                Expanded(child: Text(item['name'] ?? 'Прием пищи', maxLines: 1, overflow: TextOverflow.ellipsis, style: const TextStyle(color: _textColor, fontSize: 15, fontWeight: FontWeight.w800))),
                                 Text(timeStr, style: const TextStyle(color: _subTextColor, fontSize: 12, fontWeight: FontWeight.w500)),
                               ],
                             ),

@@ -290,7 +290,8 @@ class DatabaseService {
     }
   }
 
-  Future<void> logMeal(Map<String, dynamic> data) async {
+  // Добавили необязательный параметр extraImageUrl, чтобы передавать фото из чата, если его нет в JSON
+  Future<void> logMeal(Map<String, dynamic> data, {String? extraImageUrl}) async {
     final user = _auth.currentUser;
     if (user == null) return;
 
@@ -365,7 +366,10 @@ class DatabaseService {
     final String mealId = DateTime.now().millisecondsSinceEpoch.toString();
     final mealEntry = {
       'id': mealId,
-      'name': data['meal_name'] ?? data['name'] ?? 'Прием пищи',
+      // УМНЫЙ ФОЛБЭК: Если ИИ забыл общее название, берем имя из первого ингредиента
+      'name': data['meal_name'] ?? data['name'] ?? (ingredients.isNotEmpty ? ingredients.first['name'] : 'Прием пищи'),
+      // УМНЫЙ ФОЛБЭК КАРТИНКИ: Приоритет URL из JSON, если нет - берем переданный из чата extraImageUrl
+      'imageUrl': data['imageUrl'] ?? extraImageUrl, 
       'calories': totalCals,
       'protein': totalProt,
       'fat': totalFat,
@@ -423,7 +427,7 @@ class DatabaseService {
       final int newP = ((oldIngredient['protein'] as num) * ratio).round();
       final int newF = ((oldIngredient['fat'] as num) * ratio).round();
       final int newCarb = ((oldIngredient['carbs'] as num) * ratio).round();
-      final int newFib = ((oldIngredient['fiber'] ?? 0 as num) * ratio).round(); // <-- Пересчет клетчатки
+      final int newFib = (((oldIngredient['fiber'] as num?) ?? 0) * ratio).round(); // <-- Безопасный пересчет клетчатки
       
       final int hScore = oldIngredient['health_score'] ?? 5;
 

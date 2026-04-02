@@ -18,6 +18,7 @@ class NutritionSummaryCard extends StatelessWidget {
         final int targetP = goalData?['protein'] ?? 0;
         final int targetF = goalData?['fat'] ?? 0;
         final int targetC = goalData?['carbs'] ?? 0;
+        final int targetFiber = 25; // Цель по клетчатке
 
         return StreamBuilder<DocumentSnapshot>(
           stream: DatabaseService().getTodayMealsDoc(),
@@ -25,7 +26,7 @@ class NutritionSummaryCard extends StatelessWidget {
             // === БРОНЕБОЙНАЯ ЗАЩИТА ПОТОКА ===
             if (mealSnapshot.hasError) return const Center(child: Text("Ошибка загрузки данных"));
 
-            int curC = 0, curP = 0, curF = 0, curCarb = 0;
+            int curC = 0, curP = 0, curF = 0, curCarb = 0, curFiber = 0;
             double totalHealthScore = 0;
             int mealsCount = 0;
 
@@ -35,6 +36,7 @@ class NutritionSummaryCard extends StatelessWidget {
               curP = (data['protein'] as num?)?.toInt() ?? 0;
               curF = (data['fat'] as num?)?.toInt() ?? 0;
               curCarb = (data['carbs'] as num?)?.toInt() ?? 0;
+              curFiber = (data['fiber'] as num?)?.toInt() ?? 0;
               
               // === БЕЗОПАСНЫЙ ПАРСИНГ ИНДЕКСА ПОЛЬЗЫ ===
               final List<dynamic> items = data['items'] ?? [];
@@ -106,14 +108,16 @@ class NutritionSummaryCard extends StatelessWidget {
                         child: Column(
                           crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
-                            // === ИСПРАВЛЕННЫЙ ТЕКСТ СВЕРХ НОРМЫ ===
-                            Text(isExceeded ? 'Сверх нормы ✨' : 'Осталось', style: TextStyle(color: subTextColor, fontSize: 13, fontWeight: FontWeight.w600)),
-                            FittedBox(
-                              fit: BoxFit.scaleDown,
-                              alignment: Alignment.centerLeft,
-                              // === ИСПРАВЛЕННЫЙ ВЫВОД ЦИФРЫ ===
-                              child: Text('${leftCals.abs()} ккал', style: TextStyle(color: textColor, fontSize: isExceeded ? 26 : 30, fontWeight: FontWeight.w900, letterSpacing: -0.5)),
+                            Row(
+                              crossAxisAlignment: CrossAxisAlignment.baseline,
+                              textBaseline: TextBaseline.alphabetic,
+                              children: [
+                                Text('$curC', style: TextStyle(color: isExceeded ? const Color(0xFFB6A6CA) : textColor, fontSize: 30, fontWeight: FontWeight.w900, letterSpacing: -1.0)),
+                                Text(' / $targetCals ккал', style: TextStyle(color: subTextColor, fontSize: 16, fontWeight: FontWeight.w600)),
+                              ],
                             ),
+                            const SizedBox(height: 4),
+                            Text(isExceeded ? 'Сверх нормы ✨' : 'Калорий употреблено', style: TextStyle(color: isExceeded ? const Color(0xFFB6A6CA) : subTextColor, fontSize: 13, fontWeight: FontWeight.w600)),
                           ],
                         ),
                       ),
@@ -126,6 +130,8 @@ class NutritionSummaryCard extends StatelessWidget {
                           Text('Ж: $curF / $targetF', style: TextStyle(color: subTextColor, fontSize: 12, fontWeight: FontWeight.w600)),
                           const SizedBox(height: 4),
                           Text('У: $curCarb / $targetC', style: TextStyle(color: subTextColor, fontSize: 12, fontWeight: FontWeight.w600)),
+                          const SizedBox(height: 4),
+                          Text('К: $curFiber / $targetFiber', style: TextStyle(color: subTextColor, fontSize: 12, fontWeight: FontWeight.w600)),
                         ],
                       ),
                     ],

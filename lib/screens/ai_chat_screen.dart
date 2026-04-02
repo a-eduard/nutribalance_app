@@ -96,7 +96,7 @@ class _AIChatScreenState extends State<AIChatScreen> {
   Future<void> _pickImages() async {
     try {
       if (_selectedPdf != null) setState(() { _selectedPdf = null; _pdfFileName = null; });
-      final List<XFile> pickedFiles = await _picker.pickMultiImage(imageQuality: 70);
+      final List<XFile> pickedFiles = await _picker.pickMultiImage(imageQuality: 70, maxWidth: 1024, maxHeight: 1024);
 
       if (pickedFiles.isNotEmpty) {
         if (pickedFiles.length > _maxImages) {
@@ -142,7 +142,7 @@ class _AIChatScreenState extends State<AIChatScreen> {
                 title: const Text('Сделать фото', style: TextStyle(color: _textColor, fontSize: 16, fontWeight: FontWeight.w500)),
                 onTap: () async {
                   Navigator.pop(ctx);
-                  final XFile? photo = await _picker.pickImage(source: ImageSource.camera, imageQuality: 70);
+                  final XFile? photo = await _picker.pickImage(source: ImageSource.camera, imageQuality: 70, maxWidth: 1024, maxHeight: 1024);
                   if (photo != null) setState(() { _selectedPdf = null; _pdfFileName = null; _selectedImages = [File(photo.path)]; });
                 },
               ),
@@ -233,8 +233,15 @@ class _AIChatScreenState extends State<AIChatScreen> {
       _fullUserContext = await DatabaseService().getAIContextSummary();
       final HttpsCallable callable = FirebaseFunctions.instance.httpsCallable('askDietitian');
 
+      String promptToSend = text;
+      if (localImagesBase64.isNotEmpty) {
+        promptToSend = text.isEmpty
+            ? "Распознай еду на этом фото максимально точно, оцени КБЖУ и напиши конкретное название блюда"
+            : "$text\n[Скрытый промпт для ИИ: Распознай еду на этом фото максимально точно, оцени КБЖУ и напиши конкретное название блюда]";
+      }
+
       final result = await callable.call({
-        'prompt': text,
+        'prompt': promptToSend,
         'history': history,
         'userContext': _fullUserContext,
         'imagesBase64': localImagesBase64,
@@ -426,6 +433,27 @@ class _AIChatScreenState extends State<AIChatScreen> {
                     final displayText = isUser ? rawText : _cleanText(cleanRawText, jsonData);
                     final Timestamp? ts = data['timestamp'] as Timestamp?;
                     final String timeStr = ts != null ? DateFormat('HH:mm').format(ts.toDate()) : '';
+
+                    String? attachedImageUrl;
+                    if (!isUser) {
+                      // Ищем фото в последних 3-х сообщениях (на случай, если был дослан текст)
+                      for (int i = index + 1; i < docs.length && i <= index + 3; i++) {
+                        final prevDoc = docs[i].data() as Map<String, dynamic>;
+                        if (prevDoc['role'] == 'user') {
+                          final prevImages = prevDoc['imageUrls'] as List<dynamic>?;
+                          final oldPrevImage = prevDoc['imageUrl'] as String?;
+                          if (prevImages != null && prevImages.isNotEmpty) {
+                            attachedImageUrl = prevImages.first.toString();
+                            break;
+                          } else if (oldPrevImage != null) {
+                            attachedImageUrl = oldPrevImage;
+                            break;
+                          }
+                          // Если дошли до сообщения только с текстом - дальше не ищем
+                          if ((prevDoc['text'] ?? '').toString().isNotEmpty) break;
+                        }
+                      }
+                    }
 
                     return GestureDetector(
                       onLongPress: () {

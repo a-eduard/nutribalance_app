@@ -271,7 +271,10 @@ class _NutritionStatsScreenState extends State<NutritionStatsScreen> {
                       child: const Icon(Icons.delete, color: Colors.white),
                     ),
                     onDismissed: (_) {
-                      DatabaseService().deleteMealItem(item);
+                      // Получаем ID сегодняшнего документа и передаем его в метод удаления
+                      final String todayDocId = DatabaseService().getTodayDocId();
+                      DatabaseService().deleteMealItem(item, todayDocId);
+                      
                       ScaffoldMessenger.of(context).showSnackBar(
                         const SnackBar(
                           content: Text('Удалено из дневника'),

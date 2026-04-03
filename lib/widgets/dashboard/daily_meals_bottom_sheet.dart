@@ -228,7 +228,9 @@ class DailyMealsBottomSheet extends StatelessWidget {
                         child: const Icon(Icons.delete_outline, color: Colors.redAccent, size: 28),
                       ),
                       onDismissed: (_) {
-                        DatabaseService().deleteMealItem(item);
+                      // Даем методу ту самую дату (сегодняшнюю), чтобы он знал, где искать блюдо
+                      final String todayDocId = DatabaseService().getTodayDocId();
+                      DatabaseService().deleteMealItem(item, todayDocId);
                         ScaffoldMessenger.of(context).showSnackBar(
                           const SnackBar(
                             content: Text('Блюдо удалено из дневника ✨', style: TextStyle(fontWeight: FontWeight.bold)),

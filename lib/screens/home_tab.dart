@@ -16,7 +16,6 @@ class HomeTab extends StatefulWidget {
   State<HomeTab> createState() => _HomeTabState();
 }
 
-// ДОБАВЛЕНО: AutomaticKeepAliveClientMixin кэширует экран и убирает лаги при переключении вкладок
 class _HomeTabState extends State<HomeTab> with AutomaticKeepAliveClientMixin {
   static const Color _accentColor = Color(0xFFB76E79);
   static const Color _lavenderColor = Color(0xFFB6A6CA); 
@@ -205,20 +204,17 @@ class _HomeTabState extends State<HomeTab> with AutomaticKeepAliveClientMixin {
 
   @override
   Widget build(BuildContext context) {
-    super.build(context); // Обязательно для AutomaticKeepAliveClientMixin
+    super.build(context);
     final uid = FirebaseAuth.instance.currentUser?.uid;
     if (uid == null) return const SizedBox.shrink();
 
+    // === ИСПРАВЛЕНО НА STREAMBUILDER ДЛЯ ПРЕДОТВРАЩЕНИЯ ЗАВИСАНИЙ ===
     return StreamBuilder<DocumentSnapshot>(
       stream: FirebaseFirestore.instance.collection('users').doc(uid).snapshots(),
       builder: (context, userSnapshot) {
-        if (userSnapshot.hasError) return const Center(child: Text("Ошибка загрузки профиля"));
-        if (!userSnapshot.hasData || !userSnapshot.data!.exists) return const Center(child: CircularProgressIndicator(color: _accentColor));
-        
-        final userData = userSnapshot.data!.data() as Map<String, dynamic>;
-        final String name = userData['name']?.toString().trim() ?? 'Красотка';
+        final userData = userSnapshot.data?.data() as Map<String, dynamic>? ?? {};
+        final String name = userData['name']?.toString() ?? 'Красотка';
 
-        // === ИСПРАВЛЕНИЕ: SafeArea с явными параметрами top и bottom ===
         return SafeArea(
           top: true,
           bottom: true,
@@ -332,18 +328,18 @@ class _HomeTabState extends State<HomeTab> with AutomaticKeepAliveClientMixin {
     return StreamBuilder<DocumentSnapshot>(
       stream: FirebaseFirestore.instance.collection('users').doc(uid).collection('nutrition_goal').doc('current').snapshots(),
       builder: (context, goalSnapshot) {
-        if (goalSnapshot.hasError) return const SizedBox.shrink(); // Бронебойная защита
+        if (goalSnapshot.hasError) return const SizedBox.shrink(); 
         
         final goalData = goalSnapshot.data?.data() as Map<String, dynamic>?;
         int targetCals = goalData?['calories'] ?? 0;
         final int targetP = goalData?['protein'] ?? 0;
         final int targetF = goalData?['fat'] ?? 0;
         final int targetC = goalData?['carbs'] ?? 0;
-        final int targetFiber = 25; // Цель по клетчатке
+        final int targetFiber = 25; 
 
         return StreamBuilder<DocumentSnapshot>(
           stream: FirebaseFirestore.instance.collection('users').doc(uid).collection('meals').doc(_docId).snapshots(),
-          builder: (context, mealSnapshot) {
+          builder: (context, mealSnapshot) { 
             if (mealSnapshot.hasError) return const Center(child: Text("Ошибка загрузки данных"));
 
             int curC = 0, curP = 0, curF = 0, curCarb = 0, bonusCals = 0, curFiber = 0;
@@ -359,7 +355,6 @@ class _HomeTabState extends State<HomeTab> with AutomaticKeepAliveClientMixin {
               bonusCals = (data['bonus_calories'] as num?)?.toInt() ?? 0;
               curFiber = (data['fiber'] as num?)?.toInt() ?? 0;
 
-              // === БРОНЕБОЙНЫЙ ПАРСИНГ ИНДЕКСА ПОЛЬЗЫ ===
               final List<dynamic> items = data['items'] ?? [];
               for (var item in items) {
                 if (item is Map<String, dynamic>) {
@@ -375,7 +370,6 @@ class _HomeTabState extends State<HomeTab> with AutomaticKeepAliveClientMixin {
             targetCals += bonusCals;
             bool isExceeded = targetCals > 0 && curC > targetCals;
             final Color activeColor = isExceeded ? _lavenderColor : _accentColor;
-            int leftCals = targetCals - curC;
 
             return Container(
               padding: const EdgeInsets.all(24),
@@ -480,10 +474,7 @@ class _HomeTabState extends State<HomeTab> with AutomaticKeepAliveClientMixin {
     return StreamBuilder<DocumentSnapshot>(
       stream: FirebaseFirestore.instance.collection('users').doc(uid).collection('meals').doc(_docId).snapshots(),
       builder: (context, snapshot) {
-        if (snapshot.hasError) return const Center(child: Text("Ошибка загрузки дневника")); // Бронебойная защита
-        if (snapshot.connectionState == ConnectionState.waiting && !snapshot.hasData) {
-          return const Center(child: CircularProgressIndicator(color: _accentColor));
-        }
+        if (snapshot.hasError) return const Center(child: Text("Ошибка загрузки дневника")); 
         
         if (!snapshot.hasData || !snapshot.data!.exists) return _buildEmptyState();
 
@@ -498,12 +489,11 @@ class _HomeTabState extends State<HomeTab> with AutomaticKeepAliveClientMixin {
           itemCount: items.length,
           itemBuilder: (context, index) {
             final item = items[index];
-            if (item is! Map<String, dynamic>) return const SizedBox.shrink(); // Бронебойный каст
+            if (item is! Map<String, dynamic>) return const SizedBox.shrink(); 
 
             final bool isGrouped = item['is_grouped'] == true;
             final String timeStr = item['timestamp'] != null ? DateFormat('HH:mm').format((item['timestamp'] as Timestamp).toDate()) : '';
             
-            // === ЗАЩИТА UI ОТ СТАРОГО МУСОРА (Блокируем краш от Base64) ===
             final String? imageUrl = item['imageUrl']?.toString();
             final bool isValidUrl = imageUrl != null && imageUrl.startsWith('http') && imageUrl.length < 1000;
 
@@ -533,7 +523,28 @@ class _HomeTabState extends State<HomeTab> with AutomaticKeepAliveClientMixin {
                   },
                 );
               },
-              onDismissed: (_) { DatabaseService().deleteMealItem(item); ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Блюдо удалено ✨'), backgroundColor: _accentColor)); },
+              onDismissed: (_) { 
+                DatabaseService().deleteMealItem(item, _docId); 
+
+                // Выводим безопасное нативное уведомление
+                final messenger = ScaffoldMessenger.of(context);
+                messenger.clearSnackBars();
+                messenger.showSnackBar(
+                  SnackBar(
+                    content: const Text(
+                      'Блюдо удалено ✨', 
+                      style: TextStyle(fontWeight: FontWeight.bold, color: Colors.white, fontSize: 16),
+                      textAlign: TextAlign.center,
+                    ),
+                    backgroundColor: _accentColor,
+                    behavior: SnackBarBehavior.floating,
+                    elevation: 10,
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(24)),
+                    margin: const EdgeInsets.only(bottom: 24, left: 24, right: 24), // Безопасный нативный отступ
+                    duration: const Duration(seconds: 2),
+                  )
+                );
+              },
               child: GestureDetector(
                 onTap: () {
                   HapticFeedback.selectionClick();
@@ -561,7 +572,6 @@ class _HomeTabState extends State<HomeTab> with AutomaticKeepAliveClientMixin {
                             Row(
                               mainAxisAlignment: MainAxisAlignment.spaceBetween,
                               children: [
-                                // Сделали текст более ярким и крупным
                                 Expanded(child: Text(item['name'] ?? 'Прием пищи', maxLines: 1, overflow: TextOverflow.ellipsis, style: const TextStyle(color: _textColor, fontSize: 15, fontWeight: FontWeight.w800))),
                                 Text(timeStr, style: const TextStyle(color: _subTextColor, fontSize: 12, fontWeight: FontWeight.w500)),
                               ],
@@ -602,7 +612,6 @@ class _HomeTabState extends State<HomeTab> with AutomaticKeepAliveClientMixin {
     );
   }
 
-  // === ИСПРАВЛЕНИЕ: Вызов изолированного виджета Оптимистичного трекера воды ===
   Widget _buildWaterWidget(String uid) {
     return OptimisticWaterWidget(uid: uid, docId: _docId);
   }
@@ -624,7 +633,6 @@ class _HomeTabState extends State<HomeTab> with AutomaticKeepAliveClientMixin {
   }
 }
 
-// === ДОБАВЛЕНО: Отдельный виджет трекера воды с Оптимистичным UI ===
 class OptimisticWaterWidget extends StatefulWidget {
   final String uid;
   final String docId;
@@ -657,13 +665,11 @@ class _OptimisticWaterWidgetState extends State<OptimisticWaterWidget> {
       builder: (context, snapshot) {
         if (snapshot.hasError) return const SizedBox.shrink();
 
-        // Синхронизация с сервером, если мы сейчас не переопределяем UI локально
         if (snapshot.hasData && snapshot.data!.exists) {
           int serverGlasses = (snapshot.data!.data() as Map<String, dynamic>?)?['water_glasses']?.toInt() ?? 0;
           if (!_isOptimistic) {
             _glasses = serverGlasses;
           } else if (serverGlasses == _glasses) {
-            // Как только сервер подтвердил наше значение, снимаем флаг
             _isOptimistic = false;
           }
         }
@@ -702,13 +708,11 @@ class _OptimisticWaterWidgetState extends State<OptimisticWaterWidget> {
                       HapticFeedback.lightImpact();
                       int newCount = isFilled ? index : index + 1;
                       
-                      // Оптимистичное обновление: меняем UI моментально
                       setState(() {
                         _glasses = newCount;
                         _isOptimistic = true;
                       });
                       
-                      // Отправляем в Firebase (fire-and-forget)
                       DatabaseService().updateWaterGlasses(newCount);
                     },
                     child: AnimatedContainer(
@@ -718,7 +722,6 @@ class _OptimisticWaterWidgetState extends State<OptimisticWaterWidget> {
                       transformAlignment: Alignment.center,
                       child: Icon(
                         Icons.water_drop,
-                        // Четкий голубой цвет при заполнении
                         color: isFilled ? Colors.lightBlueAccent : const Color(0xFFE5E5EA),
                         size: 30,
                       ),

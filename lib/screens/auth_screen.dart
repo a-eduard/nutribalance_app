@@ -3,10 +3,8 @@ import 'package:flutter/gestures.dart';
 import 'package:url_launcher/url_launcher.dart'; 
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
-import 'package:easy_localization/easy_localization.dart';
 import '../services/auth_service.dart';
-import '../paywall_screen.dart';
-import 'home_wrapper.dart';
+
 
 class AuthScreen extends StatefulWidget {
   const AuthScreen({super.key});

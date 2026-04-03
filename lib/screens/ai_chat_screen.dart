@@ -11,9 +11,7 @@ import 'package:file_picker/file_picker.dart';
 import 'package:cloud_functions/cloud_functions.dart';
 import 'package:firebase_storage/firebase_storage.dart';
 
-import '../services/ai_service.dart';
 import '../services/database_service.dart';
-import '../widgets/shopping_list_widget.dart';
 import '../widgets/ai_chat_parser.dart';
 import '../services/push_notification_service.dart';
 import 'shopping_list_screen.dart';

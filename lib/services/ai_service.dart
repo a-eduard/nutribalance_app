@@ -48,26 +48,22 @@ class AIService {
 
     final callable = FirebaseFunctions.instance.httpsCallable('askDietitian');
 
-    int maxRetries = 2;
-    for (int attempt = 0; attempt <= maxRetries; attempt++) {
-      try {
-        final result = await callable.call({
-          // Промпт теперь полностью управляется в index.js! 
-          // Мы отправляем только сам запрос пользователя.
-          'prompt': userMessage.isEmpty && base64Image != null ? "Оцени это блюдо." : userMessage,
-          'history': formattedHistory,
-          'userContext': userContext,
-          'imagesBase64': base64Image != null ? [base64Image] : [], // Исправлено на массив
-        }).timeout(const Duration(seconds: 20)); // === УСКОРЕНИЕ: Уменьшили таймаут до 20 сек ===
+    try {
+      final result = await callable.call({
+        // === УСИЛЕННЫЙ ПРОМПТ ДЛЯ ИИ ===
+        // Заставляем Еву не дублировать названия и возвращать чистый JSON
+        'prompt': userMessage.isEmpty && base64Image != null 
+            ? "Оцени это блюдо. Верни СТРОГО чистый JSON. Разбей на базовые ингредиенты. НИКОГДА не дублируй названия ингредиентов." 
+            : "$userMessage УБЕДИСЬ, что ты разбил блюдо на разные ингредиенты и вернул чистый JSON.",
+        'history': formattedHistory,
+        'userContext': userContext,
+        'imagesBase64': base64Image != null ? [base64Image] : [], 
+      }).timeout(const Duration(seconds: 40)); 
 
-        return result.data['text']?.toString() ?? "Извините, Ева не смогла обработать запрос.";
-      } catch (e) {
-        if (attempt == maxRetries) {
-          debugPrint("AI Error: $e");
-          return "Извините, Ева сейчас занята.";
-        }
-      }
+      return result.data['text']?.toString() ?? "Извините, Ева не смогла обработать запрос.";
+    } catch (e) {
+      debugPrint("AI Error: $e");
+      return "Извините, сервер сейчас перегружен. Попробуй переснять фото.";
     }
-    return "Ошибка сети.";
   }
 }

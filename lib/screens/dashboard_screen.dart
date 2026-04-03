@@ -129,13 +129,18 @@ class _DashboardScreenState extends State<DashboardScreen> {
     );
   }
 
-  @override
+ @override
   Widget build(BuildContext context) {
     final uid = FirebaseAuth.instance.currentUser?.uid;
 
     return Scaffold(
       backgroundColor: _bgColor,
-      body: _screens[_currentIndex],
+      // === ФИКС ЗАВИСАНИЙ: IndexedStack держит все экраны в памяти! ===
+      // Больше никакого пересоздания виджетов и обрыва потоков БД при клике на меню.
+      body: IndexedStack(
+        index: _currentIndex,
+        children: _screens,
+      ),
       floatingActionButton: (_currentIndex != 2)
           ? SizedBox(
               height: 64,

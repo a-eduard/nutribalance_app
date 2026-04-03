@@ -1,5 +1,4 @@
 import 'dart:io';
-import 'dart:convert';
 import 'dart:typed_data';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
@@ -269,14 +268,13 @@ class DatabaseService {
   }
 
   Future<void> _updateWeeklyNutritionCache(String uid) async {
-    // ОТКЛЮЧЕНО: Вызов этого метода при каждом добавлении еды обновлял корневой 
-    // документ пользователя, что вызывало сброс StreamBuilder'ов на главном экране
-    // и приводило к "вечной загрузке".
-    // Теперь мы считаем средние калории "на лету" прямо в getAIContextSummary.
+    // МЕТОД ОТКЛЮЧЕН: Обновление профиля при каждом сохранении еды 
+    // вызывало бесконечный цикл перерисовки HomeTab.
   }
 
   // Централизованная загрузка фото в Storage (абсолютная защита от Base64 в Firestore)
   Future<void> logMeal(Map<String, dynamic> data, {String? extraImageUrl, File? imageFile, Uint8List? imageBytes}) async {
+    debugPrint("🔥 [TEST] 1. Старт logMeal. Приняты данные: ${data['meal_name'] ?? data['name']}");
     final user = _auth.currentUser;
     if (user == null) return;
 
@@ -358,51 +356,61 @@ class DatabaseService {
       finalImageUrl = null; 
     }
 
-    // Если прикрепили реальное фото (File или Uint8List) — грузим напрямую в Storage!
+    // === ТЕСТ ПРОИЗВОДИТЕЛЬНОСТИ ===
+    final Stopwatch sw = Stopwatch()..start();
+
     if (imageFile != null || imageBytes != null) {
+      debugPrint("🔥 [TEST] 2. Начинаем загрузку фото... (${sw.elapsedMilliseconds} мс)");
       try {
         final ref = FirebaseStorage.instance.ref().child('users/${user.uid}/meals/$mealId.jpg');
         if (imageFile != null) {
-          await ref.putFile(imageFile);
+          await ref.putFile(imageFile).timeout(const Duration(seconds: 5));
         } else {
-          await ref.putData(imageBytes!);
+          await ref.putData(imageBytes!).timeout(const Duration(seconds: 5));
         }
-        finalImageUrl = await ref.getDownloadURL(); // Получаем короткую ссылку
+        finalImageUrl = await ref.getDownloadURL();
+        debugPrint("🔥 [TEST] 3. Фото загружено за ${sw.elapsedMilliseconds} мс!");
       } catch (e) {
-        debugPrint("Ошибка Storage: $e");
+        debugPrint("🔥 [TEST ERROR] Storage ЗАВИС или не доступен: $e");
       }
     }
 
+    // === ВОССТАНОВИЛИ ПЕРЕМЕННУЮ ===
     final mealEntry = {
       'id': mealId,
       'name': data['meal_name'] ?? data['name'] ?? (ingredients.isNotEmpty ? ingredients.first['name'] : 'Прием пищи'),
-      'imageUrl': finalImageUrl, // <-- Только чистая короткая ссылка (http) или null
+      'imageUrl': finalImageUrl, 
       'calories': totalCals,
       'protein': totalProt,
       'fat': totalFat,
       'carbs': totalCarbs,
-      'fiber': totalFiber, // <-- Сохраняем общую клетчатку в блюдо
+      'fiber': totalFiber, 
       'health_score': avgHealthScore.round(), 
       'timestamp': Timestamp.now(),
       'is_grouped': true, 
       'ingredients': ingredients,
     };
 
-    // Set с merge: true гарантированно создаст документ для новичка, если его еще нет
-    await _db
-        .collection('users')
-        .doc(user.uid)
-        .collection('meals')
-        .doc(docId)
-        .set({
-          'items': FieldValue.arrayUnion([mealEntry]), 
-          'calories': FieldValue.increment(totalCals),
-          'protein': FieldValue.increment(totalProt),
-          'fat': FieldValue.increment(totalFat),
-          'carbs': FieldValue.increment(totalCarbs),
-          'fiber': FieldValue.increment(totalFiber), // <-- Инкремент клетчатки
-          'date': Timestamp.fromDate(_getLogicalNow()),
-        }, SetOptions(merge: true));
+    // Возвращаем стандартную запись. Без .timeout() Firestore 
+    // мгновенно сохранит данные локально и отправит их на сервер в фоне.
+    try {
+      await _db
+          .collection('users')
+          .doc(user.uid)
+          .collection('meals')
+          .doc(docId)
+          .set({
+            'items': FieldValue.arrayUnion([mealEntry]), 
+            'calories': FieldValue.increment(totalCals),
+            'protein': FieldValue.increment(totalProt),
+            'fat': FieldValue.increment(totalFat),
+            'carbs': FieldValue.increment(totalCarbs),
+            'fiber': FieldValue.increment(totalFiber),
+            'date': Timestamp.fromDate(_getLogicalNow()),
+          }, SetOptions(merge: true));
+    } catch (e) {
+      debugPrint("Ошибка записи Firestore: $e");
+    }
 
     _updateWeeklyNutritionCache(user.uid);
   }
@@ -542,32 +550,36 @@ class DatabaseService {
     try {
       final String todayDocId = getTodayDocId();
 
+      // === УСКОРЕНИЕ: Ставим жесткие таймауты и не скачиваем лишнее ===
       final results = await Future.wait([
-        _db.collection('users').doc(user.uid).get(),
-        _db.collection('users').doc(user.uid).collection('nutrition_goal').doc('current').get(),
-        _db.collection('users').doc(user.uid).collection('custom_foods').get(),
-        _db.collection('users').doc(user.uid).collection('cycle_logs').doc(todayDocId).get(),
+        _db.collection('users').doc(user.uid).get().timeout(const Duration(seconds: 3)),
+        _db.collection('users').doc(user.uid).collection('nutrition_goal').doc('current').get().timeout(const Duration(seconds: 3)),
+        _db.collection('users').doc(user.uid).collection('cycle_logs').doc(todayDocId).get().timeout(const Duration(seconds: 3)),
       ]);
 
       final userDoc = results[0] as DocumentSnapshot;
       final goalDoc = results[1] as DocumentSnapshot;
-      final foodsSnap = results[2] as QuerySnapshot;
-      final harmonyDoc = results[3] as DocumentSnapshot; 
+      final harmonyDoc = results[2] as DocumentSnapshot;
 
       final userData = userDoc.data() as Map<String, dynamic>? ?? {};
 
       final bool hasNutritionPlan = goalDoc.exists && ((goalDoc.data() as Map<String, dynamic>?)?['calories'] ?? 0) > 0;
       final String planStatus = hasNutritionPlan ? "has_nutrition_plan == true" : "has_nutrition_plan == false";
 
-      // === ИСПРАВЛЕНИЕ ЗАВИСАНИЙ: Вычисляем средние калории на лету ===
+     // === FIX: Считаем среднее только для контекста ИИ, не трогая документ юзера ===
       int avgCals = 0;
       try {
-        final weekAgoTs = Timestamp.fromDate(DateTime.now().subtract(const Duration(days: 7)));
-        final snap = await _db.collection('users').doc(user.uid).collection('meals').where('date', isGreaterThanOrEqualTo: weekAgoTs).get();
-        int totalCals = 0;
-        for (var doc in snap.docs) { totalCals += (doc.data()['calories'] as num?)?.toInt() ?? 0; }
-        avgCals = snap.docs.isEmpty ? 0 : totalCals ~/ 7;
-      } catch (_) {}
+        final weekAgo = DateTime.now().subtract(const Duration(days: 7));
+        final snap = await _db.collection('users').doc(user.uid).collection('meals')
+            .where('date', isGreaterThanOrEqualTo: Timestamp.fromDate(weekAgo))
+            .get().timeout(const Duration(seconds: 5));
+        
+        int total = 0;
+        for (var d in snap.docs) { total += (d.data()['calories'] as num?)?.toInt() ?? 0; }
+        avgCals = snap.docs.isEmpty ? 0 : total ~/ 7;
+      } catch (e) {
+        debugPrint("Ошибка быстрого расчета калорий: $e");
+      }
 
       String cyclePhase = 'Не указано';
       
@@ -631,14 +643,7 @@ class DatabaseService {
         });
       }
 
-      String customFoodsContext = "";
-      if (foodsSnap.docs.isNotEmpty) {
-        customFoodsContext = "\n[ЛИЧНАЯ БАЗА ПРОДУКТОВ ПОЛЬЗОВАТЕЛЯ]:\n";
-        for (var doc in foodsSnap.docs) {
-          final f = doc.data() as Map<String, dynamic>;
-          customFoodsContext += "- ${f['name']}: ${f['calories']} ккал (Б:${f['protein']} Ж:${f['fat']} У:${f['carbs']})\n";
-        }
-      }
+      String customFoodsContext = ""; // Отключено для ускорения загрузки
 
       return """
 [СЕКРЕТНЫЙ СИСТЕМНЫЙ КОНТЕКСТ]
@@ -684,25 +689,27 @@ $customFoodsContext
     await _db.collection('users').doc(user.uid).update({'isPro': true, 'proUntil': Timestamp.fromDate(newProUntil)});
   }
 
-  Future<void> deleteMealItem(Map<String, dynamic> item) async {
+  // === ФИКС УДАЛЕНИЯ: Теперь принимаем точную дату (dateDocId) ===
+  Future<void> deleteMealItem(Map<String, dynamic> item, String dateDocId) async {
     final user = _auth.currentUser;
     if (user == null) return;
-    final String docId = getTodayDocId();
-    final docRef = _db.collection('users').doc(user.uid).collection('meals').doc(docId);
+    
+    // Ищем блюдо именно в том дне, который открыт в календаре!
+    final docRef = _db.collection('users').doc(user.uid).collection('meals').doc(dateDocId);
 
-    await _db.runTransaction((transaction) async {
-      final snapshot = await transaction.get(docRef);
+    try {
+      final snapshot = await docRef.get();
       if (!snapshot.exists) return;
 
       List<dynamic> items = snapshot.data()?['items'] ?? [];
       final originalLength = items.length;
       
-      // Ищем строго по ID, чтобы избежать проблем с Timestamp
+      // Ищем блюдо по его уникальному ID и удаляем из списка
       items.removeWhere((i) => i['id'] == item['id']);
+      
+      if (items.length == originalLength) return; // Если не нашли, выходим
 
-      if (items.length == originalLength) return; // Блюдо не найдено
-
-      // Пересчитываем итоги с нуля для надежности
+      // Пересчитываем макросы без этого блюда
       int totalCals = 0, totalProt = 0, totalFat = 0, totalCarbs = 0, totalFiber = 0;
       for (var i in items) {
         totalCals += (i['calories'] as num?)?.toInt() ?? 0;
@@ -712,7 +719,8 @@ $customFoodsContext
         totalFiber += (i['fiber'] as num?)?.toInt() ?? 0;
       }
 
-      transaction.update(docRef, {
+      // Мгновенно обновляем базу
+      await docRef.update({
         'items': items,
         'calories': totalCals,
         'protein': totalProt,
@@ -720,9 +728,9 @@ $customFoodsContext
         'carbs': totalCarbs,
         'fiber': totalFiber,
       });
-    });
-
-    _updateWeeklyNutritionCache(user.uid);
+    } catch (e) {
+      debugPrint("Ошибка при удалении блюда: $e");
+    }
   }
 
   Future<void> updateMealItemWeight(Map<String, dynamic> oldItem, int newWeightG) async {

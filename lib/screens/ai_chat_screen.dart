@@ -96,8 +96,8 @@ class _AIChatScreenState extends State<AIChatScreen> {
   Future<void> _pickImages() async {
     try {
       if (_selectedPdf != null) setState(() { _selectedPdf = null; _pdfFileName = null; });
-      // === ЖЕСТКОЕ СЖАТИЕ ФОТО ДЛЯ УСКОРЕНИЯ ===
-      final List<XFile> pickedFiles = await _picker.pickMultiImage(imageQuality: 50, maxWidth: 800, maxHeight: 800);
+      // === УЛЬТРА-СЖАТИЕ ФОТО ДЛЯ МГНОВЕННОГО ОТВЕТА ЕВЫ ===
+      final List<XFile> pickedFiles = await _picker.pickMultiImage(imageQuality: 30, maxWidth: 512, maxHeight: 512);
 
       if (pickedFiles.isNotEmpty) {
         if (pickedFiles.length > _maxImages) {
@@ -143,8 +143,8 @@ class _AIChatScreenState extends State<AIChatScreen> {
                 title: const Text('Сделать фото', style: TextStyle(color: _textColor, fontSize: 16, fontWeight: FontWeight.w500)),
                 onTap: () async {
                   Navigator.pop(ctx);
-                  // === ЖЕСТКОЕ СЖАТИЕ ФОТО ДЛЯ УСКОРЕНИЯ ===
-                  final XFile? photo = await _picker.pickImage(source: ImageSource.camera, imageQuality: 50, maxWidth: 800, maxHeight: 800);
+                  // === УЛЬТРА-СЖАТИЕ ФОТО ДЛЯ МГНОВЕННОГО ОТВЕТА ЕВЫ ===
+                  final XFile? photo = await _picker.pickImage(source: ImageSource.camera, imageQuality: 30, maxWidth: 512, maxHeight: 512);
                   if (photo != null) setState(() { _selectedPdf = null; _pdfFileName = null; _selectedImages = [File(photo.path)]; });
                 },
               ),

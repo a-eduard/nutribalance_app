@@ -57,8 +57,8 @@ class _FastFoodScannerSheetState extends State<FastFoodScannerSheet> with Single
 
   Future<void> _pickImage(ImageSource source) async {
     try {
-      // === ЖЕСТКОЕ СЖАТИЕ ФОТО ДЛЯ УСКОРЕНИЯ ===
-      final XFile? pickedFile = await _picker.pickImage(source: source, imageQuality: 50, maxWidth: 800, maxHeight: 800);
+      // === УЛЬТРА-СЖАТИЕ ФОТО ДЛЯ МГНОВЕННОГО ОТВЕТА ЕВЫ ===
+      final XFile? pickedFile = await _picker.pickImage(source: source, imageQuality: 30, maxWidth: 512, maxHeight: 512);
       if (pickedFile != null) {
         setState(() { _image = File(pickedFile.path); _errorMessage = null; });
         _analyzeImage();
@@ -150,28 +150,12 @@ class _FastFoodScannerSheetState extends State<FastFoodScannerSheet> with Single
   }
 
   Future<void> _saveToDiary() async {
-    if (_resultData == null) return;
-    setState(() => _isProcessing = true);
+    if (_resultData == null || _isProcessing) return;
+    setState(() => _isProcessing = true); // Блокируем кнопку, чтобы не кликали дважды
+    
     try {
-      String? uploadedImageUrl;
-      
-      // === ЗАГРУЖАЕМ ФОТО НА СЕРВЕР ПЕРЕД СОХРАНЕНИЕМ ===
-      if (_imageBytes != null) {
-        try {
-          final uid = DatabaseService().currentUser?.uid ?? 'unknown';
-          final timestamp = DateTime.now().millisecondsSinceEpoch;
-          final ref = FirebaseStorage.instance.ref().child('meals/$uid/fast_scan_$timestamp.jpg');
-          
-          // Используем putData вместо putFile (защита от удаленных файлов кэша)
-          await ref.putData(_imageBytes!); 
-          uploadedImageUrl = await ref.getDownloadURL(); // Получаем ссылку
-        } catch (e) {
-          debugPrint("Ошибка загрузки фото: $e");
-        }
-      }
-
-      // Передаем URL в наш новый параметр extraImageUrl
-      await DatabaseService().logMeal(_resultData!, extraImageUrl: uploadedImageUrl);
+      // Передаем байты напрямую в сервис базы данных, он сам загрузит их в Storage!
+      await DatabaseService().logMeal(_resultData!, imageBytes: _imageBytes);
       
       if (mounted) {
         Navigator.pop(context);
@@ -431,7 +415,17 @@ class _FastFoodScannerSheetState extends State<FastFoodScannerSheet> with Single
             ),
           ),
           const SizedBox(height: 32),
-          SizedBox(width: double.infinity, height: 56, child: ElevatedButton(style: ElevatedButton.styleFrom(backgroundColor: _accentColor, shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)), elevation: 0), onPressed: _saveToDiary, child: const Text("ДОБАВИТЬ", style: TextStyle(color: Colors.white, fontWeight: FontWeight.w800, fontSize: 15)))),
+          SizedBox(
+            width: double.infinity, 
+            height: 56, 
+            child: ElevatedButton(
+              style: ElevatedButton.styleFrom(backgroundColor: _accentColor, shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)), elevation: 0), 
+              onPressed: _isProcessing ? null : _saveToDiary, 
+              child: _isProcessing 
+                  ? const SizedBox(width: 24, height: 24, child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2))
+                  : const Text("ДОБАВИТЬ", style: TextStyle(color: Colors.white, fontWeight: FontWeight.w800, fontSize: 15))
+            )
+          ),
           const SizedBox(height: 12),
           Center(child: TextButton(onPressed: () => setState(() { _resultData = null; _image = null; _imageBytes = null; }), child: const Text("Переснять фото", style: TextStyle(color: _subTextColor, fontWeight: FontWeight.w600))))
         ],

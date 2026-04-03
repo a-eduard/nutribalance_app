@@ -269,31 +269,14 @@ class DatabaseService {
   }
 
   Future<void> _updateWeeklyNutritionCache(String uid) async {
-    try {
-      final weekAgoTs = Timestamp.fromDate(
-        DateTime.now().subtract(const Duration(days: 7)),
-      );
-      final snap = await _db
-          .collection('users')
-          .doc(uid)
-          .collection('meals')
-          .where('date', isGreaterThanOrEqualTo: weekAgoTs)
-          .get();
-      int totalCals = 0;
-      for (var doc in snap.docs) {
-        totalCals += (doc.data()['calories'] as num?)?.toInt() ?? 0;
-      }
-      int avgCals = snap.docs.isEmpty ? 0 : totalCals ~/ 7;
-      await _db.collection('users').doc(uid).set({
-        'weeklyAvgCals': avgCals,
-      }, SetOptions(merge: true));
-    } catch (e) {
-      debugPrint("Фоновая ошибка кэширования: $e");
-    }
+    // ОТКЛЮЧЕНО: Вызов этого метода при каждом добавлении еды обновлял корневой 
+    // документ пользователя, что вызывало сброс StreamBuilder'ов на главном экране
+    // и приводило к "вечной загрузке".
+    // Теперь мы считаем средние калории "на лету" прямо в getAIContextSummary.
   }
 
-  // Добавили необязательный параметр extraImageUrl, чтобы передавать фото из чата, если его нет в JSON
-  Future<void> logMeal(Map<String, dynamic> data, {String? extraImageUrl}) async {
+  // Централизованная загрузка фото в Storage (абсолютная защита от Base64 в Firestore)
+  Future<void> logMeal(Map<String, dynamic> data, {String? extraImageUrl, File? imageFile, Uint8List? imageBytes}) async {
     final user = _auth.currentUser;
     if (user == null) return;
 
@@ -367,32 +350,33 @@ class DatabaseService {
 
     final String mealId = DateTime.now().millisecondsSinceEpoch.toString();
     
-    // === ЗАЩИТА ОТ КРАША БД И ПЕРЕХОД НА STORAGE ===
-    String? safeImageUrl = data['imageUrl'] ?? extraImageUrl;
+    // === СТРОГАЯ ЗАЩИТА И ПЕРЕХОД НА STORAGE ===
+    String? finalImageUrl = extraImageUrl ?? data['imageUrl'];
     
-    if (safeImageUrl != null && !safeImageUrl.startsWith('http')) {
-      // КАТЕГОРИЧЕСКИ ЗАПРЕЩАЕТСЯ сохранять Base64 строку в Firestore!
-      // Конвертируем Base64 в бинарный файл и отправляем в Firebase Storage
+    // Очищаем мусор: если это Base64 или странный текст - безжалостно удаляем
+    if (finalImageUrl != null && (!finalImageUrl.startsWith('http') || finalImageUrl.length > 1000)) {
+      finalImageUrl = null; 
+    }
+
+    // Если прикрепили реальное фото (File или Uint8List) — грузим напрямую в Storage!
+    if (imageFile != null || imageBytes != null) {
       try {
-        String base64String = safeImageUrl;
-        if (base64String.contains(',')) {
-          base64String = base64String.split(',').last;
-        }
-        final Uint8List bytes = base64Decode(base64String);
         final ref = FirebaseStorage.instance.ref().child('users/${user.uid}/meals/$mealId.jpg');
-        await ref.putData(bytes);
-        safeImageUrl = await ref.getDownloadURL(); // Получаем короткую безопасную ссылку
+        if (imageFile != null) {
+          await ref.putFile(imageFile);
+        } else {
+          await ref.putData(imageBytes!);
+        }
+        finalImageUrl = await ref.getDownloadURL(); // Получаем короткую ссылку
       } catch (e) {
-        debugPrint("Ошибка загрузки Base64 фото в Storage: $e");
-        safeImageUrl = null; // Если не вышло — блокируем мусор
+        debugPrint("Ошибка Storage: $e");
       }
     }
 
     final mealEntry = {
       'id': mealId,
-      // УМНЫЙ ФОЛБЭК: Если ИИ забыл общее название, берем имя из первого ингредиента
       'name': data['meal_name'] ?? data['name'] ?? (ingredients.isNotEmpty ? ingredients.first['name'] : 'Прием пищи'),
-      'imageUrl': safeImageUrl, // <-- Безопасная картинка
+      'imageUrl': finalImageUrl, // <-- Только чистая короткая ссылка (http) или null
       'calories': totalCals,
       'protein': totalProt,
       'fat': totalFat,
@@ -575,7 +559,15 @@ class DatabaseService {
       final bool hasNutritionPlan = goalDoc.exists && ((goalDoc.data() as Map<String, dynamic>?)?['calories'] ?? 0) > 0;
       final String planStatus = hasNutritionPlan ? "has_nutrition_plan == true" : "has_nutrition_plan == false";
 
-      final int avgCals = (userData['weeklyAvgCals'] as num?)?.toInt() ?? 0;
+      // === ИСПРАВЛЕНИЕ ЗАВИСАНИЙ: Вычисляем средние калории на лету ===
+      int avgCals = 0;
+      try {
+        final weekAgoTs = Timestamp.fromDate(DateTime.now().subtract(const Duration(days: 7)));
+        final snap = await _db.collection('users').doc(user.uid).collection('meals').where('date', isGreaterThanOrEqualTo: weekAgoTs).get();
+        int totalCals = 0;
+        for (var doc in snap.docs) { totalCals += (doc.data()['calories'] as num?)?.toInt() ?? 0; }
+        avgCals = snap.docs.isEmpty ? 0 : totalCals ~/ 7;
+      } catch (_) {}
 
       String cyclePhase = 'Не указано';
       

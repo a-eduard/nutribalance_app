@@ -502,6 +502,10 @@ class _HomeTabState extends State<HomeTab> with AutomaticKeepAliveClientMixin {
 
             final bool isGrouped = item['is_grouped'] == true;
             final String timeStr = item['timestamp'] != null ? DateFormat('HH:mm').format((item['timestamp'] as Timestamp).toDate()) : '';
+            
+            // === ЗАЩИТА UI ОТ СТАРОГО МУСОРА (Base64) ===
+            final String? imageUrl = item['imageUrl']?.toString();
+            final bool isValidUrl = imageUrl != null && imageUrl.startsWith('http') && imageUrl.length < 1000;
 
             return Dismissible(
               key: Key(item['id'] ?? index.toString()),
@@ -545,8 +549,8 @@ class _HomeTabState extends State<HomeTab> with AutomaticKeepAliveClientMixin {
                       Container(
                         width: 56, height: 56, 
                         decoration: BoxDecoration(color: _bgColor, borderRadius: BorderRadius.circular(16)), 
-                        child: (item['imageUrl'] != null && item['imageUrl'].toString().isNotEmpty)
-                            ? ClipRRect(borderRadius: BorderRadius.circular(16), child: CachedNetworkImage(imageUrl: item['imageUrl'], fit: BoxFit.cover))
+                        child: isValidUrl
+                            ? ClipRRect(borderRadius: BorderRadius.circular(16), child: CachedNetworkImage(imageUrl: imageUrl, fit: BoxFit.cover))
                             : const Icon(Icons.restaurant, color: Color(0xFFC7C7CC), size: 28),
                       ),
                       const SizedBox(width: 16),

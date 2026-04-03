@@ -252,7 +252,66 @@ class _HarmonyScreenState extends State<HarmonyScreen> {
     );
   }
 
-  void _showSymptomsBottomSheet() {
+  // === НОВАЯ ШТОРКА ДЛЯ ПМС (26-Й ДЕНЬ ЦИКЛА) ===
+  void _showPMSCheatDaySheet() {
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: Colors.white,
+      shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(24))),
+      builder: (ctx) => SafeArea(
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 24.0, vertical: 32.0),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const Text(
+                "Прислушайся к себе ✨",
+                style: TextStyle(
+                  color: Color(0xFF2D2D2D),
+                  fontSize: 22,
+                  fontWeight: FontWeight.bold,
+                ),
+                textAlign: TextAlign.center,
+              ),
+              const SizedBox(height: 16),
+              const Text(
+                "Сейчас 26-й день твоего цикла. В этот период ПМС твоему телу физиологически нужно чуть больше энергии и углеводов. Это нормально! Позволь себе любимую еду без чувства вины — организму нужна поддержка, а не строгие рамки.",
+                textAlign: TextAlign.center,
+                style: TextStyle(
+                  color: Color(0xFF8E8E93),
+                  fontSize: 15,
+                  height: 1.4,
+                ),
+              ),
+              const SizedBox(height: 32),
+              SizedBox(
+                width: double.infinity,
+                height: 50,
+                child: ElevatedButton(
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: const Color(0xFFB76E79),
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+                    elevation: 0,
+                  ),
+                  onPressed: () => Navigator.pop(ctx),
+                  child: const Text(
+                    "Понятно 🌸",
+                    style: TextStyle(
+                      color: Colors.white,
+                      fontWeight: FontWeight.w800,
+                      letterSpacing: 1.0,
+                    ),
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+    void _showSymptomsBottomSheet() {
     showModalBottomSheet(
       context: context,
       backgroundColor: Colors.white,
@@ -822,9 +881,15 @@ class _HarmonyScreenState extends State<HarmonyScreen> {
                       _loadSymptomsForDay(selectedDay); 
                       _showDayTooltip(selectedDay, userData);
                       
-                      // Показываем шторку читмила по воскресеньям (если не беременна)
-                      if (selectedDay.weekday == DateTime.sunday && !isPregnant) {
-                        _showCheatMealSheet();
+                      if (!isPregnant) {
+                        final String cheatStatus = _getCheatStatus(selectedDay, userData);
+                        if (cheatStatus == 'cheat_day') {
+                          // Показываем шторку ПМС для 26-го дня
+                          _showPMSCheatDaySheet();
+                        } else if (cheatStatus == 'cheat_meal') {
+                          // Показываем шторку читмила по воскресеньям
+                          _showCheatMealSheet();
+                        }
                       }
                     },
                     startingDayOfWeek: StartingDayOfWeek.monday,

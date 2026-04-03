@@ -1,4 +1,6 @@
 import 'dart:io';
+import 'dart:convert';
+import 'dart:typed_data';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:firebase_storage/firebase_storage.dart';
@@ -364,12 +366,33 @@ class DatabaseService {
     avgHealthScore = ingredients.isNotEmpty ? avgHealthScore / ingredients.length : 5.0;
 
     final String mealId = DateTime.now().millisecondsSinceEpoch.toString();
+    
+    // === ЗАЩИТА ОТ КРАША БД И ПЕРЕХОД НА STORAGE ===
+    String? safeImageUrl = data['imageUrl'] ?? extraImageUrl;
+    
+    if (safeImageUrl != null && !safeImageUrl.startsWith('http')) {
+      // КАТЕГОРИЧЕСКИ ЗАПРЕЩАЕТСЯ сохранять Base64 строку в Firestore!
+      // Конвертируем Base64 в бинарный файл и отправляем в Firebase Storage
+      try {
+        String base64String = safeImageUrl;
+        if (base64String.contains(',')) {
+          base64String = base64String.split(',').last;
+        }
+        final Uint8List bytes = base64Decode(base64String);
+        final ref = FirebaseStorage.instance.ref().child('users/${user.uid}/meals/$mealId.jpg');
+        await ref.putData(bytes);
+        safeImageUrl = await ref.getDownloadURL(); // Получаем короткую безопасную ссылку
+      } catch (e) {
+        debugPrint("Ошибка загрузки Base64 фото в Storage: $e");
+        safeImageUrl = null; // Если не вышло — блокируем мусор
+      }
+    }
+
     final mealEntry = {
       'id': mealId,
       // УМНЫЙ ФОЛБЭК: Если ИИ забыл общее название, берем имя из первого ингредиента
       'name': data['meal_name'] ?? data['name'] ?? (ingredients.isNotEmpty ? ingredients.first['name'] : 'Прием пищи'),
-      // УМНЫЙ ФОЛБЭК КАРТИНКИ: Приоритет URL из JSON, если нет - берем переданный из чата extraImageUrl
-      'imageUrl': data['imageUrl'] ?? extraImageUrl, 
+      'imageUrl': safeImageUrl, // <-- Безопасная картинка
       'calories': totalCals,
       'protein': totalProt,
       'fat': totalFat,

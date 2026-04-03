@@ -1,5 +1,7 @@
 import 'dart:convert';
 import 'dart:io';
+import 'dart:ui';
+import 'dart:typed_data'; // <-- ДОБАВЛЕНО для Uint8List
 import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
 import '../../services/ai_service.dart';
@@ -28,6 +30,7 @@ class FastFoodScannerSheet extends StatefulWidget {
 class _FastFoodScannerSheetState extends State<FastFoodScannerSheet> with SingleTickerProviderStateMixin {
   final ImagePicker _picker = ImagePicker();
   File? _image;
+  Uint8List? _imageBytes; // <-- Будем хранить фото в памяти, чтобы избежать PathNotFoundException
   bool _isProcessing = false;
   Map<String, dynamic>? _resultData;
   String? _errorMessage;
@@ -54,7 +57,8 @@ class _FastFoodScannerSheetState extends State<FastFoodScannerSheet> with Single
 
   Future<void> _pickImage(ImageSource source) async {
     try {
-      final XFile? pickedFile = await _picker.pickImage(source: source, imageQuality: 70, maxWidth: 1024);
+      // === ЖЕСТКОЕ СЖАТИЕ ФОТО ДЛЯ УСКОРЕНИЯ ===
+      final XFile? pickedFile = await _picker.pickImage(source: source, imageQuality: 50, maxWidth: 800, maxHeight: 800);
       if (pickedFile != null) {
         setState(() { _image = File(pickedFile.path); _errorMessage = null; });
         _analyzeImage();
@@ -65,10 +69,51 @@ class _FastFoodScannerSheetState extends State<FastFoodScannerSheet> with Single
   }
 
   Future<void> _analyzeImage() async {
-    setState(() => _isProcessing = true);
+    // Сохраняем фото в оперативную память, так как Android может удалять кэш (PathNotFoundException)
+    _imageBytes = await _image!.readAsBytes();
+    final base64Image = base64Encode(_imageBytes!);
+
+    // === НОВЫЙ КРАСИВЫЙ ЛОАДЕР С РАЗМЫТИЕМ ===
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      barrierColor: Colors.black.withValues(alpha: 0.2), // Легкое затемнение
+      builder: (dialogContext) { // Используем отдельный контекст диалога
+        return PopScope(
+          canPop: false, // Блокируем закрытие кнопкой "Назад" во время загрузки
+          child: BackdropFilter(
+            filter: ImageFilter.blur(sigmaX: 5, sigmaY: 5),
+            child: Center(
+              child: Container(
+                padding: const EdgeInsets.all(24),
+                decoration: BoxDecoration(
+                  color: Colors.white,
+                  borderRadius: BorderRadius.circular(24),
+                ),
+                child: const Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    CircularProgressIndicator(color: Color(0xFFB76E79)),
+                    SizedBox(height: 16),
+                    Text(
+                      "Ева анализирует блюдо ✨",
+                      style: TextStyle(
+                        color: Color(0xFF2D2D2D),
+                        fontSize: 16,
+                        fontWeight: FontWeight.bold,
+                        decoration: TextDecoration.none, 
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ),
+        );
+      },
+    );
+
     try {
-      final bytes = await _image!.readAsBytes();
-      final base64Image = base64Encode(bytes);
       final response = await AIService().sendMultimodalMessage(
         userMessage: "Проанализируй это блюдо. Верни СТРОГО JSON формат (action_type: log_food), разбив на ингредиенты.",
         base64Image: base64Image,
@@ -83,7 +128,10 @@ class _FastFoodScannerSheetState extends State<FastFoodScannerSheet> with Single
     } catch (e) {
       setState(() => _errorMessage = "Ошибка связи с сервером. Проверь интернет.");
     } finally {
-      if (mounted) setState(() => _isProcessing = false);
+      if (mounted) {
+        // Бронебойное закрытие диалога-лоадера поверх всего стека
+        Navigator.of(context, rootNavigator: true).pop(); 
+      }
     }
   }
 
@@ -108,13 +156,14 @@ class _FastFoodScannerSheetState extends State<FastFoodScannerSheet> with Single
       String? uploadedImageUrl;
       
       // === ЗАГРУЖАЕМ ФОТО НА СЕРВЕР ПЕРЕД СОХРАНЕНИЕМ ===
-      if (_image != null) {
+      if (_imageBytes != null) {
         try {
           final uid = DatabaseService().currentUser?.uid ?? 'unknown';
           final timestamp = DateTime.now().millisecondsSinceEpoch;
           final ref = FirebaseStorage.instance.ref().child('meals/$uid/fast_scan_$timestamp.jpg');
           
-          await ref.putFile(_image!); // Грузим в Storage
+          // Используем putData вместо putFile (защита от удаленных файлов кэша)
+          await ref.putData(_imageBytes!); 
           uploadedImageUrl = await ref.getDownloadURL(); // Получаем ссылку
         } catch (e) {
           debugPrint("Ошибка загрузки фото: $e");
@@ -223,7 +272,6 @@ class _FastFoodScannerSheetState extends State<FastFoodScannerSheet> with Single
   }
 
   @override
-  @override
   Widget build(BuildContext context) {
     return Container(
       margin: const EdgeInsets.all(16), // Отступ от краев экрана
@@ -241,8 +289,7 @@ class _FastFoodScannerSheetState extends State<FastFoodScannerSheet> with Single
         mainAxisSize: MainAxisSize.min,
         children: [
           Container(width: 48, height: 5, margin: const EdgeInsets.only(bottom: 24), decoration: BoxDecoration(color: const Color(0xFFE5E5EA), borderRadius: BorderRadius.circular(10))),
-          if (_isProcessing) _buildProcessingState()
-          else if (_resultData != null) _buildResultState()
+          if (_resultData != null) _buildResultState()
           else _buildSelectionState(),
         ],
       ),
@@ -278,22 +325,6 @@ class _FastFoodScannerSheetState extends State<FastFoodScannerSheet> with Single
             Icon(icon, color: _accentColor, size: 28),
             const SizedBox(width: 16),
             Text(text, style: const TextStyle(color: _textColor, fontSize: 18, fontWeight: FontWeight.w600)),
-          ],
-        ),
-      ),
-    );
-  }
-
-  Widget _buildProcessingState() {
-    return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 60.0),
-      child: FadeTransition(
-        opacity: _pulseAnimation,
-        child: const Column(
-          children: [
-            Icon(Icons.psychology_outlined, color: _accentColor, size: 64),
-            SizedBox(height: 24),
-            Text("Ева анализирует блюдо ✨", textAlign: TextAlign.center, style: TextStyle(color: _accentColor, fontSize: 18, fontWeight: FontWeight.w800)),
           ],
         ),
       ),
@@ -350,7 +381,7 @@ class _FastFoodScannerSheetState extends State<FastFoodScannerSheet> with Single
         children: [
           Row(
             children: [
-              if (_image != null) ClipRRect(borderRadius: BorderRadius.circular(16), child: Image.file(_image!, width: 80, height: 80, fit: BoxFit.cover)),
+              if (_imageBytes != null) ClipRRect(borderRadius: BorderRadius.circular(16), child: Image.memory(_imageBytes!, width: 80, height: 80, fit: BoxFit.cover)),
               const SizedBox(width: 16),
               Expanded(
                 child: Column(
@@ -402,7 +433,7 @@ class _FastFoodScannerSheetState extends State<FastFoodScannerSheet> with Single
           const SizedBox(height: 32),
           SizedBox(width: double.infinity, height: 56, child: ElevatedButton(style: ElevatedButton.styleFrom(backgroundColor: _accentColor, shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)), elevation: 0), onPressed: _saveToDiary, child: const Text("ДОБАВИТЬ", style: TextStyle(color: Colors.white, fontWeight: FontWeight.w800, fontSize: 15)))),
           const SizedBox(height: 12),
-          Center(child: TextButton(onPressed: () => setState(() { _resultData = null; _image = null; }), child: const Text("Переснять фото", style: TextStyle(color: _subTextColor, fontWeight: FontWeight.w600))))
+          Center(child: TextButton(onPressed: () => setState(() { _resultData = null; _image = null; _imageBytes = null; }), child: const Text("Переснять фото", style: TextStyle(color: _subTextColor, fontWeight: FontWeight.w600))))
         ],
       ),
     );

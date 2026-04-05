@@ -230,7 +230,8 @@ class DailyMealsBottomSheet extends StatelessWidget {
                       onDismissed: (_) {
                       // Даем методу ту самую дату (сегодняшнюю), чтобы он знал, где искать блюдо
                       final String todayDocId = DatabaseService().getTodayDocId();
-                      DatabaseService().deleteMealItem(item, todayDocId);
+                      // ФИКС ОШИБКИ: Передаем 3 аргумента, включая текущий список List.from(items)
+                      DatabaseService().deleteMealItem(item, List.from(items), todayDocId);
                         ScaffoldMessenger.of(context).showSnackBar(
                           const SnackBar(
                             content: Text('Блюдо удалено из дневника ✨', style: TextStyle(fontWeight: FontWeight.bold)),

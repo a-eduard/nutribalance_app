@@ -16,14 +16,18 @@ class _NutritionStatsScreenState extends State<NutritionStatsScreen> {
   String _selectedPeriod = 'day';
 
   String _getAIDietitianInsight(int maintenance, int consumed, int diff) {
-    if (consumed == 0)
+    if (consumed == 0) {
       return "Привет! Запиши свой первый прием пищи, и я посчитаю твой дефицит. 🍏";
-    if (maintenance == 0)
+    }
+    if (maintenance == 0) {
       return "Попроси меня рассчитать твою норму калорий, чтобы я смог анализировать твой дефицит! 🤖";
-    if (diff > 0)
+    }
+    if (diff > 0) {
       return "Супер! Твой дефицит составил $diff ккал от нормы поддержания. Жир горит, ты на верном пути! 🔥";
-    if (diff == 0)
+    }
+    if (diff == 0) {
       return "Идеальный баланс! Ты питаешься ровно на поддержание веса. ⚖️";
+    }
     return "Внимание! Профицит ${diff.abs()} ккал. Если ты на массе — отличная работа! Если сушишься, стоит урезать угли. 💪";
   }
 
@@ -31,11 +35,11 @@ class _NutritionStatsScreenState extends State<NutritionStatsScreen> {
     final TextEditingController weightController = TextEditingController(
       text: item['weight_g'].toString(),
     );
-    bool isSaving = false; // Состояние загрузки
+    bool isSaving = false;
 
     showDialog(
       context: context,
-      barrierDismissible: false, // Запрещаем закрывать, пока идет сохранение
+      barrierDismissible: false, 
       builder: (ctx) => StatefulBuilder(
         builder: (context, setStateDialog) {
           return AlertDialog(
@@ -104,13 +108,13 @@ class _NutritionStatsScreenState extends State<NutritionStatsScreen> {
                         if (newWeight != null && newWeight > 0) {
                           setStateDialog(() => isSaving = true);
                           try {
-                            // Ждем завершения транзакции
                             await DatabaseService().updateMealItemWeight(
                               item,
                               newWeight,
                             );
-                            if (context.mounted)
-                              Navigator.pop(ctx); // Закрываем только при успехе
+                            if (context.mounted) {
+                              Navigator.pop(ctx); 
+                            }
                           } catch (e) {
                             setStateDialog(() => isSaving = false);
                             if (context.mounted) {
@@ -150,7 +154,6 @@ class _NutritionStatsScreenState extends State<NutritionStatsScreen> {
     final uid = FirebaseAuth.instance.currentUser?.uid;
     if (uid == null) return const Scaffold(backgroundColor: Colors.black);
 
-    // QA FIX: Обернули в DefaultTabController для 2 вкладок
     return DefaultTabController(
       length: 2,
       child: Scaffold(
@@ -215,7 +218,6 @@ class _NutritionStatsScreenState extends State<NutritionStatsScreen> {
 
         return Column(
           children: [
-            // Мини-сводка сверху списка
             Container(
               padding: const EdgeInsets.symmetric(vertical: 16, horizontal: 20),
               decoration: const BoxDecoration(
@@ -249,7 +251,6 @@ class _NutritionStatsScreenState extends State<NutritionStatsScreen> {
                 ],
               ),
             ),
-            // Список продуктов
             Expanded(
               child: ListView.builder(
                 padding: const EdgeInsets.all(16),
@@ -271,9 +272,8 @@ class _NutritionStatsScreenState extends State<NutritionStatsScreen> {
                       child: const Icon(Icons.delete, color: Colors.white),
                     ),
                     onDismissed: (_) {
-                      // Получаем ID сегодняшнего документа и передаем его в метод удаления
                       final String todayDocId = DatabaseService().getTodayDocId();
-                      DatabaseService().deleteMealItem(item, todayDocId);
+                      DatabaseService().deleteMealItem(item, List.from(items), todayDocId);
                       
                       ScaffoldMessenger.of(context).showSnackBar(
                         const SnackBar(
@@ -288,10 +288,10 @@ class _NutritionStatsScreenState extends State<NutritionStatsScreen> {
                         margin: const EdgeInsets.only(bottom: 12),
                         padding: const EdgeInsets.all(16),
                         decoration: BoxDecoration(
-                          color: const Color(0xFF1C1C1E).withOpacity(0.6),
+                          color: const Color(0xFF1C1C1E).withValues(alpha: 0.6),
                           borderRadius: BorderRadius.circular(12),
                           border: Border.all(
-                            color: Colors.white.withOpacity(0.05),
+                            color: Colors.white.withValues(alpha: 0.05),
                           ),
                         ),
                         child: Row(
@@ -394,10 +394,12 @@ class _NutritionStatsScreenState extends State<NutritionStatsScreen> {
                   logicalNow.month,
                   logicalNow.day,
                 );
-                if (_selectedPeriod == 'week')
+                if (_selectedPeriod == 'week') {
                   startDate = startDate.subtract(const Duration(days: 6));
-                if (_selectedPeriod == 'month')
+                }
+                if (_selectedPeriod == 'month') {
                   startDate = startDate.subtract(const Duration(days: 29));
+                }
 
                 final startTs = Timestamp.fromDate(startDate);
 
@@ -487,10 +489,10 @@ class _NutritionStatsScreenState extends State<NutritionStatsScreen> {
                           Container(
                             padding: const EdgeInsets.all(20),
                             decoration: BoxDecoration(
-                              color: const Color(0xFF1C1C1E).withOpacity(0.6),
+                              color: const Color(0xFF1C1C1E).withValues(alpha: 0.6),
                               borderRadius: BorderRadius.circular(16),
                               border: Border.all(
-                                color: const Color(0xFFB76E79).withOpacity(0.3),
+                                color: const Color(0xFFB76E79).withValues(alpha: 0.3),
                               ),
                             ),
                             child: Column(
@@ -559,7 +561,7 @@ class _NutritionStatsScreenState extends State<NutritionStatsScreen> {
                           Container(
                             padding: const EdgeInsets.all(16),
                             decoration: BoxDecoration(
-                              color: const Color(0xFFB76E79).withOpacity(0.1),
+                              color: const Color(0xFFB76E79).withValues(alpha: 0.1),
                               borderRadius: BorderRadius.circular(12),
                             ),
                             child: Row(
@@ -609,7 +611,7 @@ class _NutritionStatsScreenState extends State<NutritionStatsScreen> {
                                   style: ElevatedButton.styleFrom(
                                     backgroundColor: const Color(
                                       0xFFB76E79,
-                                    ).withOpacity(0.1),
+                                    ).withValues(alpha: 0.1),
                                     side: const BorderSide(
                                       color: Color(0xFFB76E79),
                                     ),

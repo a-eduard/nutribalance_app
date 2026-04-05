@@ -65,30 +65,45 @@ class _AIChatScreenState extends State<AIChatScreen> {
     final uid = FirebaseAuth.instance.currentUser?.uid;
     if (uid == null) return;
 
-    try {
-      _fullUserContext = await DatabaseService().getAIContextSummary();
+    // === ФИКС №1: КОНТЕКСТ В ФОНЕ ===
+    // Запускаем сбор контекста в фоне, не блокируя UI (убираем await).
+    // Больше никаких задержек в 9 секунд!
+    DatabaseService().getAIContextSummary().then((contextText) {
+      if (mounted) setState(() => _fullUserContext = contextText);
+    }).catchError((_) {});
 
+    // === ФИКС №2: МГНОВЕННОЕ ЧТЕНИЕ КЭША ===
+    try {
+      // Спрашиваем только память телефона (0.001 сек)
       final historyCheck = await FirebaseFirestore.instance
           .collection('users')
           .doc(uid)
           .collection('ai_chats_${widget.botType}')
           .limit(1)
-          .get();
+          .get(const GetOptions(source: Source.cache));
 
       if (historyCheck.docs.isEmpty) {
-        String welcome =
-            '''Привет! 🥰 Я Ева — твой личный ИИ-нутрициолог и заботливая подруга.✨
+        _sendWelcomeMessage();
+      }
+    } catch (_) {
+      // Если кэш абсолютно пустой (самый первый запуск в жизни), Firestore может выдать ошибку.
+      // Не пугаемся, просто кидаем приветствие.
+      _sendWelcomeMessage();
+    }
+  }
+
+  // Вынесли приветствие в отдельный метод для чистоты кода
+  void _sendWelcomeMessage() {
+    String welcome = '''Привет! 🥰 Я Ева — твой личный ИИ-нутрициолог и заботливая подруга.✨
 Ты можешь скидывать мне всё, что касается твоего здоровья. Например:
 📸 Фото твоей тарелки — я сама посчитаю калории и БЖУ.
 📑 Результаты анализов — я объясню их простым языком без паники.
 ❤️ Любой вопрос — я поддержу, когда тревожно или нужен совет.
 Хочешь, я расскажу подробнее, с чего начать? 😉''';
 
-        await DatabaseService().saveBotChatMessage(widget.botType, welcome, 'ai');
-      }
-    } catch (e) {
-      debugPrint("Ошибка инициализации контекста: $e");
-    }
+    // Отправляем в базу БЕЗ await! 
+    // Firestore мгновенно обновит локальный кэш, StreamBuilder это увидит и закроет крутилку.
+    DatabaseService().saveBotChatMessage(widget.botType, welcome, 'ai').catchError((_) {});
   }
 
   Future<void> _pickImages() async {
@@ -251,8 +266,13 @@ class _AIChatScreenState extends State<AIChatScreen> {
       final String aiResponse = result.data['text'] as String;
       await DatabaseService().saveBotChatMessage(widget.botType, aiResponse, 'ai');
     } catch (e) {
-      if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text("Ошибка ИИ: $e", style: const TextStyle(color: Colors.white)), backgroundColor: Colors.redAccent));
+      // === ЖЕСТКОЕ ЛОГИРОВАНИЕ КРИТИЧЕСКОЙ ОШИБКИ ИИ ===
+      debugPrint('CRITICAL CHAT ERROR: $e');
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text("Ошибка ИИ: $e", style: const TextStyle(color: Colors.white)), backgroundColor: Colors.redAccent));
+      }
     } finally {
+      // Гарантированно снимаем лоадер, что бы ни случилось
       if (mounted) setState(() => _isTyping = false);
     }
   }
@@ -385,7 +405,15 @@ class _AIChatScreenState extends State<AIChatScreen> {
             child: StreamBuilder<QuerySnapshot>(
               stream: DatabaseService().getBotChatMessages(widget.botType),
               builder: (context, snapshot) {
-                if (snapshot.connectionState == ConnectionState.waiting) return const Center(child: CircularProgressIndicator(color: _themeColor));
+                // === ЖЕСТКИЙ ОТЛОВ ОШИБОК STREAM ===
+                if (snapshot.hasError) {
+                  debugPrint('CRITICAL CHAT STREAM ERROR: ${snapshot.error}');
+                  return Center(child: Text('Ошибка загрузки чата: ${snapshot.error}', style: const TextStyle(color: Colors.redAccent)));
+                }
+                if (snapshot.connectionState == ConnectionState.waiting && !snapshot.hasData) {
+                  return const Center(child: CircularProgressIndicator(color: _themeColor));
+                }
+                
                 final docs = snapshot.data?.docs ?? [];
                 
                 return ListView.builder(
@@ -397,7 +425,13 @@ class _AIChatScreenState extends State<AIChatScreen> {
                     final doc = docs[index];
                     final data = doc.data() as Map<String, dynamic>;
                     final isUser = data['role'] == 'user';
-                    final rawText = data['text'] ?? '';
+                    String rawText = data['text'] ?? '';
+                    
+                    // === АНТИ-КРАШ: Игнорируем застрявшие Base64 картинки в тексте ===
+                    if (rawText.length > 50000) {
+                      rawText = "[Медиафайл скрыт для ускорения загрузки]";
+                    }
+                    
                     final bool isActionCompleted = data['isActionCompleted'] == true;
 
                     String cleanRawText = rawText.replaceAll(RegExp(r'<thinking>[\s\S]*?<\/thinking>'), '').trim();

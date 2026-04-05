@@ -113,7 +113,48 @@ class NutritionSummaryCard extends StatelessWidget {
                               textBaseline: TextBaseline.alphabetic,
                               children: [
                                 Text('$curC', style: TextStyle(color: isExceeded ? const Color(0xFFB6A6CA) : textColor, fontSize: 30, fontWeight: FontWeight.w900, letterSpacing: -1.0)),
-                                Text(' / $targetCals ккал', style: TextStyle(color: subTextColor, fontSize: 16, fontWeight: FontWeight.w600)),
+                                // === РЕДАКТИРОВАНИЕ НОРМЫ КАЛОРИЙ ===
+                                GestureDetector(
+                                  onTap: () {
+                                    final TextEditingController ctrl = TextEditingController(text: targetCals.toString());
+                                    showDialog(
+                                      context: context,
+                                      builder: (ctx) => AlertDialog(
+                                        backgroundColor: Colors.white,
+                                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+                                        title: const Text('Изменить норму', style: TextStyle(color: Color(0xFF2D2D2D), fontWeight: FontWeight.w900)),
+                                        content: TextField(
+                                          controller: ctrl,
+                                          keyboardType: TextInputType.number,
+                                          style: const TextStyle(fontSize: 24, fontWeight: FontWeight.bold),
+                                          decoration: const InputDecoration(suffixText: 'ккал', focusedBorder: UnderlineInputBorder(borderSide: BorderSide(color: Color(0xFFB76E79), width: 2))),
+                                          cursorColor: const Color(0xFFB76E79),
+                                        ),
+                                        actions: [
+                                          TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Отмена', style: TextStyle(color: Color(0xFF8E8E93), fontWeight: FontWeight.bold))),
+                                          ElevatedButton(
+                                            style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFFB76E79), shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12))),
+                                            onPressed: () async {
+                                              final val = int.tryParse(ctrl.text.trim());
+                                              if (val != null && val > 0) {
+                                                await DatabaseService().saveNutritionGoal({'calories': val});
+                                                if (ctx.mounted) Navigator.pop(ctx);
+                                              }
+                                            },
+                                            child: const Text('Сохранить', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
+                                          )
+                                        ],
+                                      ),
+                                    );
+                                  },
+                                  child: Row(
+                                    children: [
+                                      Text(' / $targetCals ккал', style: TextStyle(color: subTextColor, fontSize: 16, fontWeight: FontWeight.w600)),
+                                      const SizedBox(width: 4),
+                                      Icon(Icons.edit_rounded, color: subTextColor, size: 16),
+                                    ],
+                                  ),
+                                ),
                               ],
                             ),
                             const SizedBox(height: 4),

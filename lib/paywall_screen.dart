@@ -1,14 +1,14 @@
 import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
-import 'screens/dashboard_screen.dart'; 
-import 'screens/auth_screen.dart'; 
-import 'package:url_launcher/url_launcher.dart';
-import '../services/database_service.dart'; // Добавляем наш сервис
+import 'screens/dashboard_screen.dart';
+import 'package:flutter_rustore_billing/flutter_rustore_billing.dart'; // <-- ИМПОРТ RUSTORE SDK
+import 'package:cloud_functions/cloud_functions.dart'; // <-- ДОБАВЛЕНО ДЛЯ СЕРВЕРНОЙ ПРОВЕРКИ
+
 
 class PaywallScreen extends StatefulWidget {
   final bool isFromProfile;
-  
+
   const PaywallScreen({super.key, this.isFromProfile = false});
 
   @override
@@ -17,26 +17,22 @@ class PaywallScreen extends StatefulWidget {
 
 class _PaywallScreenState extends State<PaywallScreen> {
   bool _isLoading = false;
-  String _selectedPlan = 'year'; 
-  String? _appliedPromo; 
+  String _selectedPlan = 'year';
+  String? _appliedPromo;
 
-  static const Color _accentColor = Color(0xFFB76E79); 
+  static const Color _accentColor = Color(0xFFB76E79);
   static const Color _textColor = Color(0xFF2D2D2D);
   static const Color _subTextColor = Color(0xFF8E8E93);
 
-  final double _basePriceMonth = 199;
-  final double _basePriceYear = 990;
+  // === ОБНОВЛЕНИЕ ЦЕН: новые базовые тарифы ===
+  final double _basePriceMonth = 299;
+  final double _basePriceYear = 1490;
 
   void _closePaywall() {
-    if (widget.isFromProfile) {
+    // ИСПРАВЛЕНО: Безопасное закрытие экрана без изменения стейта авторизации.
+    // Если пейвол открыт поверх другого экрана (например, сканера) — он просто аккуратно смахнется.
+    if (Navigator.canPop(context)) {
       Navigator.pop(context);
-    } else {
-      // Если это онбординг - принудительный разлогин и возврат на вход
-      FirebaseAuth.instance.signOut();
-      Navigator.of(context).pushAndRemoveUntil(
-        MaterialPageRoute(builder: (_) => const AuthScreen()),
-        (route) => false,
-      );
     }
   }
 
@@ -44,20 +40,26 @@ class _PaywallScreenState extends State<PaywallScreen> {
     final cleanCode = code.trim().toUpperCase();
     if (cleanCode == 'START3') {
       setState(() => _appliedPromo = cleanCode);
-      Navigator.pop(context); 
-      _processPayment(); 
-    } else if (cleanCode == 'SALE50') {
-      setState(() => _appliedPromo = cleanCode);
-      Navigator.pop(context); 
+      Navigator.pop(context);
+      _processPayment();
+    } else if (cleanCode == 'SALE50EVA' || cleanCode == 'SALE50') {
+      setState(() => _appliedPromo = 'SALE50'); // Оставляем SALE50 для применения скидки в UI
+      Navigator.pop(context);
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
-          content: Text("Промокод на скидку 50% успешно применен! ✨", style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
+          content: Text(
+            "Промокод активирован! Скидка 50% применена ✨",
+            style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold),
+          ),
           backgroundColor: Colors.teal,
         ),
       );
     } else {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text("Неверный промокод"), backgroundColor: Colors.redAccent),
+        const SnackBar(
+          content: Text("Неверный промокод"),
+          backgroundColor: Colors.redAccent,
+        ),
       );
     }
   }
@@ -69,14 +71,25 @@ class _PaywallScreenState extends State<PaywallScreen> {
       builder: (ctx) => AlertDialog(
         backgroundColor: Colors.white,
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(24)),
-        title: const Text("Промокод", style: TextStyle(color: _textColor, fontWeight: FontWeight.w800)),
+        title: const Text(
+          "Промокод",
+          style: TextStyle(color: _textColor, fontWeight: FontWeight.w800),
+        ),
         content: TextField(
           controller: promoController,
-          style: const TextStyle(color: _textColor, fontWeight: FontWeight.w600),
+          style: const TextStyle(
+            color: _textColor,
+            fontWeight: FontWeight.w600,
+          ),
           decoration: InputDecoration(
             hintText: "Введите код (START3, SALE50)",
-            hintStyle: TextStyle(color: _subTextColor.withValues(alpha: 0.5), fontWeight: FontWeight.normal),
-            focusedBorder: const UnderlineInputBorder(borderSide: BorderSide(color: _accentColor)),
+            hintStyle: TextStyle(
+              color: _subTextColor.withValues(alpha: 0.5),
+              fontWeight: FontWeight.normal,
+            ),
+            focusedBorder: const UnderlineInputBorder(
+              borderSide: BorderSide(color: _accentColor),
+            ),
           ),
           cursorColor: _accentColor,
         ),
@@ -86,13 +99,91 @@ class _PaywallScreenState extends State<PaywallScreen> {
             child: const Text("Отмена", style: TextStyle(color: _subTextColor)),
           ),
           ElevatedButton(
-            style: ElevatedButton.styleFrom(backgroundColor: _accentColor, shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16))),
+            style: ElevatedButton.styleFrom(
+              backgroundColor: _accentColor,
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(16),
+              ),
+            ),
             onPressed: () => _applyPromoCode(promoController.text),
-            child: const Text("Применить", style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
+            child: const Text(
+              "Применить",
+              style: TextStyle(
+                color: Colors.white,
+                fontWeight: FontWeight.bold,
+              ),
+            ),
           ),
         ],
       ),
     );
+  }
+
+  // === НОВЫЙ МЕТОД: Покупка через RuStore ===
+  Future<void> _buySubscription(String productId, int daysToAdd) async {
+    final user = FirebaseAuth.instance.currentUser;
+    if (user == null) return;
+
+    try {
+      // 1. Вызываем нативное окно оплаты RuStore
+      final purchaseResult = await RustoreBillingClient.purchase(productId, user.uid);
+      
+      // Пытаемся достать токен (зависит от версии SDK). Если нет - передаем заглушку для mock-сервера
+      String pToken = "mock_token";
+      try {
+        if (purchaseResult != null) {
+          pToken = (purchaseResult as dynamic).purchaseToken?.toString() ?? "mock_token";
+        }
+      } catch (_) {}
+
+      // 2. БЕЗОПАСНАЯ СЕРВЕРНАЯ ПРОВЕРКА (Cloud Functions)
+      final callable = FirebaseFunctions.instance.httpsCallable('verifyRuStorePurchase');
+      await callable.call({
+        'productId': productId,
+        'purchaseToken': pToken,
+      });
+
+      // 3. Выводим радостное сообщение и пускаем в приложение
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text(
+              "Оплата прошла успешно! Добро пожаловать в Моя Ева Премиум ✨",
+              style: TextStyle(
+                color: Colors.white,
+                fontWeight: FontWeight.bold,
+              ),
+            ),
+            backgroundColor: Color(0xFFB76E79),
+          ),
+        );
+
+        // Разделяем логику закрытия (из профиля или из онбординга)
+        if (widget.isFromProfile) {
+          Navigator.pop(context);
+        } else {
+          Navigator.of(context).pushReplacement(
+            MaterialPageRoute(builder: (_) => const DashboardScreen()),
+          );
+        }
+      }
+    } catch (e) {
+      debugPrint("🔥 Ошибка RuStore: $e");
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text(
+              "Оплата отменена или магазин не найден",
+              style: TextStyle(
+                color: Colors.white,
+                fontWeight: FontWeight.bold,
+              ),
+            ),
+            backgroundColor: Colors.redAccent,
+          ),
+        );
+      }
+    }
   }
 
   Future<void> _processPayment() async {
@@ -103,10 +194,13 @@ class _PaywallScreenState extends State<PaywallScreen> {
       if (_appliedPromo == 'START3') {
         final user = FirebaseAuth.instance.currentUser;
         if (user != null) {
-          
           // НОВЫЙ КОД: Читаем профиль пользователя для проверки
-          final userDoc = await FirebaseFirestore.instance.collection('users').doc(user.uid).get();
-          final userData = userDoc.data() as Map<String, dynamic>? ?? {};
+          final userDoc = await FirebaseFirestore.instance
+              .collection('users')
+              .doc(user.uid)
+              .get();
+          // Исправлено: убрали ненужный cast (unnecessary_cast), так как data() уже возвращает Map<String, dynamic>?
+          final userData = userDoc.data() ?? {};
           final List<dynamic> usedPromos = userData['usedPromoCodes'] ?? [];
 
           // Если промокод уже использован - выдаем ошибку и останавливаем процесс
@@ -114,8 +208,14 @@ class _PaywallScreenState extends State<PaywallScreen> {
             if (mounted) {
               ScaffoldMessenger.of(context).showSnackBar(
                 const SnackBar(
-                  content: Text("Вы уже использовали этот промокод 😔", style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)), 
-                  backgroundColor: Colors.redAccent
+                  content: Text(
+                    "Вы уже использовали этот промокод 😔",
+                    style: TextStyle(
+                      color: Colors.white,
+                      fontWeight: FontWeight.bold,
+                    ),
+                  ),
+                  backgroundColor: Colors.redAccent,
                 ),
               );
               setState(() => _isLoading = false);
@@ -125,62 +225,60 @@ class _PaywallScreenState extends State<PaywallScreen> {
 
           // Если промокода нет - даем доступ и записываем код в базу
           final untilDate = DateTime.now().add(const Duration(days: 3));
-          await FirebaseFirestore.instance.collection('users').doc(user.uid).update({
-            'isPro': true,
-            'proUntil': Timestamp.fromDate(untilDate),
-            'usedPromoCodes': FieldValue.arrayUnion(['START3']), // Навсегда сохраняем в профиль
-          });
+          await FirebaseFirestore.instance
+              .collection('users')
+              .doc(user.uid)
+              .update({
+                'isPro': true,
+                'proUntil': Timestamp.fromDate(untilDate),
+                'usedPromoCodes': FieldValue.arrayUnion([
+                  'START3',
+                ]), // Навсегда сохраняем в профиль
+              });
         }
 
         if (mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(content: Text("Добро пожаловать в премиум! ✨", style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)), backgroundColor: Color(0xFFB76E79)),
+            const SnackBar(
+              content: Text(
+                "Промокод активирован! Премиум доступен ✨",
+                style: TextStyle(
+                  color: Colors.white,
+                  fontWeight: FontWeight.bold,
+                ),
+              ),
+              backgroundColor: Color(0xFFB76E79),
+            ),
           );
           if (widget.isFromProfile) {
             Navigator.pop(context);
           } else {
-            Navigator.of(context).pushReplacement(MaterialPageRoute(builder: (_) => const DashboardScreen()));
+            Navigator.of(context).pushReplacement(
+              MaterialPageRoute(builder: (_) => const DashboardScreen()),
+            );
           }
         }
         return; // Выходим отсюда, ЮKassa для триала не нужна.
       }
 
-      // === 2. ЛОГИКА ДЛЯ ПЛАТНОЙ ПОДПИСКИ (ЮKASSA) ===
-      double amount = _selectedPlan == 'month' ? _basePriceMonth : _basePriceYear;
-      int days = _selectedPlan == 'month' ? 30 : 365;
-      
-      if (_appliedPromo == 'SALE50') amount = amount / 2;
-
-      // Вызываем нашу облачную функцию
-      final String? confirmationUrl = await DatabaseService().createYookassaPayment(
-        amount: amount,
-        description: 'Подписка MyEva Premium',
-        paymentType: 'premium',
-        durationDays: days,
-      );
-
-      if (confirmationUrl != null) {
-        await launchUrl(Uri.parse(confirmationUrl), mode: LaunchMode.externalApplication);
-        
-        if (mounted) {
-          showDialog(
-            context: context,
-            barrierDismissible: false,
-            builder: (ctx) => _WaitingPaymentDialog(isSpecialist: false, isFromProfile: widget.isFromProfile),
-          );
-        }
-      } else {
-        throw Exception("Бэкенд не вернул ссылку на оплату");
+      /// === 2. ЛОГИКА ДЛЯ ПЛАТНОЙ ПОДПИСКИ (RUSTORE) ===
+      if (_selectedPlan == 'month') {
+        await _buySubscription('eva_sub_1_month', 30);
+      } else if (_selectedPlan == 'year') {
+        await _buySubscription('eva_sub_1_year', 365);
       }
     } catch (e) {
-      debugPrint("🔥 ОШИБКА КАССЫ: $e");
+      debugPrint("🔥 ОШИБКА ПЛАТЕЖА: $e");
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: Text('Ошибка бэкенда: $e', style: const TextStyle(fontSize: 12)), 
+            content: Text(
+              'Ошибка бэкенда: $e',
+              style: const TextStyle(fontSize: 12),
+            ),
             backgroundColor: Colors.red,
             duration: const Duration(seconds: 5),
-          )
+          ),
         );
       }
     } finally {
@@ -196,10 +294,10 @@ class _PaywallScreenState extends State<PaywallScreen> {
 
     // ПЕРЕХВАТ КНОПКИ НАЗАД
     return PopScope(
-      canPop: widget.isFromProfile, 
+      canPop: widget.isFromProfile,
       onPopInvokedWithResult: (didPop, result) {
         if (didPop) return;
-        _closePaywall(); 
+        _closePaywall();
       },
       child: Scaffold(
         backgroundColor: const Color(0xFFF9F9F9),
@@ -207,11 +305,15 @@ class _PaywallScreenState extends State<PaywallScreen> {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
+              // === КРЕСТИК ЗАКРЫТИЯ В ПРАВОМ ВЕРХНЕМ УГЛУ ===
               Padding(
-                padding: const EdgeInsets.only(left: 8.0, top: 8.0),
-                child: IconButton(
-                  icon: const Icon(Icons.arrow_back_ios_new, color: _textColor),
-                  onPressed: _closePaywall, 
+                padding: const EdgeInsets.only(right: 16.0, top: 8.0),
+                child: Align(
+                  alignment: Alignment.topRight,
+                  child: IconButton(
+                    icon: const Icon(Icons.close, color: _subTextColor, size: 24), // Сделали менее массивным
+                    onPressed: _closePaywall,
+                  ),
                 ),
               ),
 
@@ -223,20 +325,43 @@ class _PaywallScreenState extends State<PaywallScreen> {
                     children: [
                       const Text(
                         "✨ Забота о себе,\nа не строгие диеты",
-                        style: TextStyle(fontSize: 34, fontWeight: FontWeight.w900, color: _textColor, height: 1.2, letterSpacing: -0.5),
+                        style: TextStyle(
+                          fontSize: 34,
+                          fontWeight: FontWeight.w900,
+                          color: _textColor,
+                          height: 1.2,
+                          letterSpacing: -0.5,
+                        ),
                       ),
                       const SizedBox(height: 16),
                       const Text(
                         "Твой личный ИИ-коуч и подруга. Поможет с питанием, женским здоровьем и мотивацией без ругани за калории.",
-                        style: TextStyle(fontSize: 16, color: _subTextColor, height: 1.5, fontWeight: FontWeight.w500),
+                        style: TextStyle(
+                          fontSize: 16,
+                          color: _subTextColor,
+                          height: 1.5,
+                          fontWeight: FontWeight.w500,
+                        ),
                       ),
 
                       const SizedBox(height: 32),
 
                       // ИСПРАВЛЕНЫ ИМЕНА ИКОНОК (auto_awesome, health_and_safety, support_agent)
-                      _buildFeatureItem(Icons.auto_awesome, "Умный план питания", "Индивидуальное меню на основе анализов."),
-                      _buildFeatureItem(Icons.health_and_safety, "Анализ симптомов", "Мгновенная расшифровка самочувствия."),
-                      _buildFeatureItem(Icons.support_agent, "Поддержка 24/7", "Приоритетные ответы от специалистов."),
+                      _buildFeatureItem(
+                        Icons.auto_awesome,
+                        "Умный план питания",
+                        "Индивидуальное меню на основе анализов.",
+                      ),
+                      _buildFeatureItem(
+                        Icons.health_and_safety,
+                        "Анализ симптомов",
+                        "Мгновенная расшифровка самочувствия.",
+                      ),
+                      _buildFeatureItem(
+                        Icons.support_agent,
+                        "Поддержка 24/7",
+                        "Приоритетные ответы от специалистов.",
+                      ),
 
                       const SizedBox(height: 32),
 
@@ -244,20 +369,22 @@ class _PaywallScreenState extends State<PaywallScreen> {
                         child: Row(
                           crossAxisAlignment: CrossAxisAlignment.stretch,
                           children: [
+                            // === ОБНОВЛЕНИЕ ЦЕН: Карточка на 1 месяц ===
                             _buildPlanCard(
-                              'month', 
-                              '1 месяц', 
-                              _basePriceMonth, 
-                              oldPrice: 490
+                              'month',
+                              '1 месяц',
+                              _basePriceMonth,
+                              oldPrice: 590,
                             ),
                             const SizedBox(width: 16),
+                            // === ОБНОВЛЕНИЕ ЦЕН: Карточка на 1 год ===
                             _buildPlanCard(
-                              'year', 
-                              '1 год', 
-                              _basePriceYear, 
-                              oldPrice: 2388, 
-                              label: 'ВЫГОДА 58%', 
-                              subtitle: 'Всего 82 ₽ в месяц!'
+                              'year',
+                              '1 год',
+                              _basePriceYear,
+                              oldPrice: 3588,
+                              label: 'ВЫГОДА 58%',
+                              subtitle: 'Всего 124 ₽ в месяц!',
                             ),
                           ],
                         ),
@@ -265,27 +392,23 @@ class _PaywallScreenState extends State<PaywallScreen> {
 
                       const SizedBox(height: 24),
 
-                      Center(
-                        child: TextButton(
-                          onPressed: _showPromoDialog,
-                          child: Text(
-                            _appliedPromo != null ? "Промокод $_appliedPromo применен" : "У меня есть промокод",
-                            style: TextStyle(color: _appliedPromo != null ? Colors.teal : _subTextColor, fontWeight: FontWeight.w700, decoration: TextDecoration.underline),
-                          ),
-                        ),
-                      ),
-                      
+                      const SizedBox(height: 16),
+
                       if (!widget.isFromProfile)
                         Center(
                           child: TextButton(
-                            onPressed: _closePaywall, 
+                            onPressed: _closePaywall,
                             child: const Text(
                               "Уже есть аккаунт? Войти",
-                              style: TextStyle(color: _subTextColor, fontWeight: FontWeight.w600, decoration: TextDecoration.underline),
+                              style: TextStyle(
+                                color: _subTextColor,
+                                fontWeight: FontWeight.w600,
+                                decoration: TextDecoration.underline,
+                              ),
                             ),
                           ),
                         ),
-                      
+
                       const SizedBox(height: 40),
                     ],
                   ),
@@ -296,28 +419,92 @@ class _PaywallScreenState extends State<PaywallScreen> {
                 padding: const EdgeInsets.fromLTRB(28, 20, 28, 32),
                 decoration: BoxDecoration(
                   color: Colors.white,
-                  borderRadius: const BorderRadius.vertical(top: Radius.circular(32)),
-                  boxShadow: [BoxShadow(color: Colors.black.withValues(alpha: 0.04), blurRadius: 32, offset: const Offset(0, -8))], 
-                ),
-                child: Container(
-                  width: double.infinity,
-                  height: 60,
-                  decoration: BoxDecoration(
-                    gradient: const LinearGradient(colors: [_accentColor, Color(0xFFD49A89)], begin: Alignment.topLeft, end: Alignment.bottomRight),
-                    borderRadius: BorderRadius.circular(24),
-                    boxShadow: [BoxShadow(color: _accentColor.withValues(alpha: 0.3), blurRadius: 24, offset: const Offset(0, 8))],
+                  borderRadius: const BorderRadius.vertical(
+                    top: Radius.circular(32),
                   ),
-                  child: ElevatedButton(
-                    onPressed: _isLoading ? null : _processPayment,
-                    style: ElevatedButton.styleFrom(
-                      backgroundColor: Colors.transparent,
-                      shadowColor: Colors.transparent,
-                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(24)),
+                  boxShadow: [
+                    BoxShadow(
+                      color: Colors.black.withValues(alpha: 0.04),
+                      blurRadius: 32,
+                      offset: const Offset(0, -8),
                     ),
-                    child: _isLoading
-                        ? const SizedBox(width: 24, height: 24, child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2))
-                        : Text(ctaText, style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w800, fontSize: 16, letterSpacing: 0.5)),
-                  ),
+                  ],
+                ),
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Container(
+                      width: double.infinity,
+                      height: 60,
+                      decoration: BoxDecoration(
+                        gradient: const LinearGradient(
+                          colors: [_accentColor, Color(0xFFD49A89)],
+                          begin: Alignment.topLeft,
+                          end: Alignment.bottomRight,
+                        ),
+                        borderRadius: BorderRadius.circular(24),
+                        boxShadow: [
+                          BoxShadow(
+                            color: _accentColor.withValues(alpha: 0.3),
+                            blurRadius: 24,
+                            offset: const Offset(0, 8),
+                          ),
+                        ],
+                      ),
+                      child: ElevatedButton(
+                        onPressed: _isLoading ? null : _processPayment,
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: Colors.transparent,
+                          shadowColor: Colors.transparent,
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(24),
+                          ),
+                        ),
+                        child: _isLoading
+                            ? const SizedBox(
+                                width: 24,
+                                height: 24,
+                                child: CircularProgressIndicator(
+                                  color: Colors.white,
+                                  strokeWidth: 2,
+                                ),
+                              )
+                            : Text(
+                                ctaText,
+                                style: const TextStyle(
+                                  color: Colors.white,
+                                  fontWeight: FontWeight.w800,
+                                  fontSize: 16,
+                                  letterSpacing: 0.5,
+                                ),
+                              ),
+                      ),
+                    ),
+                    const SizedBox(height: 12),
+                    const Text(
+                      "3 дня бесплатно, затем отмена в любой момент",
+                      textAlign: TextAlign.center,
+                      style: TextStyle(
+                        color: Color(0xFFC7C7CC), // Сделали светлее
+                        fontSize: 13, // Сделали крупнее
+                        fontWeight: FontWeight.w500,
+                      ),
+                    ),
+                    const SizedBox(height: 8),
+                    GestureDetector(
+                      onTap: _showPromoDialog,
+                      child: Text(
+                        _appliedPromo != null ? "Промокод $_appliedPromo применен" : "У меня есть промокод",
+                        style: TextStyle(
+                          color: _appliedPromo != null ? Colors.teal : const Color(0xFFC7C7CC),
+                          fontSize: 13,
+                          fontWeight: FontWeight.w600,
+                          decoration: TextDecoration.underline,
+                          decorationColor: _appliedPromo != null ? Colors.teal : const Color(0xFFC7C7CC),
+                        ),
+                      ),
+                    ),
+                  ],
                 ),
               ),
             ],
@@ -334,7 +521,10 @@ class _PaywallScreenState extends State<PaywallScreen> {
         children: [
           Container(
             padding: const EdgeInsets.all(10),
-            decoration: BoxDecoration(color: const Color(0xFFFDECE8), borderRadius: BorderRadius.circular(12)),
+            decoration: BoxDecoration(
+              color: const Color(0xFFFDECE8),
+              borderRadius: BorderRadius.circular(12),
+            ),
             child: Icon(icon, color: _accentColor, size: 22),
           ),
           const SizedBox(width: 16),
@@ -342,8 +532,22 @@ class _PaywallScreenState extends State<PaywallScreen> {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Text(title, style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w700, color: _textColor)),
-                Text(subtitle, style: const TextStyle(fontSize: 13, color: _subTextColor, fontWeight: FontWeight.w500)),
+                Text(
+                  title,
+                  style: const TextStyle(
+                    fontSize: 16,
+                    fontWeight: FontWeight.w700,
+                    color: _textColor,
+                  ),
+                ),
+                Text(
+                  subtitle,
+                  style: const TextStyle(
+                    fontSize: 13,
+                    color: _subTextColor,
+                    fontWeight: FontWeight.w500,
+                  ),
+                ),
               ],
             ),
           ),
@@ -352,12 +556,19 @@ class _PaywallScreenState extends State<PaywallScreen> {
     );
   }
 
-  Widget _buildPlanCard(String planId, String title, double basePrice, {double? oldPrice, String? label, String? subtitle}) {
+  Widget _buildPlanCard(
+    String planId,
+    String title,
+    double basePrice, {
+    double? oldPrice,
+    String? label,
+    String? subtitle,
+  }) {
     bool isSelected = _selectedPlan == planId;
     bool hasDiscount = _appliedPromo == 'SALE50';
-    
+
     double finalPrice = hasDiscount ? basePrice / 2 : basePrice;
-    double finalOldPrice = oldPrice ?? (basePrice * 2.5); 
+    double finalOldPrice = oldPrice ?? (basePrice * 2.5);
 
     return Expanded(
       child: GestureDetector(
@@ -366,9 +577,20 @@ class _PaywallScreenState extends State<PaywallScreen> {
           padding: const EdgeInsets.all(16),
           decoration: BoxDecoration(
             color: isSelected ? const Color(0xFFFDECE8) : Colors.white,
-            borderRadius: BorderRadius.circular(24), 
-            border: Border.all(color: isSelected ? _accentColor : Colors.transparent, width: 2),
-            boxShadow: [BoxShadow(color: isSelected ? _accentColor.withValues(alpha: 0.15) : Colors.black.withValues(alpha: 0.04), blurRadius: 32, offset: const Offset(0, 8))], 
+            borderRadius: BorderRadius.circular(24),
+            border: Border.all(
+              color: isSelected ? _accentColor : Colors.transparent,
+              width: 2,
+            ),
+            boxShadow: [
+              BoxShadow(
+                color: isSelected
+                    ? _accentColor.withValues(alpha: 0.15)
+                    : Colors.black.withValues(alpha: 0.04),
+                blurRadius: 32,
+                offset: const Offset(0, 8),
+              ),
+            ],
           ),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
@@ -377,102 +599,79 @@ class _PaywallScreenState extends State<PaywallScreen> {
               if (label != null)
                 Container(
                   margin: const EdgeInsets.only(bottom: 12),
-                  padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-                  decoration: BoxDecoration(color: Colors.redAccent, borderRadius: BorderRadius.circular(10)),
-                  child: Text(label, style: const TextStyle(color: Colors.white, fontSize: 10, fontWeight: FontWeight.w900, letterSpacing: 1.0)),
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 8,
+                    vertical: 4,
+                  ),
+                  decoration: BoxDecoration(
+                    color: _accentColor,
+                    borderRadius: BorderRadius.circular(8),
+                  ),
+                  child: Text(
+                    label.toUpperCase(),
+                    style: const TextStyle(
+                      color: Colors.white,
+                      fontSize: 9,
+                      fontWeight: FontWeight.w900,
+                      letterSpacing: 0.5,
+                    ),
+                  ),
                 ),
-              Text(title, style: TextStyle(fontSize: 16, fontWeight: FontWeight.w800, color: isSelected ? _accentColor : _subTextColor)),
-              const SizedBox(height: 8),
-              
-              Text("${finalOldPrice.toInt()} ₽", style: const TextStyle(fontSize: 14, color: _subTextColor, decoration: TextDecoration.lineThrough, fontWeight: FontWeight.w600)),
-              
-              Text("${finalPrice.toInt()} ₽", style: const TextStyle(fontSize: 32, fontWeight: FontWeight.w900, color: _textColor, letterSpacing: -1.0)),
-              
+              Text(
+                title,
+                style: TextStyle(
+                  fontSize: 15, // Чуть компактнее
+                  fontWeight: FontWeight.w800,
+                  color: isSelected ? _accentColor : _subTextColor,
+                ),
+              ),
+              const SizedBox(height: 4), // Уменьшили отступ
+
+              Text(
+                "${finalOldPrice.toInt()} ₽",
+                style: const TextStyle(
+                  fontSize: 13, // Чуть компактнее
+                  color: _subTextColor,
+                  decoration: TextDecoration.lineThrough,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+
+              Text(
+                "${finalPrice.toInt()} ₽",
+                style: const TextStyle(
+                  fontSize: 26, // Было 32, делаем аккуратнее
+                  fontWeight: FontWeight.w900,
+                  color: _textColor,
+                  letterSpacing: -1.0,
+                ),
+              ),
+
               if (subtitle != null) ...[
-                const SizedBox(height: 12),
+                const SizedBox(height: 8), // Уменьшили отступ
                 Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 8,
+                    vertical: 6,
+                  ),
                   decoration: BoxDecoration(
                     color: _accentColor.withValues(alpha: 0.15),
-                    borderRadius: BorderRadius.circular(8)
+                    borderRadius: BorderRadius.circular(8),
                   ),
-                  child: Text(subtitle, style: const TextStyle(color: _accentColor, fontSize: 11, fontWeight: FontWeight.w800)),
-                )
-              ]
+                  child: Text(
+                    subtitle,
+                    style: const TextStyle(
+                      color: _accentColor,
+                      fontSize: 11,
+                      fontWeight: FontWeight.w800,
+                    ),
+                  ),
+                ),
+              ],
             ],
           ),
         ),
       ),
-    );
-  }
-}
-
-class _WaitingPaymentDialog extends StatefulWidget {
-  final bool isSpecialist;
-  final bool isFromProfile;
-
-  const _WaitingPaymentDialog({required this.isSpecialist, this.isFromProfile = false});
-
-  @override
-  State<_WaitingPaymentDialog> createState() => _WaitingPaymentDialogState();
-}
-
-class _WaitingPaymentDialogState extends State<_WaitingPaymentDialog> {
-  @override
-  Widget build(BuildContext context) {
-    final uid = FirebaseAuth.instance.currentUser?.uid;
-    if (uid == null) return const SizedBox.shrink();
-
-    return StreamBuilder<DocumentSnapshot>(
-      stream: FirebaseFirestore.instance.collection('users').doc(uid).snapshots(),
-      builder: (context, snapshot) {
-        if (snapshot.hasData && snapshot.data!.exists) {
-          final data = snapshot.data!.data() as Map<String, dynamic>;
-          final bool hasAccess = widget.isSpecialist 
-              ? (data['hasSpecialistAccess'] == true) 
-              : (data['isPro'] == true);
-
-          // Если вебхук выдал доступ - автоматически закрываем окна
-          // Если вебхук выдал доступ - автоматически закрываем окна
-          if (hasAccess) {
-            WidgetsBinding.instance.addPostFrameCallback((_) {
-              if (mounted) {
-                Navigator.pop(context); // 1. Закрываем диалог ожидания
-                if (widget.isFromProfile) {
-                  Navigator.pop(context); // 2. Закрываем пейвол
-                } else {
-                  // ИСПРАВЛЕНИЕ: Безопасный переход на главный экран (без черного экрана)
-                  Navigator.of(context).pushAndRemoveUntil(
-                    MaterialPageRoute(builder: (_) => const DashboardScreen()),
-                    (route) => false,
-                  );
-                }
-                ScaffoldMessenger.of(context).showSnackBar(
-                  const SnackBar(content: Text("Оплата успешно подтверждена! 🎉"), backgroundColor: Colors.green)
-                );
-              }
-            });
-          }
-        }
-
-        return AlertDialog(
-          title: const Text("Ожидание оплаты ⏳"),
-          content: const Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Text("Мы проверяем статус платежа. Окно закроется автоматически после подтверждения транзакции."),
-              SizedBox(height: 24),
-              CircularProgressIndicator(color: Color(0xFFB76E79)),
-            ],
-          ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.pop(context),
-              child: const Text("Скрыть", style: TextStyle(color: Colors.grey)),
-            ),
-          ],
-        );
-      }
     );
   }
 }

@@ -3,49 +3,41 @@ import 'package:flutter/services.dart';
 import 'package:firebase_core/firebase_core.dart';
 import 'package:firebase_messaging/firebase_messaging.dart';
 import 'package:flutter/foundation.dart';
-import 'package:firebase_app_check/firebase_app_check.dart';
 import 'package:easy_localization/easy_localization.dart';
+import 'package:cloud_firestore/cloud_firestore.dart';
 
 import 'firebase_options.dart';
 import 'screens/home_wrapper.dart';
 import 'services/local_notification_service.dart';
+import 'package:flutter_rustore_billing/flutter_rustore_billing.dart';
 
 @pragma('vm:entry-point')
 Future<void> _firebaseMessagingBackgroundHandler(RemoteMessage message) async {
-  await Firebase.initializeApp(
-    options: DefaultFirebaseOptions.currentPlatform,
-  );
-  
+  await Firebase.initializeApp(options: DefaultFirebaseOptions.currentPlatform);
   debugPrint("Handling a background message: ${message.messageId}");
 }
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
-  
-  await Firebase.initializeApp(
-    options: DefaultFirebaseOptions.currentPlatform,
-  );
 
-  // === ВКЛЮЧАЕМ APP CHECK ДЛЯ ЭМУЛЯТОРА ===
   try {
-    await FirebaseAppCheck.instance.activate(
-      // kDebugMode заставит Flutter отправить тот самый токен, который ты вставил в консоль
-      androidProvider: kDebugMode ? AndroidProvider.debug : AndroidProvider.playIntegrity,
-      appleProvider: kDebugMode ? AppleProvider.debug : AppleProvider.deviceCheck,
-    );
-    debugPrint("✅ App Check успешно активирован");
+    RustoreBillingClient.initialize('2063702590', 'nutribalance', true);
+    debugPrint("✅ RuStore Billing успешно инициализирован");
   } catch (e) {
-    debugPrint("❌ Ошибка активации App Check: $e");
+    debugPrint("⚠️ RuStore Billing не доступен: $e");
   }
+
+  await Firebase.initializeApp(options: DefaultFirebaseOptions.currentPlatform);
 
   await LocalNotificationService().init();
   await EasyLocalization.ensureInitialized();
 
-  // Делаем статус-бар прозрачным с темными иконками для премиального вида
-  SystemChrome.setSystemUIOverlayStyle(const SystemUiOverlayStyle(
-    statusBarColor: Colors.transparent,
-    statusBarIconBrightness: Brightness.dark,
-  ));
+  SystemChrome.setSystemUIOverlayStyle(
+    const SystemUiOverlayStyle(
+      statusBarColor: Colors.transparent,
+      statusBarIconBrightness: Brightness.dark,
+    ),
+  );
 
   runApp(
     EasyLocalization(
@@ -65,38 +57,32 @@ class MyApp extends StatelessWidget {
     return MaterialApp(
       title: 'MyEva',
       debugShowCheckedModeBanner: false,
-      
       localizationsDelegates: context.localizationDelegates,
       supportedLocales: context.supportedLocales,
       locale: context.locale,
-
       theme: ThemeData.light().copyWith(
-        scaffoldBackgroundColor: const Color(0xFFF9F9F9), 
-        primaryColor: const Color(0xFFB76E79), 
+        scaffoldBackgroundColor: const Color(0xFFF9F9F9),
+        primaryColor: const Color(0xFFB76E79),
         colorScheme: const ColorScheme.light(
           primary: Color(0xFFB76E79),
-          secondary: Color(0xFFD49A89), 
-          surface: Colors.white, 
+          secondary: Color(0xFFD49A89),
+          surface: Colors.white,
         ),
-        
         textTheme: ThemeData.light().textTheme.apply(
           bodyColor: const Color(0xFF2D2D2D),
           displayColor: const Color(0xFF2D2D2D),
         ),
-        
         appBarTheme: const AppBarTheme(
           backgroundColor: Color(0xFFF9F9F9),
-          elevation: 0, 
-          iconTheme: IconThemeData(color: Color(0xFF2D2D2D)), 
+          elevation: 0,
+          iconTheme: IconThemeData(color: Color(0xFF2D2D2D)),
           titleTextStyle: TextStyle(
-            color: Color(0xFF2D2D2D), 
-            fontSize: 20, 
+            color: Color(0xFF2D2D2D),
+            fontSize: 20,
             fontWeight: FontWeight.w800,
             letterSpacing: -0.5,
           ),
         ),
-
-        // ПРЕМИАЛЬНЫЙ СТИЛЬ НИЖНЕЙ ПАНЕЛИ
         bottomNavigationBarTheme: const BottomNavigationBarThemeData(
           backgroundColor: Colors.white,
           elevation: 0,
@@ -107,7 +93,6 @@ class MyApp extends StatelessWidget {
           type: BottomNavigationBarType.fixed,
         ),
       ),
-      
       home: const HomeWrapper(),
     );
   }

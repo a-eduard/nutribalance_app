@@ -71,23 +71,38 @@ class _HarmonyScreenState extends State<HarmonyScreen> {
     if (uid == null) return;
 
     final String docId = "${date.year}-${date.month.toString().padLeft(2, '0')}-${date.day.toString().padLeft(2, '0')}";
-    final doc = await FirebaseFirestore.instance.collection('users').doc(uid).collection('cycle_logs').doc(docId).get();
     
-    if (doc.exists && mounted) {
-      final data = doc.data()!;
-      _cachedDays[dateKey] = data; 
-      setState(() { 
-        _currentDaySymptoms = List<String>.from(data['symptoms'] ?? []); 
-        _currentMood = data['mood'] ?? '';
-        _currentSleep = data['sleep'] ?? '';
-      });
-    } else if (mounted) {
-      _cachedDays[dateKey] = {}; 
-      setState(() { 
-        _currentDaySymptoms = []; 
-        _currentMood = '';
-        _currentSleep = '';
-      });
+    // ИСПРАВЛЕНО: Обернули сетевой запрос в try/catch, чтобы сбой доступа не вешал приложение
+    try {
+      final doc = await FirebaseFirestore.instance.collection('users').doc(uid).collection('cycle_logs').doc(docId).get();
+      
+      if (doc.exists && mounted) {
+        final data = doc.data()!;
+        _cachedDays[dateKey] = data; 
+        setState(() { 
+          _currentDaySymptoms = List<String>.from(data['symptoms'] ?? []); 
+          _currentMood = data['mood'] ?? '';
+          _currentSleep = data['sleep'] ?? '';
+        });
+      } else if (mounted) {
+        _cachedDays[dateKey] = {}; 
+        setState(() { 
+          _currentDaySymptoms = []; 
+          _currentMood = '';
+          _currentSleep = '';
+        });
+      }
+    } catch (e) {
+      debugPrint("🔥 Ошибка чтения cycle_logs (База заблокирована): $e");
+      // Если база откинула нас (permission-denied), просто показываем чистый день
+      if (mounted) {
+        _cachedDays[dateKey] = {}; 
+        setState(() { 
+          _currentDaySymptoms = []; 
+          _currentMood = '';
+          _currentSleep = '';
+        });
+      }
     }
   }
 
@@ -564,7 +579,71 @@ class _HarmonyScreenState extends State<HarmonyScreen> {
       context: context, initialDate: DateTime.now(), firstDate: DateTime.now().subtract(const Duration(days: 365)), lastDate: DateTime.now().add(const Duration(days: 30)),
       builder: (context, child) => Theme(data: Theme.of(context).copyWith(colorScheme: const ColorScheme.light(primary: _accentColor, onPrimary: Colors.white, onSurface: _textColor)), child: child!),
     );
-    if (picked != null) await DatabaseService().savePeriodData(start: picked, cycleLength: 28, periodDuration: 5);
+    if (picked != null) {
+      final uid = FirebaseAuth.instance.currentUser?.uid;
+      if (uid != null) {
+        // Записываем старт и ОБЯЗАТЕЛЬНО удаляем старый конец, чтобы цикл стал "активным"
+        await FirebaseFirestore.instance.collection('users').doc(uid).update({
+          'lastPeriodStartDate': Timestamp.fromDate(picked),
+          'lastPeriodEndDate': FieldValue.delete(),
+        });
+      }
+    }
+  }
+
+  // НОВЫЙ МЕТОД ДЛЯ ОКОНЧАНИЯ ЦИКЛА
+  Future<void> _selectEndDateAndSave(BuildContext context) async {
+    final DateTime? picked = await showDatePicker(
+      context: context, initialDate: DateTime.now(), firstDate: DateTime.now().subtract(const Duration(days: 30)), lastDate: DateTime.now().add(const Duration(days: 30)),
+      builder: (context, child) => Theme(data: Theme.of(context).copyWith(colorScheme: const ColorScheme.light(primary: _accentColor, onPrimary: Colors.white, onSurface: _textColor)), child: child!),
+    );
+    if (picked != null) {
+      final uid = FirebaseAuth.instance.currentUser?.uid;
+      if (uid != null) {
+        await FirebaseFirestore.instance.collection('users').doc(uid).update({
+          'lastPeriodEndDate': Timestamp.fromDate(picked),
+        });
+      }
+    }
+  }
+
+  // НОВЫЙ МЕТОД ДЛЯ НАСТРОЙКИ ДЛИНЫ МЕСЯЧНЫХ
+  void _showPeriodDurationDialog(int currentLen) {
+    final TextEditingController controller = TextEditingController(text: currentLen.toString());
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(24)),
+        backgroundColor: Colors.white,
+        title: const Text("Длина месячных", style: TextStyle(fontWeight: FontWeight.w900, fontSize: 20, color: _textColor)),
+        content: TextField(
+          controller: controller,
+          keyboardType: TextInputType.number,
+          style: const TextStyle(color: _textColor, fontWeight: FontWeight.bold),
+          decoration: const InputDecoration(
+            hintText: "Например: 5", 
+            hintStyle: TextStyle(color: Colors.grey),
+            focusedBorder: UnderlineInputBorder(borderSide: BorderSide(color: _accentColor)),
+          ),
+          cursorColor: _accentColor,
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx), child: const Text("Отмена", style: TextStyle(color: _subTextColor, fontWeight: FontWeight.w600))),
+          ElevatedButton(
+            style: ElevatedButton.styleFrom(backgroundColor: _accentColor, shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16))),
+            onPressed: () {
+              final int? newLen = int.tryParse(controller.text);
+              if (newLen != null && newLen > 1 && newLen < 15) {
+                final uid = FirebaseAuth.instance.currentUser?.uid;
+                if (uid != null) FirebaseFirestore.instance.collection('users').doc(uid).update({'periodDuration': newLen});
+              }
+              Navigator.pop(ctx);
+            },
+            child: const Text("Сохранить", style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
+          ),
+        ],
+      ),
+    );
   }
 
   Future<void> _endPeriod() async {
@@ -764,10 +843,15 @@ class _HarmonyScreenState extends State<HarmonyScreen> {
           final bool isPregnant = userData['isPregnant'] ?? false;
 
           DateTime? lastStart = lastStartTs?.toDate();
+          DateTime? lastEnd = lastPeriodEndTs?.toDate();
+
           String dayText = "Нет данных", phaseText = "Отметьте первый день цикла";
           int currentDayOfCycle = 0;
-          bool hasEnded = false;
           
+          // Флаги управления кнопками:
+          bool isPeriodActive = false; // Идут ли месячные прямо сейчас
+          bool hasEnded = false;       // Нажал ли юзер кнопку завершения
+
           if (isPregnant) {
             if (pregStartTs != null) {
               final int weeks = DateTime.now().difference(pregStartTs.toDate()).inDays ~/ 7;
@@ -784,48 +868,60 @@ class _HarmonyScreenState extends State<HarmonyScreen> {
             }
           } else if (lastStart != null) {
             final start = DateTime(lastStart.year, lastStart.month, lastStart.day);
-            final diff = DateTime(DateTime.now().year, DateTime.now().month, DateTime.now().day).difference(start).inDays;
-            if (lastPeriodEndTs != null && lastPeriodEndTs.toDate().isAfter(lastStart)) hasEnded = true;
+            final today = DateTime(DateTime.now().year, DateTime.now().month, DateTime.now().day);
+            final diff = today.difference(start).inDays;
+            
+            // Проверяем, нажал ли юзер кнопку окончания после начала
+            if (lastEnd != null && (lastEnd.isAfter(start) || lastEnd.isAtSameMomentAs(start))) {
+               hasEnded = true;
+            }
 
             if (diff >= 0) {
               currentDayOfCycle = (diff % cycleLength) + 1;
               dayText = "$currentDayOfCycle-й день";
+              
               if (currentDayOfCycle <= periodDuration && !hasEnded) phaseText = 'Менструация 🩸';
               else if (currentDayOfCycle <= cycleLength - 15) phaseText = 'Фолликулярная фаза 🌸';
               else if (currentDayOfCycle <= cycleLength - 12) phaseText = 'Окно фертильности ✨';
               else phaseText = 'Лютеиновая фаза 🌿';
+
+              // Умная кнопка: Если прошло меньше 12 дней и цикл не завершен вручную
+              if (diff <= 12 && !hasEnded) {
+                isPeriodActive = true;
+              }
             }
           }
-
-          bool showEndButton = currentDayOfCycle > 0 && currentDayOfCycle <= periodDuration && !hasEnded && !isPregnant;
 
           return SingleChildScrollView(
             child: Column(
               children: [
-                Container(
-                  margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-                  decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(20), boxShadow: [BoxShadow(color: Colors.black.withValues(alpha: 0.04), blurRadius: 20, offset: const Offset(0, 4))]),
-                  child: SwitchListTile(
-                    activeColor: _accentColor,
-                    contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 0),
-                    title: const Text("Я беременна 🤰", style: TextStyle(color: _textColor, fontSize: 15, fontWeight: FontWeight.w800)),
-                    value: isPregnant,
-                    onChanged: (val) async {
-                      if (val) {
-                        final picked = await showDatePicker(
-                          context: context, 
-                          initialDate: DateTime.now(), 
-                          firstDate: DateTime.now().subtract(const Duration(days: 300)), 
-                          lastDate: DateTime.now(),
-                          builder: (context, child) => Theme(data: Theme.of(context).copyWith(colorScheme: const ColorScheme.light(primary: _accentColor, onPrimary: Colors.white, onSurface: _textColor)), child: child!),
-                        );
-                        if (picked != null) {
-                          FirebaseFirestore.instance.collection('users').doc(uid).update({'isPregnant': true, 'pregnancyStartDate': Timestamp.fromDate(picked)});
+                Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 4),
+                  child: Row(
+                    mainAxisAlignment: MainAxisAlignment.end,
+                    children: [
+                      const Text("Я беременна 🤰", style: TextStyle(color: _subTextColor, fontSize: 14, fontWeight: FontWeight.w600)),
+                      Switch(
+                        activeColor: _accentColor,
+                        value: isPregnant,
+                        onChanged: (val) async {
+                          if (val) {
+                            final picked = await showDatePicker(
+                              context: context, 
+                              initialDate: DateTime.now(), 
+                              firstDate: DateTime.now().subtract(const Duration(days: 300)), 
+                              lastDate: DateTime.now(),
+                              builder: (context, child) => Theme(data: Theme.of(context).copyWith(colorScheme: const ColorScheme.light(primary: _accentColor, onPrimary: Colors.white, onSurface: _textColor)), child: child!),
+                            );
+                            if (picked != null) {
+                              FirebaseFirestore.instance.collection('users').doc(uid).update({'isPregnant': true, 'pregnancyStartDate': Timestamp.fromDate(picked)});
+                            }
+                          } else {
+                            FirebaseFirestore.instance.collection('users').doc(uid).update({'isPregnant': false});
+                          }
                         }
-                      } else {
-                        FirebaseFirestore.instance.collection('users').doc(uid).update({'isPregnant': false});
-                      }
-                    }
+                      ),
+                    ],
                   ),
                 ),
 
@@ -840,16 +936,31 @@ class _HarmonyScreenState extends State<HarmonyScreen> {
                       
                       if (!isPregnant) ...[
                         const SizedBox(height: 12),
-                        GestureDetector(
-                          onTap: () => _showCycleLengthDialog(cycleLength),
-                          child: Row(
-                            mainAxisAlignment: MainAxisAlignment.center,
-                            children: [
-                              const Icon(Icons.edit_calendar, color: _accentColor, size: 14),
-                              const SizedBox(width: 6),
-                              Text("Длина цикла: $cycleLength дн. ✎", style: const TextStyle(color: _accentColor, fontWeight: FontWeight.bold, fontSize: 13)),
-                            ],
-                          ),
+                        Row(
+                          mainAxisAlignment: MainAxisAlignment.center,
+                          children: [
+                            GestureDetector(
+                              onTap: () => _showCycleLengthDialog(cycleLength),
+                              child: Row(
+                                children: [
+                                  const Icon(Icons.refresh, color: _accentColor, size: 14),
+                                  const SizedBox(width: 4),
+                                  Text("Цикл: $cycleLength дн. ✎", style: const TextStyle(color: _accentColor, fontWeight: FontWeight.bold, fontSize: 12)),
+                                ],
+                              ),
+                            ),
+                            const SizedBox(width: 16),
+                            GestureDetector(
+                              onTap: () => _showPeriodDurationDialog(periodDuration),
+                              child: Row(
+                                children: [
+                                  const Icon(Icons.water_drop, color: _accentColor, size: 14),
+                                  const SizedBox(width: 4),
+                                  Text("Месячные: $periodDuration дн. ✎", style: const TextStyle(color: _accentColor, fontWeight: FontWeight.bold, fontSize: 12)),
+                                ],
+                              ),
+                            ),
+                          ],
                         ),
                       ],
                       
@@ -858,9 +969,19 @@ class _HarmonyScreenState extends State<HarmonyScreen> {
                         SizedBox(
                           width: double.infinity, height: 48,
                           child: ElevatedButton(
-                            style: ElevatedButton.styleFrom(backgroundColor: showEndButton ? const Color(0xFF2D2D2D) : _accentColor, shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(100)), elevation: 0),
-                            onPressed: () { if (showEndButton) _endPeriod(); else _selectDateAndSave(context, true); },
-                            child: Text(showEndButton ? "ОТМЕТИТЬ ОКОНЧАНИЕ" : "ОТМЕТИТЬ НАЧАЛО", textAlign: TextAlign.center, style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w800, fontSize: 13, letterSpacing: 1.0)),
+                            style: ElevatedButton.styleFrom(
+                              backgroundColor: isPeriodActive ? const Color(0xFF2D2D2D) : _accentColor, 
+                              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(100)), 
+                              elevation: 0
+                            ),
+                            onPressed: () { 
+                              if (isPeriodActive) {
+                                _selectEndDateAndSave(context); 
+                              } else {
+                                _selectDateAndSave(context, true); 
+                              }
+                            },
+                            child: Text(isPeriodActive ? "ОТМЕТИТЬ ОКОНЧАНИЕ" : "ОТМЕТИТЬ НАЧАЛО НОВОГО ЦИКЛА", textAlign: TextAlign.center, style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w800, fontSize: 13, letterSpacing: 1.0)),
                           ),
                         )
                     ],
@@ -875,7 +996,6 @@ class _HarmonyScreenState extends State<HarmonyScreen> {
                     focusedDay: _focusedDay,
                     availableGestures: AvailableGestures.horizontalSwipe, 
                     selectedDayPredicate: (day) => isSameDay(_selectedDay, day),
-                    // === ОБНОВЛЕНО: Действие при клике на день ===
                     onDaySelected: (selectedDay, focusedDay) { 
                       setState(() { _selectedDay = selectedDay; _focusedDay = focusedDay; }); 
                       _loadSymptomsForDay(selectedDay); 
@@ -884,10 +1004,8 @@ class _HarmonyScreenState extends State<HarmonyScreen> {
                       if (!isPregnant) {
                         final String cheatStatus = _getCheatStatus(selectedDay, userData);
                         if (cheatStatus == 'cheat_day') {
-                          // Показываем шторку ПМС для 26-го дня
                           _showPMSCheatDaySheet();
                         } else if (cheatStatus == 'cheat_meal') {
-                          // Показываем шторку читмила по воскресеньям
                           _showCheatMealSheet();
                         }
                       }
@@ -911,7 +1029,7 @@ class _HarmonyScreenState extends State<HarmonyScreen> {
                   child: Row(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      Expanded(child: _buildSymptomCard("Симптомы", Icons.healing_outlined, _accentColor, _showSymptomsBottomSheet, isActive: _currentDaySymptoms.isNotEmpty)),
+                      Expanded(child: _buildSymptomCard("Симптомы", Icons.tune_rounded, _accentColor, _showSymptomsBottomSheet, isActive: _currentDaySymptoms.isNotEmpty)),
                       const SizedBox(width: 12),
                       Expanded(child: _buildSymptomCard("Настроение", Icons.sentiment_satisfied_alt, Colors.orange, _showMoodBottomSheet, isActive: _currentMood.isNotEmpty)),
                       const SizedBox(width: 12),
@@ -944,14 +1062,40 @@ class _HarmonyScreenState extends State<HarmonyScreen> {
                 GestureDetector(
                   onTap: _analyzeWithEva, 
                   child: Container(
-                    margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 8), padding: const EdgeInsets.all(16),
-                    decoration: BoxDecoration(gradient: const LinearGradient(colors: [Color(0xFFB76E79), Color(0xFFD49A89)], begin: Alignment.topLeft, end: Alignment.bottomRight), borderRadius: BorderRadius.circular(20), boxShadow: [BoxShadow(color: _accentColor.withValues(alpha: 0.3), blurRadius: 20, offset: const Offset(0, 6))]),
+                    margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 8), 
+                    padding: const EdgeInsets.all(16),
+                    decoration: BoxDecoration(
+                      color: Colors.white,
+                      borderRadius: BorderRadius.circular(20), 
+                      border: Border.all(color: _accentColor.withValues(alpha: 0.3), width: 1),
+                      boxShadow: [
+                        BoxShadow(color: _accentColor.withValues(alpha: 0.05), blurRadius: 10, offset: const Offset(0, 4))
+                      ]
+                    ),
                     child: Row(
                       children: [
-                        Container(padding: const EdgeInsets.all(10), decoration: BoxDecoration(color: Colors.white.withValues(alpha: 0.25), shape: BoxShape.circle), child: _isAnalyzing ? const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2)) : const Icon(Icons.auto_awesome, color: Colors.white, size: 24)),
+                        Container(
+                          padding: const EdgeInsets.all(10), 
+                          decoration: BoxDecoration(
+                            color: const Color(0xFFB6A6CA).withValues(alpha: 0.2), 
+                            shape: BoxShape.circle
+                          ), 
+                          child: _isAnalyzing 
+                            ? const SizedBox(width: 24, height: 24, child: CircularProgressIndicator(color: _accentColor, strokeWidth: 2)) 
+                            : const Icon(Icons.auto_awesome, color: _accentColor, size: 24)
+                        ),
                         const SizedBox(width: 16),
-                        const Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [Text('Анализ Евы', style: TextStyle(color: Colors.white, fontWeight: FontWeight.w900, fontSize: 16)), SizedBox(height: 2), Text('Обсудить симптомы с ИИ', style: TextStyle(color: Colors.white, fontSize: 12, fontWeight: FontWeight.w500))])),
-                        const Icon(Icons.arrow_forward_ios, color: Colors.white, size: 16),
+                        const Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start, 
+                            children: [
+                              Text('Анализ Евы ✨', style: TextStyle(color: _textColor, fontWeight: FontWeight.bold, fontSize: 16)), 
+                              SizedBox(height: 2), 
+                              Text('Обсудить симптомы с ИИ', style: TextStyle(color: _subTextColor, fontSize: 13, fontWeight: FontWeight.w500))
+                            ]
+                          )
+                        ),
+                        const Icon(Icons.chevron_right, color: _subTextColor, size: 20),
                       ],
                     ),
                   ),

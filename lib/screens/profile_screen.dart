@@ -16,7 +16,8 @@ import '../services/database_service.dart';
 class ProfileScreen extends StatelessWidget {
   const ProfileScreen({super.key});
 
-  static const String SUPPORT_ADMIN_UID = 'VlTTLh2o7GVaXUzw32sNUtQ6alD3';
+  // Исправлено: используем lowerCamelCase для констант по стандартам Dart
+  static const String supportAdminUid = 'VlTTLh2o7GVaXUzw32sNUtQ6alD3';
 
   Widget _buildMenuItem(
     IconData icon,
@@ -77,10 +78,12 @@ class ProfileScreen extends StatelessWidget {
               .doc(uid)
               .snapshots(),
           builder: (context, snapshot) {
-            if (!snapshot.hasData || !snapshot.data!.exists)
+            // Исправлено: добавлены обязательные фигурные скобки
+            if (!snapshot.hasData || !snapshot.data!.exists) {
               return const Center(
                 child: CircularProgressIndicator(color: Color(0xFFB76E79)),
               );
+            }
 
             final data = snapshot.data!.data() as Map<String, dynamic>;
             final String name =
@@ -128,16 +131,24 @@ class ProfileScreen extends StatelessWidget {
                             ? CachedNetworkImage(
                                 imageUrl: photoUrl,
                                 fit: BoxFit.cover,
-                                errorWidget: (c, u, e) => const Icon(
-                                  Icons.person,
-                                  color: Color(0xFFC7C7CC),
-                                  size: 60,
+                                // Если ссылка битая, показываем красивый градиент с буквой
+                                errorWidget: (c, u, e) => Container(
+                                  decoration: const BoxDecoration(
+                                    gradient: LinearGradient(colors: [Color(0xFFB76E79), Color(0xFFB6A6CA)], begin: Alignment.topLeft, end: Alignment.bottomRight),
+                                  ),
+                                  alignment: Alignment.center,
+                                  // Исправлено: переменная name всегда имеет значение, убрали мертвый код
+                                  child: Text(name[0].toUpperCase(), style: const TextStyle(color: Colors.white, fontSize: 36, fontWeight: FontWeight.bold)),
                                 ),
                               )
-                            : const Icon(
-                                Icons.person,
-                                color: Color(0xFFC7C7CC),
-                                size: 60,
+                            // Если фото изначально нет, тоже показываем градиент с первой буквой имени
+                            : Container(
+                                decoration: const BoxDecoration(
+                                  gradient: LinearGradient(colors: [Color(0xFFB76E79), Color(0xFFB6A6CA)], begin: Alignment.topLeft, end: Alignment.bottomRight),
+                                ),
+                                alignment: Alignment.center,
+                                // Исправлено: убрали избыточную проверку isNotEmpty
+                                child: Text(name[0].toUpperCase(), style: const TextStyle(color: Colors.white, fontSize: 36, fontWeight: FontWeight.bold)),
                               ),
                       ),
                     ),
@@ -223,7 +234,8 @@ class ProfileScreen extends StatelessWidget {
                                 context,
                                 MaterialPageRoute(
                                   builder: (_) => const P2PChatScreen(
-                                    otherUserId: SUPPORT_ADMIN_UID,
+                                    // Исправлено: используем правильное имя константы
+                                    otherUserId: supportAdminUid,
                                     otherUserName: 'Поддержка MyEva',
                                   ),
                                 ),
@@ -235,7 +247,8 @@ class ProfileScreen extends StatelessWidget {
                           _buildMenuItem(
                             FontAwesomeIcons.vk, // Векторный логотип VK
                             'Наше комьюнити в VK',
-                            iconColor: const Color(0xFF0077FF), // Фирменный цвет VK
+                            // Успокаиваем цвет, чтобы он не ломал общую пастельную эстетику
+                            iconColor: const Color(0xFF8E8E93), 
                             onTap: () async {
                               const url = 'https://vk.com/club237160300';
                               final uri = Uri.parse(url);
@@ -247,85 +260,87 @@ class ProfileScreen extends StatelessWidget {
                           _divider(),
 
                           // === КНОПКА СВЯЗИ СО СПЕЦИАЛИСТОМ ===
-                          StatefulBuilder(
-                            builder: (context, setTileState) {
+                          Builder(
+                            builder: (context) {
+                              // ИСПРАВЛЕНИЕ: Переменная вынесена ВНЕ StatefulBuilder.
+                              // Теперь при вызове setTileState она сохранит свое значение true!
                               bool isOpeningChat = false;
-
-                              return ListTile(
-                                leading: Container(
-                                  padding: const EdgeInsets.all(6),
-                                  decoration: BoxDecoration(
-                                    color: Colors.amber.withValues(alpha: 0.2),
-                                    shape: BoxShape.circle,
-                                  ),
-                                  child: const Icon(
-                                    Icons.star,
-                                    color: Colors.amber,
-                                    size: 20,
-                                  ),
-                                ),
-                                title: const Text(
-                                  'Связь со специалистом',
-                                  style: TextStyle(
-                                    color: Color(0xFF2D2D2D),
-                                    fontSize: 16,
-                                    fontWeight: FontWeight.w800,
-                                  ),
-                                ),
-                                trailing: isOpeningChat
-                                    ? const SizedBox(
-                                        width: 16,
-                                        height: 16,
-                                        child: CircularProgressIndicator(
-                                          strokeWidth: 2,
-                                          color: Color(0xFFB76E79),
-                                        ),
-                                      )
-                                    : const Icon(
-                                        Icons.arrow_forward_ios,
-                                        color: Color(0xFFC7C7CC),
-                                        size: 16,
+                              
+                              return StatefulBuilder(
+                                builder: (context, setTileState) {
+                                  return ListTile(
+                                    leading: Container(
+                                      padding: const EdgeInsets.all(6),
+                                      decoration: BoxDecoration(
+                                        color: Colors.amber.withValues(alpha: 0.2),
+                                        shape: BoxShape.circle,
                                       ),
-                                onTap: () async {
-                                  if (isOpeningChat) return; // Защита от двойного клика
-                                  
-                                  setTileState(() => isOpeningChat = true);
-
-                                  // 1. ПРОВЕРЯЕМ РУБИЛЬНИК МОДЕРАЦИИ
-                                  final bool inReview = await DatabaseService().isAppInReview();
-
-                                  // 2. ЕСЛИ КУПЛЕНО ИЛИ ВКЛЮЧЕН РЕЖИМ МОДЕРАЦИИ -> ПУСКАЕМ
-                                  if (hasSpecialistAccess || inReview) {
-                                    // Спрашиваем у базы актуальный UID врача
-                                    final specInfo = await DatabaseService().getSpecialistInfo();
-
-                                    if (context.mounted) {
-                                      setTileState(() => isOpeningChat = false);
-                                      Navigator.push(
-                                        context,
-                                        MaterialPageRoute(
-                                          builder: (_) => P2PChatScreen(
-                                            otherUserId: specInfo['uid']!,
-                                            otherUserName: specInfo['name']!,
+                                      child: const Icon(
+                                        Icons.star,
+                                        color: Colors.amber,
+                                        size: 20,
+                                      ),
+                                    ),
+                                    title: const Text(
+                                      'Связь со специалистом',
+                                      style: TextStyle(
+                                        color: Color(0xFF2D2D2D),
+                                        fontSize: 16,
+                                        fontWeight: FontWeight.w800,
+                                      ),
+                                    ),
+                                    trailing: isOpeningChat
+                                        ? const SizedBox(
+                                            width: 16,
+                                            height: 16,
+                                            child: CircularProgressIndicator(
+                                              strokeWidth: 2,
+                                              color: Color(0xFFB76E79),
+                                            ),
+                                          )
+                                        : const Icon(
+                                            Icons.arrow_forward_ios,
+                                            color: Color(0xFFC7C7CC),
+                                            size: 16,
                                           ),
-                                        ),
-                                      );
-                                    }
-                                  } else {
-                                    // 3. БОЕВОЙ РЕЖИМ -> ПОКАЗЫВАЕМ ПЕЙВОЛ
-                                    if (context.mounted) {
-                                      setTileState(() => isOpeningChat = false);
-                                      Navigator.push(
-                                        context,
-                                        MaterialPageRoute(
-                                          builder: (_) => const SpecialistPaywallScreen(),
-                                        ),
-                                      );
-                                    }
-                                  }
+                                    onTap: () async {
+                                      if (isOpeningChat) return; 
+                                      
+                                      setTileState(() => isOpeningChat = true);
+
+                                      final bool inReview = await DatabaseService().isAppInReview();
+
+                                      if (hasSpecialistAccess || inReview) {
+                                        final specInfo = await DatabaseService().getSpecialistInfo();
+
+                                        if (context.mounted) {
+                                          setTileState(() => isOpeningChat = false);
+                                          Navigator.push(
+                                            context,
+                                            MaterialPageRoute(
+                                              builder: (_) => P2PChatScreen(
+                                                otherUserId: specInfo['uid']!,
+                                                otherUserName: specInfo['name']!,
+                                              ),
+                                            ),
+                                          );
+                                        }
+                                      } else {
+                                        if (context.mounted) {
+                                          setTileState(() => isOpeningChat = false);
+                                          Navigator.push(
+                                            context,
+                                            MaterialPageRoute(
+                                              builder: (_) => const SpecialistPaywallScreen(),
+                                            ),
+                                          );
+                                        }
+                                      }
+                                    },
+                                  );
                                 },
                               );
-                            },
+                            }
                           ),
                           const SizedBox(height: 8),
                         ],

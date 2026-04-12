@@ -92,6 +92,20 @@ class _AuthScreenState extends State<AuthScreen> {
       return;
     }
 
+    // ИСПРАВЛЕНО: Жесткая проверка согласия с правилами только для регистрации
+    if (!_isLogin && !_acceptedTerms) { 
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Пожалуйста, примите Политику конфиденциальности и Пользовательское соглашение.'),
+            backgroundColor: Colors.redAccent,
+            behavior: SnackBarBehavior.floating,
+          ),
+        );
+      }
+      return; // Жестко прерываем выполнение метода
+    }
+
     setState(() => _isLoading = true);
 
     try {
@@ -125,20 +139,37 @@ class _AuthScreenState extends State<AuthScreen> {
     setState(() => _isLoading = true);
     try {
       final result = await AuthService().signInWithGoogle();
-      if (result is UserCredential && result.user != null) {
-        final uid = result.user!.uid;
-        final userDoc = await _db.collection('users').doc(uid).get();
-        if (!userDoc.exists) {
-          await _db.collection('users').doc(uid).set({
-            'name': result.user!.displayName ?? 'Пользователь',
-            'email': result.user!.email,
-            'activeRole': 'user',
-            'createdAt': FieldValue.serverTimestamp(),
-            'isPro': false,
-            'isOnboardingCompleted': false, // <--- МЕТКА НОВИЧКА
-          });
-        }
-      } else if (result is String) {
+          if (result is UserCredential && result.user != null) {
+            final uid = result.user!.uid;
+            
+            // Проверяем документ пользователя в базе
+            final userDoc = await _db.collection('users').doc(uid).get();
+            
+            // УМНАЯ ПРОВЕРКА: есть ли реальные данные онбординга (вес, рост)
+            final hasOnboardingData = userDoc.exists &&
+                userDoc.data() != null &&
+                userDoc.data()!.containsKey('weight') && 
+                userDoc.data()!.containsKey('height');
+
+            if (!hasOnboardingData) {
+              // Это НОВЫЙ пользователь через Google -> сохраняем базовые данные и ставим метку новичка.
+              // HomeWrapper автоматически отследит этот флаг и перекинет на OnboardingScreen.
+              await _db.collection('users').doc(uid).set({
+                'email': result.user!.email,
+                'name': result.user!.displayName ?? 'Пользователь',
+                'activeRole': 'user',
+                'createdAt': FieldValue.serverTimestamp(),
+                'isPro': false,
+                'isOnboardingCompleted': false, 
+              }, SetOptions(merge: true));
+            } else {
+              // Это СТАРЫЙ пользователь. Гарантируем, что флаг установлен, 
+              // чтобы HomeWrapper точно пустил его на DashboardScreen.
+              await _db.collection('users').doc(uid).set({
+                'isOnboardingCompleted': true,
+              }, SetOptions(merge: true));
+            }
+          } else if (result is String) {
         _showError(result);
       }
     } catch (e) {
@@ -164,7 +195,7 @@ class _AuthScreenState extends State<AuthScreen> {
               crossAxisAlignment: CrossAxisAlignment.center,
               children: [
                 const Text(
-                  'MyEva',
+                  'Моя Ева',
                   style: TextStyle(color: _accentColor, fontSize: 36, fontWeight: FontWeight.w800, letterSpacing: 0.5),
                 ),
                 const SizedBox(height: 8),

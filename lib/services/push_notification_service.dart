@@ -104,10 +104,15 @@ class PushNotificationService {
   Future<void> _saveTokenToDatabase(String token) async {
     String? uid = FirebaseAuth.instance.currentUser?.uid;
     if (uid != null) {
-      await FirebaseFirestore.instance.collection('users').doc(uid).set(
-        {'fcmToken': token, 'lastTokenUpdate': FieldValue.serverTimestamp()}, 
-        SetOptions(merge: true)
-      );
+      // ИСПРАВЛЕНО: Обернули в try/catch. Фоновые задачи не должны крашить приложение!
+      try {
+        await FirebaseFirestore.instance.collection('users').doc(uid).set(
+          {'fcmToken': token, 'lastTokenUpdate': FieldValue.serverTimestamp()},
+          SetOptions(merge: true)
+        );
+      } catch (e) {
+        debugPrint("⚠️ Не удалось сохранить FCM токен (Возможно, блокирует App Check или Правила): $e");
+      }
     }
   }
 

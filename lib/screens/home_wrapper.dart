@@ -44,9 +44,20 @@ class _FirestoreRoleLoaderState extends State<FirestoreRoleLoader> {
 
   // Асинхронно спрашиваем у базы, находимся ли мы на модерации
   Future<void> _checkReviewStatus() async {
-    final status = await DatabaseService().isAppInReview();
-    if (mounted) {
-      setState(() => _isAppInReview = status);
+    try {
+      bool inReview = await DatabaseService().isAppInReview();
+      if (mounted) {
+        setState(() {
+          _isAppInReview = inReview;
+        });
+      }
+    } catch (e) {
+      debugPrint('Ошибка при проверке AppInReview: $e');
+      if (mounted) {
+        setState(() {
+          _isAppInReview = false; // Безопасный фолбэк при сбое сети
+        });
+      }
     }
   }
 
@@ -80,11 +91,17 @@ class _FirestoreRoleLoaderState extends State<FirestoreRoleLoader> {
             body: Center(child: CircularProgressIndicator(color: Color(0xFFB76E79)))
           );
         }
-        if (snapshot.hasError || !snapshot.hasData || !snapshot.data!.exists) {
+        if (snapshot.hasError || !snapshot.hasData) {
           return const Scaffold(
             backgroundColor: Color(0xFF1A1A1C), 
             body: Center(child: CircularProgressIndicator(color: Color(0xFFB76E79)))
           );
+        }
+
+        // ИСПРАВЛЕНО: Защита от вечной загрузки! 
+        // Если база пустая или документ не успел создаться - отправляем на онбординг.
+        if (!snapshot.data!.exists) {
+          return const OnboardingScreen();
         }
 
         final data = snapshot.data!.data() as Map<String, dynamic>;
@@ -99,13 +116,9 @@ class _FirestoreRoleLoaderState extends State<FirestoreRoleLoader> {
           return const OnboardingScreen(); // Отправляем новичков заполнять профиль
         }
 
-        // === СТАРАЯ ЛОГИКА: ПЕЙВОЛ ИЛИ ДАШБОРД ===
-        // Если премиума нет И мы НЕ на проверке в сторе -> показываем пейвол
-        if (!isPro && _isAppInReview == false) {
-          return const PaywallScreen();
-        }
-
-        // В противном случае (если есть премиум, включен рубильник или пройден онбординг) -> пускаем внутрь
+        // === НОВАЯ ЛОГИКА: СРАЗУ НА ГЛАВНЫЙ ЭКРАН ===
+        // Мы больше не показываем пейвол принудительно при входе.
+        // Пользователь должен сначала увидеть ценность продукта.
         return const DashboardScreen();
       },
     );

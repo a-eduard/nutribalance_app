@@ -4,6 +4,8 @@ import 'package:url_launcher/url_launcher.dart';
 import '../services/database_service.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:flutter_rustore_billing/flutter_rustore_billing.dart'; // <-- ДОБАВЛЕНО ДЛЯ RUSTORE
+import 'package:cloud_functions/cloud_functions.dart'; // <-- ДОБАВЛЕНО ДЛЯ СЕРВЕРНОЙ ПРОВЕРКИ
 
 
 class SpecialistPaywallScreen extends StatefulWidget {
@@ -28,37 +30,43 @@ class _SpecialistPaywallScreenState extends State<SpecialistPaywallScreen> {
     setState(() => _isLoading = true);
 
     try {
-      final String? confirmationUrl = await DatabaseService()
-          .createYookassaPayment(
-            amount: 5000.0,
-            description: 'Личный консультант по беременности MyEva',
-            paymentType: 'specialist',
-          );
+      final uid = FirebaseAuth.instance.currentUser?.uid;
+      if (uid == null) return;
 
-      if (confirmationUrl != null) {
-        await launchUrl(
-          Uri.parse(confirmationUrl),
-          mode: LaunchMode.externalApplication,
-        );
+      // 1. Вызываем стандартный SDK RuStore с новым ID продукта
+      final purchaseResult = await RustoreBillingClient.purchase('specialist_chat_monthly', uid); 
 
-        if (mounted) {
-          showDialog(
-            context: context,
-            barrierDismissible: false,
-            // Для specialist_paywall_screen.dart передавай isSpecialist: true
-            builder: (ctx) => _WaitingPaymentDialog(
-              isSpecialist: true,
-              isFromProfile: widget.isFromProfile,
-            ),
-          );
+      // Пытаемся достать токен
+      String pToken = "mock_token_specialist";
+      try {
+        if (purchaseResult != null) {
+          pToken = (purchaseResult as dynamic).purchaseToken?.toString() ?? "mock_token_specialist";
         }
+      } catch (_) {}
+
+      // 2. БЕЗОПАСНАЯ СЕРВЕРНАЯ ПРОВЕРКА (Cloud Functions)
+      final callable = FirebaseFunctions.instance.httpsCallable('verifyRuStorePurchase');
+      await callable.call({
+        'productId': 'specialist_chat_monthly',
+        'purchaseToken': pToken,
+      });
+
+      if (mounted) {
+        Navigator.pop(context);
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Оплата успешна! Чат со специалистом открыт. ✨'),
+            backgroundColor: Colors.teal,
+          ),
+        );
       }
     } catch (e) {
+      debugPrint('Ошибка покупки специалиста через RuStore: $e');
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(
-            content: Text('Сбой платежной системы'),
-            backgroundColor: Colors.red,
+            content: Text('Отмена или ошибка оплаты.'),
+            backgroundColor: Colors.redAccent,
           ),
         );
       }

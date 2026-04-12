@@ -125,10 +125,22 @@ class _ProductCatalogScreenState extends State<ProductCatalogScreen> {
     // Собираем карту категорий для всех продуктов (базовые + кастомные)
     Map<String, String> fullCategoryMap = {...ProductCatalogData.productCategoryMap, ..._customProductsMap};
     
-    await DatabaseService().syncCatalogShoppingList(_selectedProducts, fullCategoryMap);
-    
-    if (mounted) {
-      Navigator.pop(context); // Закрываем экран
+    try {
+      await DatabaseService().syncCatalogShoppingList(_selectedProducts, fullCategoryMap);
+      if (mounted) {
+        Navigator.pop(context); // Закрываем экран
+      }
+    } catch (e) {
+      debugPrint('Ошибка синхронизации каталога: $e');
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Ошибка сохранения. Проверьте интернет.')),
+        );
+      }
+    } finally {
+      if (mounted) {
+        setState(() => _isLoading = false); // Обязательно выключаем лоадер при любом исходе
+      }
     }
   }
 

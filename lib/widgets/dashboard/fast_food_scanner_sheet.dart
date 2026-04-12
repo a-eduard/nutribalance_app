@@ -4,6 +4,9 @@ import 'dart:ui';
 import 'dart:typed_data';
 import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
+import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:firebase_auth/firebase_auth.dart';
+import '../../paywall_screen.dart';
 import '../../services/ai_service.dart';
 import '../../services/database_service.dart';
 import '../../screens/ai_chat_screen.dart';
@@ -40,7 +43,6 @@ class _FastFoodScannerSheetState extends State<FastFoodScannerSheet> {
   static const Color _textColor = Color(0xFF2D2D2D);
   static const Color _subTextColor = Color(0xFF8E8E93);
 
-  // === НАШЕ БЕЗОПАСНОЕ УВЕДОМЛЕНИЕ ===
   void _showTopSnackBar(String message, ScaffoldMessengerState messenger, {bool isError = false}) {
     messenger.clearSnackBars();
     messenger.showSnackBar(
@@ -54,13 +56,35 @@ class _FastFoodScannerSheetState extends State<FastFoodScannerSheet> {
         behavior: SnackBarBehavior.floating,
         elevation: 10,
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(24)),
-        margin: const EdgeInsets.only(bottom: 24, left: 24, right: 24), // Безопасный отступ
+        margin: const EdgeInsets.only(bottom: 24, left: 24, right: 24),
         duration: const Duration(seconds: 2),
       )
     );
   }
 
   Future<void> _pickImage(ImageSource source) async {
+    final uid = FirebaseAuth.instance.currentUser?.uid;
+    if (uid != null) {
+      bool isPremium = false;
+      try {
+        // ИСПРАВЛЕНО: Чтение только из локального кэша для моментальной реакции камеры!
+        final doc = await FirebaseFirestore.instance.collection('users').doc(uid).get(const GetOptions(source: Source.cache)).catchError((_) => FirebaseFirestore.instance.collection('users').doc(uid).get());
+        isPremium = doc.data()?['isPro'] == true; 
+      } catch (e) {
+        debugPrint('Ошибка проверки премиума: $e');
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Ошибка подключения. Проверьте интернет.')));
+        }
+        return; 
+      }
+
+      if (!isPremium) {
+        Navigator.pop(context); 
+        Navigator.push(context, MaterialPageRoute(builder: (_) => const PaywallScreen()));
+        return; 
+      }
+    }
+
     try {
       final XFile? pickedFile = await _picker.pickImage(source: source, imageQuality: 30, maxWidth: 512, maxHeight: 512);
       if (pickedFile != null) {
@@ -150,23 +174,26 @@ class _FastFoodScannerSheetState extends State<FastFoodScannerSheet> {
     return null;
   }
 
-  Future<void> _saveToDiary() async {
+  void _saveToDiary() {
     if (_resultData == null || _isProcessing) return;
+    
     setState(() => _isProcessing = true);
+    Navigator.pop(context);
+    
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(
+        content: Text('Блюдо добавлено! ✨', style: TextStyle(fontWeight: FontWeight.bold, color: Colors.white)),
+        backgroundColor: Colors.teal,
+      ),
+    );
 
-    // Захватываем мессенджер до закрытия шторки
-    final messenger = ScaffoldMessenger.of(context);
-
-    // Фоновая отправка в базу
-    DatabaseService().logMeal(_resultData!, imageBytes: _imageBytes).catchError((e) {
-      debugPrint("Фоновая ошибка сохранения: $e");
+    Future.microtask(() async {
+      try {
+        await DatabaseService().logMeal(_resultData!, imageBytes: _imageBytes);
+      } catch (e) {
+        debugPrint('Ошибка фонового сохранения из сканера: $e');
+      }
     });
-
-    // Мгновенное закрытие и показ уведомления
-    if (mounted) {
-      Navigator.pop(context);
-      _showTopSnackBar("Блюдо добавлено! ✨", messenger);
-    }
   }
 
   void _editMacro(String macroType, int newValue, int oldCals, int oldP, int oldF, int oldC) {
@@ -183,15 +210,16 @@ class _FastFoodScannerSheetState extends State<FastFoodScannerSheet> {
           item['protein'] = (((item['protein'] as num?)?.toDouble() ?? 0) * ratio).round();
           item['fat'] = (((item['fat'] as num?)?.toDouble() ?? 0) * ratio).round();
           item['carbs'] = (((item['carbs'] as num?)?.toDouble() ?? 0) * ratio).round();
-          if (item['fiber'] != null) {
-            item['fiber'] = (((item['fiber'] as num).toDouble()) * ratio).round();
-          }
+          // Обезопасили парсинг fiber
+          item['fiber'] = (((item['fiber'] as num?)?.toDouble() ?? 0) * ratio).round();
         }
       } else {
         int diff = 0, calDiff = 0;
         if (macroType == 'protein') { diff = newValue - oldP; calDiff = diff * 4; } 
         else if (macroType == 'fat') { diff = newValue - oldF; calDiff = diff * 9; } 
         else if (macroType == 'carbs') { diff = newValue - oldC; calDiff = diff * 4; }
+        // У клетчатки нет калорий (или они минимальны), поэтому calDiff = 0
+        else if (macroType == 'fiber') { diff = newValue - (items.first['fiber'] as num?)!.toInt(); calDiff = 0; }
 
         var first = items.first;
         int currentMacro = (first[macroType] as num?)?.toInt() ?? 0;
@@ -292,14 +320,24 @@ class _FastFoodScannerSheetState extends State<FastFoodScannerSheet> {
     return GestureDetector(
       onTap: () => _showEditDialog(label, value, type, tc, tp, tf, tcarb),
       child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 10),
-        decoration: BoxDecoration(color: color.withValues(alpha: 0.1), borderRadius: BorderRadius.circular(12), border: Border.all(color: color.withValues(alpha: 0.3))),
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+        decoration: BoxDecoration(
+          color: color.withValues(alpha: 0.1), 
+          borderRadius: BorderRadius.circular(16), 
+          border: Border.all(color: color.withValues(alpha: 0.3))
+        ),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Row(children: [Expanded(child: Text(label, style: const TextStyle(color: _textColor, fontSize: 11, fontWeight: FontWeight.bold), maxLines: 1, overflow: TextOverflow.ellipsis)), Icon(Icons.edit_outlined, size: 14, color: color)]),
-            const SizedBox(height: 4),
-            Text("$valueг", style: const TextStyle(color: _textColor, fontSize: 16, fontWeight: FontWeight.w900)),
+            Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
+                Expanded(child: Text(label, style: const TextStyle(color: _textColor, fontSize: 13, fontWeight: FontWeight.bold), maxLines: 1, overflow: TextOverflow.ellipsis)), 
+                Icon(Icons.edit_outlined, size: 16, color: color)
+              ]
+            ),
+            const SizedBox(height: 6),
+            Text("$value г", style: const TextStyle(color: _textColor, fontSize: 18, fontWeight: FontWeight.w900)),
           ]
         )
       )
@@ -308,13 +346,14 @@ class _FastFoodScannerSheetState extends State<FastFoodScannerSheet> {
 
   Widget _buildResultState() {
     final List<dynamic> items = _resultData!['items'] ?? [];
-    int totalCals = 0, totalP = 0, totalF = 0, totalC = 0;
+    int totalCals = 0, totalP = 0, totalF = 0, totalC = 0, totalFiber = 0; // Добавили totalFiber
     
     for (var item in items) {
       totalCals += (item['calories'] as num?)?.toInt() ?? 0;
       totalP += (item['protein'] as num?)?.toInt() ?? 0;
       totalF += (item['fat'] as num?)?.toInt() ?? 0;
       totalC += (item['carbs'] as num?)?.toInt() ?? 0;
+      totalFiber += (item['fiber'] as num?)?.toInt() ?? 0; // Считаем клетчатку
     }
 
     return Container(
@@ -342,11 +381,23 @@ class _FastFoodScannerSheetState extends State<FastFoodScannerSheet> {
             ],
           ),
           const SizedBox(height: 20),
-          Row(
+          Column(
             children: [
-              Expanded(child: _buildMacroEditBtn("Белки", totalP, "protein", totalCals, totalP, totalF, totalC, const Color(0xFFD49A89))), const SizedBox(width: 8),
-              Expanded(child: _buildMacroEditBtn("Жиры", totalF, "fat", totalCals, totalP, totalF, totalC, const Color(0xFFE5C158))), const SizedBox(width: 8),
-              Expanded(child: _buildMacroEditBtn("Углеводы", totalC, "carbs", totalCals, totalP, totalF, totalC, const Color(0xFF89CFF0))),
+              Row(
+                children: [
+                  Expanded(child: _buildMacroEditBtn("Белки", totalP, "protein", totalCals, totalP, totalF, totalC, const Color(0xFFD49A89))),
+                  const SizedBox(width: 12),
+                  Expanded(child: _buildMacroEditBtn("Жиры", totalF, "fat", totalCals, totalP, totalF, totalC, const Color(0xFFE5C158))),
+                ],
+              ),
+              const SizedBox(height: 12),
+              Row(
+                children: [
+                  Expanded(child: _buildMacroEditBtn("Углеводы", totalC, "carbs", totalCals, totalP, totalF, totalC, const Color(0xFF89CFF0))),
+                  const SizedBox(width: 12),
+                  Expanded(child: _buildMacroEditBtn("Клетчатка", totalFiber, "fiber", totalCals, totalP, totalF, totalC, Colors.green[300] ?? Colors.green)),
+                ],
+              ),
             ],
           ),
           const SizedBox(height: 24),

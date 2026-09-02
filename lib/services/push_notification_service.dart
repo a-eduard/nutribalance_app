@@ -3,10 +3,12 @@ import 'package:firebase_messaging/firebase_messaging.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
+import 'local_notification_service.dart'; // Подключаем локальный сервис
 
 class PushNotificationService {
   final FirebaseMessaging _fcm = FirebaseMessaging.instance;
-  final FlutterLocalNotificationsPlugin _localNotifications = FlutterLocalNotificationsPlugin();
+  // ФИКС 1: Используем общий экземпляр, чтобы система не дублировала слушателей
+  final FlutterLocalNotificationsPlugin _localNotifications = LocalNotificationService().flutterLocalNotificationsPlugin;
 
   static String? currentActiveChatId;
 

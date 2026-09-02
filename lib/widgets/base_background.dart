@@ -10,9 +10,8 @@ class BaseBackground extends StatelessWidget {
     return Container(
       width: double.infinity,
       height: double.infinity, 
-      decoration: const BoxDecoration(
-        color: Color(0xFFF9F9F9), // Базовый нежный цвет приложения
-        // Темную картинку убрали, чтобы она не портила светлую тему
+      decoration: BoxDecoration(
+        color: Theme.of(context).scaffoldBackgroundColor, // ИСПРАВЛЕНИЕ: динамический фон
       ),
       child: child, 
     );

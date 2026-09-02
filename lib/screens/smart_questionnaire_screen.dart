@@ -1,3 +1,5 @@
+// Файл: lib/screens/smart_questionnaire_screen.dart
+
 import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
@@ -12,34 +14,27 @@ class SmartQuestionnaireScreen extends StatefulWidget {
 class _SmartQuestionnaireScreenState extends State<SmartQuestionnaireScreen> {
   final PageController _pageController = PageController();
   int _currentIndex = 0;
-  bool _isLoading = true; // Начинаем с загрузки
-
-  static const Color _accentColor = Color(0xFFB76E79);
-  static const Color _textColor = Color(0xFF2D2D2D);
+  bool _isLoading = true;
 
   final Map<String, dynamic> _answers = {};
   final Map<String, TextEditingController> _customTextControllers = {};
 
   final List<Map<String, dynamic>> _questions = [
-    // БЛОК 1
     {'id': 'Тип питания', 'q': 'Твой тип питания?', 'type': 'single', 'opts': ['Всеядная', 'Вегетарианка', 'Веган', 'Пескетарианка', 'Свой вариант']},
     {'id': 'Аллергии', 'q': 'Есть ли пищевая аллергия или непереносимость?', 'type': 'multi', 'opts': ['Нет', 'Лактоза', 'Глютен', 'Орехи', 'Морепродукты', 'Свой вариант']},
     {'id': 'Режим питания', 'q': 'Сколько раз в день тебе комфортно есть?', 'type': 'single', 'opts': ['2-3 больших приема', '4-5 небольших порций', 'Ем, когда придется', 'Свой вариант']},
     {'id': 'Отношение к готовке', 'q': 'Готовка для тебя — это...?', 'type': 'single', 'opts': ['Обожаю кулинарию', 'Готовлю только простое и быстрое', 'Ненавижу готовить, ем вне дома', 'Свой вариант']},
     {'id': 'Вода', 'q': 'Твое отношение к воде?', 'type': 'single', 'opts': ['Пью свою норму легко', 'Постоянно забываю пить', 'Свой вариант']},
-    // БЛОК 2
     {'id': 'Работа', 'q': 'Кем ты работаешь / Как проходит твой день?', 'type': 'single', 'opts': ['Весь день за компьютером', 'Постоянно на ногах', 'Смешанный график', 'Фриланс из дома', 'Свой вариант']},
     {'id': 'График', 'q': 'Твой типичный график?', 'type': 'single', 'opts': ['Стандартный с 9 до 18', 'Плавающий', 'Часто бывают ночные смены', 'Свой вариант']},
     {'id': 'Транспорт', 'q': 'Как ты обычно добираешься по делам?', 'type': 'multi', 'opts': ['Пешком', 'За рулем', 'Общественный транспорт', 'Свой вариант']},
     {'id': 'Биоритмы', 'q': 'Твои биоритмы?', 'type': 'single', 'opts': ['Ранняя пташка ☀️', 'Сова 🌙', 'Свой вариант']},
     {'id': 'Активность', 'q': 'Любимый вид активности?', 'type': 'multi', 'opts': ['Тренажерный зал', 'Йога и пилатес', 'Танцы', 'Бег', 'Просто люблю гулять', 'Не люблю спорт', 'Свой вариант']},
-    // БЛОК 3
     {'id': 'Стресс', 'q': 'Твой средний уровень стресса?', 'type': 'single', 'opts': ['Я спокойна как удав', 'Средне, бывают завалы', 'Я живу в состоянии стресса', 'Свой вариант']},
     {'id': 'Реакция на стресс', 'q': 'Как ты чаще всего реагируешь на стресс?', 'type': 'multi', 'opts': ['Пропадает аппетит', 'Заедаю сладким или фастфудом', 'Иду на тренировку', 'Хочу лежать и плакать', 'Свой вариант']},
     {'id': 'Сон', 'q': 'Сколько часов ты обычно спишь?', 'type': 'single', 'opts': ['Меньше 6 часов', '6-8 часов', 'Больше 8 часов', 'Свой вариант']},
     {'id': 'Слабости в еде', 'q': 'Твоя главная «вредная» слабость в еде?', 'type': 'multi', 'opts': ['Шоколад и конфеты', 'Выпечка и булочки', 'Соленья и чипсы', 'Фастфуд', 'Свой вариант']},
     {'id': 'Отдых', 'q': 'Твой идеальный способ перезагрузиться — это...?', 'type': 'multi', 'opts': ['Лежать с книгой/сериалом', 'Встреча с подругами', 'Активный отдых на природе', 'Спа, ванна и уход', 'Сон 💤', 'Секс 🔥', 'Алкоголь 🍷', 'Свой вариант']},
-    // БЛОК 4
     {'id': 'Сожители', 'q': 'С кем ты живешь?', 'type': 'single', 'opts': ['Одна', 'С партнером', 'Большая семья', 'Свой вариант']},
     {'id': 'Дети', 'q': 'Есть ли у тебя дети?', 'type': 'single', 'opts': ['Да', 'Нет', 'Планирую', 'Свой вариант']},
     {'id': 'Животные', 'q': 'Домашние животные?', 'type': 'multi', 'opts': ['Собака', 'Кот', 'Другие', 'Нет', 'Свой вариант']},
@@ -56,7 +51,7 @@ class _SmartQuestionnaireScreenState extends State<SmartQuestionnaireScreen> {
       _customTextControllers[q['id']] = TextEditingController();
       if (q['type'] == 'multi') _answers[q['id']] = <String>[];
     }
-    _loadExistingAnswers(); // <-- ИСПРАВЛЕНО: Подгружаем ответы из базы
+    _loadExistingAnswers(); 
   }
 
   Future<void> _loadExistingAnswers() async {
@@ -88,7 +83,6 @@ class _SmartQuestionnaireScreenState extends State<SmartQuestionnaireScreen> {
                 if (opts.contains(val)) {
                   _answers[id] = val;
                 } else {
-                  // Если ответа нет в стандартных опциях, значит это "Свой вариант"
                   _answers[id] = 'Свой вариант';
                   _customTextControllers[id]?.text = val;
                 }
@@ -103,7 +97,7 @@ class _SmartQuestionnaireScreenState extends State<SmartQuestionnaireScreen> {
                     _customTextControllers[id]?.text = val;
                   }
                 }
-                _answers[id] = actualAnswers.toSet().toList(); // Убираем дубликаты "Свой вариант"
+                _answers[id] = actualAnswers.toSet().toList(); 
               }
             }
           }
@@ -136,6 +130,9 @@ class _SmartQuestionnaireScreenState extends State<SmartQuestionnaireScreen> {
     final uid = FirebaseAuth.instance.currentUser?.uid;
     if (uid == null) return;
 
+    final nav = Navigator.of(context);
+    final msg = ScaffoldMessenger.of(context);
+
     Map<String, dynamic> finalAnswers = {};
 
     for (var q in _questions) {
@@ -166,22 +163,21 @@ class _SmartQuestionnaireScreenState extends State<SmartQuestionnaireScreen> {
 
     try {
       await FirebaseFirestore.instance.collection('users').doc(uid).set({
-        'questionnaire': finalAnswers, // <-- ИСПРАВЛЕНО: Используем set с merge: true для надежности
+        'questionnaire': finalAnswers, 
       }, SetOptions(merge: true));
       
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Анкета сохранена! Ева стала умнее 🧠✨', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)), backgroundColor: Colors.teal));
-        Navigator.pop(context);
-      }
+      if (!mounted) return;
+      msg.showSnackBar(const SnackBar(content: Text('Анкета сохранена! Ева стала умнее 🧠✨', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)), backgroundColor: Colors.teal));
+      nav.pop();
+      
     } catch (e) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('Произошла ошибка, попробуйте еще раз', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)), 
-            backgroundColor: Colors.redAccent
-          )
-        );
-      }
+      if (!mounted) return;
+      msg.showSnackBar(
+        const SnackBar(
+          content: Text('Произошла ошибка, попробуйте еще раз', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)), 
+          backgroundColor: Colors.redAccent
+        )
+      );
     } finally {
       if (mounted) setState(() => _isLoading = false);
     }
@@ -189,25 +185,28 @@ class _SmartQuestionnaireScreenState extends State<SmartQuestionnaireScreen> {
 
   @override
   Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+
     if (_isLoading) {
       return Scaffold(
-        backgroundColor: Colors.white,
-        appBar: AppBar(backgroundColor: Colors.white, elevation: 0, iconTheme: const IconThemeData(color: _textColor)),
-        body: const Center(child: CircularProgressIndicator(color: _accentColor)),
+        backgroundColor: theme.scaffoldBackgroundColor,
+        appBar: AppBar(backgroundColor: theme.scaffoldBackgroundColor, elevation: 0, iconTheme: IconThemeData(color: theme.colorScheme.onSurface)),
+        body: Center(child: CircularProgressIndicator(color: theme.colorScheme.primary)),
       );
     }
 
     return Scaffold(
-      backgroundColor: Colors.white,
+      backgroundColor: theme.scaffoldBackgroundColor,
       appBar: AppBar(
-        backgroundColor: Colors.white, elevation: 0,
-        iconTheme: const IconThemeData(color: _textColor),
+        backgroundColor: theme.scaffoldBackgroundColor, 
+        elevation: 0,
+        iconTheme: IconThemeData(color: theme.colorScheme.onSurface),
         title: ClipRRect(
           borderRadius: BorderRadius.circular(8),
           child: LinearProgressIndicator(
             value: (_currentIndex + 1) / _questions.length,
-            backgroundColor: const Color(0xFFF2F2F7),
-            valueColor: const AlwaysStoppedAnimation<Color>(_accentColor),
+            backgroundColor: theme.colorScheme.onSurfaceVariant.withValues(alpha: 0.2),
+            valueColor: AlwaysStoppedAnimation<Color>(theme.colorScheme.primary),
             minHeight: 8,
           ),
         ),
@@ -227,18 +226,18 @@ class _SmartQuestionnaireScreenState extends State<SmartQuestionnaireScreen> {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Text("Вопрос ${index + 1} из ${_questions.length}", style: const TextStyle(color: Colors.grey, fontWeight: FontWeight.bold, fontSize: 14)),
+                Text("Вопрос ${index + 1} из ${_questions.length}", style: TextStyle(color: theme.colorScheme.onSurfaceVariant, fontWeight: FontWeight.bold, fontSize: 14)),
                 const SizedBox(height: 16),
-                Text(q['q'], style: const TextStyle(color: _textColor, fontSize: 28, fontWeight: FontWeight.w900, height: 1.2)),
+                Text(q['q'], style: TextStyle(color: theme.colorScheme.onSurface, fontSize: 28, fontWeight: FontWeight.w900, height: 1.2)),
                 const SizedBox(height: 32),
 
                 Expanded(
                   child: SingleChildScrollView(
                     child: type == 'text' 
-                      ? _buildTextField(q['id'], q['hint'] ?? 'Ваш ответ')
+                      ? _buildTextField(q['id'], q['hint'] ?? 'Ваш ответ', theme)
                       : Wrap(
                           spacing: 12, runSpacing: 12,
-                          children: opts.map((opt) => _buildChip(q['id'], opt, type)).toList(),
+                          children: opts.map((opt) => _buildChip(q['id'], opt, type, theme)).toList(),
                         ),
                   ),
                 ),
@@ -246,11 +245,11 @@ class _SmartQuestionnaireScreenState extends State<SmartQuestionnaireScreen> {
                 SizedBox(
                   width: double.infinity, height: 56,
                   child: ElevatedButton(
-                    style: ElevatedButton.styleFrom(backgroundColor: _accentColor, shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)), elevation: 0),
+                    style: ElevatedButton.styleFrom(backgroundColor: theme.colorScheme.primary, shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)), elevation: 0),
                     onPressed: _isLoading ? null : _nextPage,
                     child: _isLoading 
-                      ? const CircularProgressIndicator(color: Colors.white)
-                      : Text(index == _questions.length - 1 ? "СОХРАНИТЬ И ВЫЙТИ" : "ДАЛЕЕ", style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w800, fontSize: 16, letterSpacing: 1.0)),
+                      ? SizedBox(width: 24, height: 24, child: CircularProgressIndicator(color: theme.colorScheme.onPrimary, strokeWidth: 2))
+                      : Text(index == _questions.length - 1 ? "СОХРАНИТЬ И ВЫЙТИ" : "ДАЛЕЕ", style: TextStyle(color: theme.colorScheme.onPrimary, fontWeight: FontWeight.w800, fontSize: 16, letterSpacing: 1.0)),
                   ),
                 ),
                 const SizedBox(height: 16),
@@ -262,7 +261,7 @@ class _SmartQuestionnaireScreenState extends State<SmartQuestionnaireScreen> {
     );
   }
 
-  Widget _buildChip(String qId, String option, String type) {
+  Widget _buildChip(String qId, String option, String type, ThemeData theme) {
     final bool isMulti = type == 'multi';
     final List<String> currentMulti = isMulti ? (_answers[qId] as List<String>? ?? []) : [];
     final bool isSelected = isMulti ? currentMulti.contains(option) : _answers[qId] == option;
@@ -271,10 +270,10 @@ class _SmartQuestionnaireScreenState extends State<SmartQuestionnaireScreen> {
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         ChoiceChip(
-          label: Text(option, style: TextStyle(color: isSelected ? Colors.white : _textColor, fontWeight: FontWeight.w600, fontSize: 15)),
+          label: Text(option, style: TextStyle(color: isSelected ? theme.colorScheme.onPrimary : theme.colorScheme.onSurface, fontWeight: FontWeight.w600, fontSize: 15)),
           selected: isSelected,
-          selectedColor: _accentColor,
-          backgroundColor: const Color(0xFFF2F2F7),
+          selectedColor: theme.colorScheme.primary,
+          backgroundColor: theme.colorScheme.onSurfaceVariant.withValues(alpha: 0.1),
           padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
           shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16), side: const BorderSide(color: Colors.transparent)),
           onSelected: (selected) {
@@ -306,7 +305,7 @@ class _SmartQuestionnaireScreenState extends State<SmartQuestionnaireScreen> {
           child: (isSelected && option == 'Свой вариант')
               ? Padding(
                   padding: const EdgeInsets.only(top: 12.0, bottom: 4.0),
-                  child: _buildTextField(qId, 'Напишите свой вариант...'),
+                  child: _buildTextField(qId, 'Напишите свой вариант...', theme),
                 )
               : const SizedBox.shrink(),
         )
@@ -314,7 +313,7 @@ class _SmartQuestionnaireScreenState extends State<SmartQuestionnaireScreen> {
     );
   }
 
-  Widget _buildTextField(String qId, String hint) {
+  Widget _buildTextField(String qId, String hint, ThemeData theme) {
     final double screenWidth = MediaQuery.of(context).size.width;
     
     return SizedBox(
@@ -322,11 +321,12 @@ class _SmartQuestionnaireScreenState extends State<SmartQuestionnaireScreen> {
       child: TextField(
         controller: _customTextControllers[qId],
         maxLines: 3, minLines: 1,
-        style: const TextStyle(color: _textColor, fontWeight: FontWeight.w500),
+        style: TextStyle(color: theme.colorScheme.onSurface, fontWeight: FontWeight.w500),
         decoration: InputDecoration(
           hintText: hint,
-          hintStyle: const TextStyle(color: Colors.grey),
-          filled: true, fillColor: const Color(0xFFF2F2F7),
+          hintStyle: TextStyle(color: theme.colorScheme.onSurfaceVariant.withValues(alpha: 0.5)),
+          filled: true, 
+          fillColor: theme.colorScheme.onSurfaceVariant.withValues(alpha: 0.1),
           border: OutlineInputBorder(borderRadius: BorderRadius.circular(16), borderSide: BorderSide.none),
         ),
       ),

@@ -2,14 +2,14 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:firebase_core/firebase_core.dart';
 import 'package:firebase_messaging/firebase_messaging.dart';
-import 'package:flutter/foundation.dart';
 import 'package:easy_localization/easy_localization.dart';
-import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:flutter_rustore_billing/flutter_rustore_billing.dart';
 
 import 'firebase_options.dart';
 import 'screens/home_wrapper.dart';
 import 'services/local_notification_service.dart';
-import 'package:flutter_rustore_billing/flutter_rustore_billing.dart';
+import 'services/theme_service.dart'; 
+import 'theme/app_theme.dart'; 
 
 @pragma('vm:entry-point')
 Future<void> _firebaseMessagingBackgroundHandler(RemoteMessage message) async {
@@ -32,10 +32,13 @@ Future<void> main() async {
   await LocalNotificationService().init();
   await EasyLocalization.ensureInitialized();
 
+  // Инициализируем сервис тем перед запуском
+  await ThemeService().init();
+
   SystemChrome.setSystemUIOverlayStyle(
     const SystemUiOverlayStyle(
       statusBarColor: Colors.transparent,
-      statusBarIconBrightness: Brightness.dark,
+      // Убрали жесткую привязку Brightness.dark, теперь AppBarTheme управляет цветом иконок
     ),
   );
 
@@ -54,46 +57,21 @@ class MyApp extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return MaterialApp(
-      title: 'MyEva',
-      debugShowCheckedModeBanner: false,
-      localizationsDelegates: context.localizationDelegates,
-      supportedLocales: context.supportedLocales,
-      locale: context.locale,
-      theme: ThemeData.light().copyWith(
-        scaffoldBackgroundColor: const Color(0xFFF9F9F9),
-        primaryColor: const Color(0xFFB76E79),
-        colorScheme: const ColorScheme.light(
-          primary: Color(0xFFB76E79),
-          secondary: Color(0xFFD49A89),
-          surface: Colors.white,
-        ),
-        textTheme: ThemeData.light().textTheme.apply(
-          bodyColor: const Color(0xFF2D2D2D),
-          displayColor: const Color(0xFF2D2D2D),
-        ),
-        appBarTheme: const AppBarTheme(
-          backgroundColor: Color(0xFFF9F9F9),
-          elevation: 0,
-          iconTheme: IconThemeData(color: Color(0xFF2D2D2D)),
-          titleTextStyle: TextStyle(
-            color: Color(0xFF2D2D2D),
-            fontSize: 20,
-            fontWeight: FontWeight.w800,
-            letterSpacing: -0.5,
-          ),
-        ),
-        bottomNavigationBarTheme: const BottomNavigationBarThemeData(
-          backgroundColor: Colors.white,
-          elevation: 0,
-          selectedItemColor: Color(0xFFB76E79),
-          unselectedItemColor: Color(0xFF8E8E93),
-          selectedLabelStyle: TextStyle(fontWeight: FontWeight.w700, fontSize: 12),
-          unselectedLabelStyle: TextStyle(fontWeight: FontWeight.w500, fontSize: 12),
-          type: BottomNavigationBarType.fixed,
-        ),
-      ),
-      home: const HomeWrapper(),
+    return ValueListenableBuilder<ThemeMode>(
+      valueListenable: ThemeService().themeModeNotifier,
+      builder: (_, mode, __) {
+        return MaterialApp(
+          title: 'Моя Ева', 
+          debugShowCheckedModeBanner: false,
+          localizationsDelegates: context.localizationDelegates,
+          supportedLocales: context.supportedLocales,
+          locale: context.locale,
+          theme: AppTheme.lightTheme,
+          darkTheme: AppTheme.darkTheme,
+          themeMode: mode, // Реактивое переключение темы
+          home: const HomeWrapper(),
+        );
+      },
     );
   }
 }

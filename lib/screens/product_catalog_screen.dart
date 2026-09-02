@@ -20,10 +20,7 @@ class _ProductCatalogScreenState extends State<ProductCatalogScreen> {
   
   bool _isLoading = true;
   
-  // Локальное хранилище выбранных продуктов
   final Set<String> _selectedProducts = {};
-  
-  // Для кастомных продуктов, добавленных пользователем
   final Map<String, String> _customProductsMap = {};
 
   @override
@@ -41,7 +38,6 @@ class _ProductCatalogScreenState extends State<ProductCatalogScreen> {
     super.dispose();
   }
 
-  // Загружаем то, что уже было добавлено в список покупок ранее
   Future<void> _loadExistingList() async {
     final uid = FirebaseAuth.instance.currentUser?.uid;
     if (uid != null) {
@@ -59,7 +55,6 @@ class _ProductCatalogScreenState extends State<ProductCatalogScreen> {
   }
 
   List<CatalogItem> get _filteredProducts {
-    // Объединяем дефолтные и кастомные продукты
     List<CatalogItem> allAvailable = [
       ...ProductCatalogData.allProducts,
       ..._customProductsMap.entries.map((e) => CatalogItem(name: e.key, category: e.value))
@@ -72,33 +67,34 @@ class _ProductCatalogScreenState extends State<ProductCatalogScreen> {
     }).toList();
   }
 
-  Future<void> _addCustomProductDialog() async {
+  Future<void> _addCustomProductDialog(ThemeData theme) async {
     final TextEditingController customController = TextEditingController();
     await showDialog(
       context: context,
       builder: (ctx) => AlertDialog(
-        backgroundColor: Colors.white,
+        backgroundColor: theme.colorScheme.surface,
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(24)),
-        title: const Text("Свой продукт", style: const TextStyle(color: Color(0xFF2D2D2D), fontWeight: FontWeight.w800, fontSize: 20)),
+        title: Text("Свой продукт", style: TextStyle(color: theme.colorScheme.onSurface, fontWeight: FontWeight.w800, fontSize: 20)),
         content: TextField(
           controller: customController,
-          style: const TextStyle(color: Color(0xFF2D2D2D), fontWeight: FontWeight.w600),
-          decoration: const InputDecoration(
+          style: TextStyle(color: theme.colorScheme.onSurface, fontWeight: FontWeight.w600),
+          decoration: InputDecoration(
             hintText: 'Название продукта',
-            hintStyle: TextStyle(color: Color(0xFFC7C7CC)),
-            focusedBorder: UnderlineInputBorder(borderSide: BorderSide(color: Color(0xFFB76E79))),
+            hintStyle: TextStyle(color: theme.colorScheme.onSurfaceVariant.withValues(alpha: 0.5)),
+            focusedBorder: UnderlineInputBorder(borderSide: BorderSide(color: theme.colorScheme.primary)),
+            enabledBorder: UnderlineInputBorder(borderSide: BorderSide(color: theme.colorScheme.onSurfaceVariant.withValues(alpha: 0.2))),
           ),
-          cursorColor: const Color(0xFFB76E79),
+          cursorColor: theme.colorScheme.primary,
           textCapitalization: TextCapitalization.sentences,
         ),
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(ctx),
-            child: const Text('Отмена', style: TextStyle(color: Color(0xFF8E8E93), fontWeight: FontWeight.bold)),
+            child: Text('Отмена', style: TextStyle(color: theme.colorScheme.onSurfaceVariant, fontWeight: FontWeight.bold)),
           ),
           ElevatedButton(
             style: ElevatedButton.styleFrom(
-              backgroundColor: const Color(0xFFB76E79),
+              backgroundColor: theme.colorScheme.primary,
               shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16))
             ),
             onPressed: () {
@@ -111,70 +107,69 @@ class _ProductCatalogScreenState extends State<ProductCatalogScreen> {
                 Navigator.pop(ctx);
               }
             },
-            child: const Text('Добавить', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
+            child: Text('Добавить', style: TextStyle(color: theme.colorScheme.onPrimary, fontWeight: FontWeight.bold)),
           ),
         ],
       )
     );
   }
 
-  // Сохранение пачкой и закрытие
   Future<void> _saveAndClose() async {
     setState(() => _isLoading = true);
+    final navigator = Navigator.of(context);
+    final messenger = ScaffoldMessenger.of(context);
     
-    // Собираем карту категорий для всех продуктов (базовые + кастомные)
     Map<String, String> fullCategoryMap = {...ProductCatalogData.productCategoryMap, ..._customProductsMap};
     
     try {
       await DatabaseService().syncCatalogShoppingList(_selectedProducts, fullCategoryMap);
-      if (mounted) {
-        Navigator.pop(context); // Закрываем экран
-      }
+      if (mounted) navigator.pop(); 
     } catch (e) {
       debugPrint('Ошибка синхронизации каталога: $e');
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
+        messenger.showSnackBar(
           const SnackBar(content: Text('Ошибка сохранения. Проверьте интернет.')),
         );
       }
     } finally {
       if (mounted) {
-        setState(() => _isLoading = false); // Обязательно выключаем лоадер при любом исходе
+        setState(() => _isLoading = false); 
       }
     }
   }
 
   @override
   Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+
     if (_isLoading) {
-      return const Scaffold(
-        backgroundColor: Color(0xFFF9F9F9),
-        body: Center(child: CircularProgressIndicator(color: Color(0xFFB76E79))),
+      return Scaffold(
+        backgroundColor: theme.scaffoldBackgroundColor,
+        body: Center(child: CircularProgressIndicator(color: theme.colorScheme.primary)),
       );
     }
 
     final products = _filteredProducts;
 
     return Scaffold(
-      backgroundColor: const Color(0xFFF9F9F9),
+      backgroundColor: theme.scaffoldBackgroundColor,
       appBar: AppBar(
-        title: const Text("Выбрать продукты", style: TextStyle(color: Color(0xFF2D2D2D), fontWeight: FontWeight.w800, fontSize: 20)),
+        title: Text("Выбрать продукты", style: TextStyle(color: theme.colorScheme.onSurface, fontWeight: FontWeight.w800, fontSize: 20)),
         backgroundColor: Colors.transparent,
         elevation: 0,
-        iconTheme: const IconThemeData(color: Color(0xFF2D2D2D)),
+        iconTheme: IconThemeData(color: theme.colorScheme.onSurface),
         actions: [
-          IconButton(icon: const Icon(Icons.add, size: 28), onPressed: _addCustomProductDialog),
+          IconButton(icon: const Icon(Icons.add, size: 28), onPressed: () => _addCustomProductDialog(theme)),
           const SizedBox(width: 8),
         ],
       ),
-      // Плавающая кнопка сохранения
       floatingActionButtonLocation: FloatingActionButtonLocation.centerFloat,
       floatingActionButton: FloatingActionButton.extended(
         onPressed: _saveAndClose,
-        backgroundColor: const Color(0xFFB76E79),
+        backgroundColor: theme.colorScheme.primary,
         elevation: 8,
-        icon: const Icon(Icons.check, color: Colors.white),
-        label: Text("Добавить в список (${_selectedProducts.length})", style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w800, fontSize: 15)),
+        icon: Icon(Icons.check, color: theme.colorScheme.onPrimary),
+        label: Text("Добавить в список (${_selectedProducts.length})", style: TextStyle(color: theme.colorScheme.onPrimary, fontWeight: FontWeight.w800, fontSize: 15)),
       ),
       body: Column(
         children: [
@@ -188,9 +183,9 @@ class _ProductCatalogScreenState extends State<ProductCatalogScreen> {
           const SizedBox(height: 16),
           Expanded(
             child: products.isEmpty 
-              ? const Center(child: Text('Продукты не найдены', style: TextStyle(color: Color(0xFF8E8E93), fontSize: 15)))
+              ? Center(child: Text('Продукты не найдены', style: TextStyle(color: theme.colorScheme.onSurfaceVariant, fontSize: 15)))
               : ListView.builder(
-                  padding: const EdgeInsets.only(left: 24, right: 24, bottom: 100), // Отступ под FAB
+                  padding: const EdgeInsets.only(left: 24, right: 24, bottom: 100), 
                   itemCount: products.length,
                   itemBuilder: (context, index) {
                     final product = products[index];

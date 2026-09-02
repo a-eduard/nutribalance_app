@@ -20,11 +20,10 @@ class LocalNotificationService {
   Future<void> init() async {
     tz.initializeTimeZones();
 
-    // Узнаем часовой пояс телефона и говорим плагину использовать его
+    // Узнаем часовой пояс телефона
     final String timeZoneName = await FlutterTimezone.getLocalTimezone();
     tz.setLocalLocation(tz.getLocation(timeZoneName));
 
-    // ИСПРАВЛЕНИЕ: Правильное имя иконки для Android
     const AndroidInitializationSettings initializationSettingsAndroid =
         AndroidInitializationSettings('@mipmap/launcher_icon');
 
@@ -56,6 +55,8 @@ class LocalNotificationService {
 
       final bool? grantedNotification = await androidImplementation
           ?.requestNotificationsPermission();
+      // Для inexact таймеров нам больше не нужно жестко требовать Exact Alarms, 
+      // но оставим запрос на всякий случай для совместимости
       final bool? grantedAlarm = await androidImplementation
           ?.requestExactAlarmsPermission();
 
@@ -72,7 +73,13 @@ class LocalNotificationService {
   }
 
   Future<void> scheduleDailyNotifications() async {
+    // 1. Очищаем все вообще
     await cancelAll();
+    
+    // 2. ЖЕСТКАЯ ОЧИСТКА по ID (на случай, если cancelAll не сработал из-за кэша ОС)
+    await flutterLocalNotificationsPlugin.cancel(id: 1);
+    await flutterLocalNotificationsPlugin.cancel(id: 2);
+    await flutterLocalNotificationsPlugin.cancel(id: 3);
 
     String userName = 'дорогая';
     try {
@@ -109,7 +116,7 @@ class LocalNotificationService {
     int mIdx = random.nextInt(morningTitles.length);
 
     await _scheduleDailyNotification(
-      id: 1,
+      id: 101,
       title: morningTitles[mIdx],
       body: morningBodies[mIdx],
       hour: 10,
@@ -130,7 +137,7 @@ class LocalNotificationService {
     int nIdx = random.nextInt(noonTitles.length);
 
     await _scheduleDailyNotification(
-      id: 2,
+      id: 102,
       title: noonTitles[nIdx],
       body: noonBodies[nIdx],
       hour: 14,
@@ -151,11 +158,11 @@ class LocalNotificationService {
     int eIdx = random.nextInt(eveningTitles.length);
 
     await _scheduleDailyNotification(
-      id: 3,
+      id: 103,
       title: eveningTitles[eIdx],
       body: eveningBodies[eIdx],
-      hour: 21,
-      minute: 00,
+      hour: 20,
+      minute: 30,
     );
   }
 
@@ -188,7 +195,8 @@ class LocalNotificationService {
       body: body,
       scheduledDate: _nextInstanceOfTime(hour, minute),
       notificationDetails: details,
-      androidScheduleMode: AndroidScheduleMode.exactAllowWhileIdle,
+      // ИСПРАВЛЕНИЕ: inexactAllowWhileIdle решает проблему двойных пушей на Android
+      androidScheduleMode: AndroidScheduleMode.inexactAllowWhileIdle,
       matchDateTimeComponents: DateTimeComponents.time,
     );
   }
@@ -203,7 +211,8 @@ class LocalNotificationService {
       hour,
       minute,
     );
-    if (scheduledDate.isBefore(now)) {
+    // ИСПРАВЛЕНИЕ: Защита от моментального двойного срабатывания, если таймер ставится минута-в-минуту
+    if (scheduledDate.isBefore(now) || scheduledDate.isAtSameMomentAs(now)) {
       scheduledDate = scheduledDate.add(const Duration(days: 1));
     }
     return scheduledDate;
@@ -211,11 +220,40 @@ class LocalNotificationService {
 
   Future<void> cancelAll() async {
     await flutterLocalNotificationsPlugin.cancelAll();
+    // ФИКС 2: Жестко добиваем все возможные зависшие ID (и старые, и новые)
+    await flutterLocalNotificationsPlugin.cancel(id: 1);
+    await flutterLocalNotificationsPlugin.cancel(id: 2);
+    await flutterLocalNotificationsPlugin.cancel(id: 3);
+    await flutterLocalNotificationsPlugin.cancel(id: 101);
+    await flutterLocalNotificationsPlugin.cancel(id: 102);
+    await flutterLocalNotificationsPlugin.cancel(id: 103);
+  }
+
+  // === ФИКС 3: Умная синхронизация при запуске приложения ===
+  Future<void> syncNotificationsOnStartup() async {
+    try {
+      final uid = FirebaseAuth.instance.currentUser?.uid;
+      if (uid == null) return;
+      
+      final doc = await FirebaseFirestore.instance.collection('users').doc(uid).get();
+      // Проверяем тумблер из базы данных
+      final isEnabled = doc.data()?['notificationsEnabled'] == true;
+      
+      if (isEnabled) {
+        await scheduleDailyNotifications();
+      } else {
+        await cancelAll(); // Жестко отменяем, если тумблер был выключен
+      }
+    } catch (e) {
+      debugPrint('Ошибка синхронизации пушей при старте: $e');
+    }
   }
 
   Future<void> testPushIn5Seconds() async {
     try {
       final bool granted = await requestPermissions();
+      if (!granted) return;
+      
       const details = NotificationDetails(
         android: AndroidNotificationDetails(
           'test_channel_v4',
@@ -230,21 +268,19 @@ class LocalNotificationService {
           presentSound: true,
         ),
       );
-      final tz.TZDateTime scheduledTime = tz.TZDateTime.now(
-        tz.local,
-      ).add(const Duration(seconds: 5));
+      
+      final tz.TZDateTime scheduledTime = tz.TZDateTime.now(tz.local).add(const Duration(seconds: 5));
 
-      // ИСПРАВЛЕНИЕ: Позиционные аргументы
       await flutterLocalNotificationsPlugin.zonedSchedule(
         id: 999,
         title: 'Отложенный тест! ⏳',
         body: 'Таймеры в фоне тоже работают!',
         scheduledDate: scheduledTime,
         notificationDetails: details,
-        androidScheduleMode: AndroidScheduleMode.exactAllowWhileIdle,
+        androidScheduleMode: AndroidScheduleMode.inexactAllowWhileIdle,
       );
     } catch (e) {
-      debugPrint('❌ ОШИБКА: $e');
+      debugPrint('❌ ОШИБКА ТЕСТОВОГО ПУША: $e');
     }
   }
 }

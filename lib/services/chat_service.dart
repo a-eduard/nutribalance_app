@@ -34,7 +34,7 @@ class ChatService {
   
   Future<String> getOrCreateChat(String otherUserId) async {
     final chatId = _getChatRoomId(currentUserId, otherUserId);
-    final chatDoc = await _db.collection('chats').doc(chatId).get();
+    final chatDoc = await _db.collection('chats').doc(chatId).get(); 
 
     if (!chatDoc.exists) {
       final myInfo = await _getUserBasicInfo(currentUserId);

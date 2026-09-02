@@ -1,11 +1,9 @@
 import 'dart:io';
-import 'dart:typed_data';
 import 'dart:convert';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:firebase_storage/firebase_storage.dart';
 import 'package:flutter/foundation.dart';
-import 'package:cloud_functions/cloud_functions.dart';
 
 class DatabaseService {
   final FirebaseFirestore _db = FirebaseFirestore.instance;
@@ -14,7 +12,7 @@ class DatabaseService {
   User? get currentUser => _auth.currentUser;
 
   DateTime _getLogicalNow() {
-    return DateTime.now().toLocal().subtract(const Duration(hours: 3));
+    return DateTime.now().toLocal();
   }
 
   String getTodayDocId() {
@@ -24,12 +22,27 @@ class DatabaseService {
 
   Future<void> updateUserData(Map<String, dynamic> data) async {
     final user = _auth.currentUser;
-    if (user != null) {
-      await _db
-          .collection('users')
-          .doc(user.uid)
-          .set(data, SetOptions(merge: true));
+    if (user == null) {
+      return;
     }
+
+    final batch = _db.batch();
+    final userRef = _db.collection('users').doc(user.uid);
+
+    batch.set(userRef, data, SetOptions(merge: true));
+
+    if (data.containsKey('weight') && data['weight'] != null) {
+      final String dateId = getTodayDocId(); 
+      final weightLogRef = userRef.collection('weight_logs').doc(dateId);
+      
+      batch.set(weightLogRef, {
+        'weight': data['weight'],
+        'date': dateId,
+        'timestamp': FieldValue.serverTimestamp(),
+      }, SetOptions(merge: true));
+    }
+
+    await batch.commit();
   }
 
   Future<Map<String, String>> getSpecialistInfo() async {
@@ -65,44 +78,26 @@ class DatabaseService {
     return false;
   }
 
-  Future<String?> createYookassaPayment({
-    required double amount,
-    required String description,
-    required String paymentType, 
-    int? durationDays,
-  }) async {
-    try {
-      final user = _auth.currentUser;
-      if (user == null) return null;
-      
-      final String idempotencyKey = '${user.uid}_${DateTime.now().millisecondsSinceEpoch}';
-
-      final result = await FirebaseFunctions.instance.httpsCallable('createPayment').call({
-        'amount': amount,
-        'description': description,
-        'paymentType': paymentType,
-        'durationDays': durationDays,
-        'idempotencyKey': idempotencyKey, 
-      });
-      return result.data['confirmationUrl'] as String?;
-    } catch (e) {
-      debugPrint('Ошибка создания платежа: $e');
-      return null;
-    }
-  }
-
   Future<bool> isNicknameUnique(String nickname) async {
-    if (nickname.isEmpty) return true;
+    if (nickname.isEmpty) {
+      return true;
+    }
     final user = _auth.currentUser;
-    if (user == null) return false;
+    if (user == null) {
+      return false;
+    }
     try {
       final snapshot = await _db
           .collection('users')
           .where('nickname', isEqualTo: nickname)
           .get();
-      if (snapshot.docs.isEmpty) return true;
+      if (snapshot.docs.isEmpty) {
+        return true;
+      }
       for (var doc in snapshot.docs) {
-        if (doc.id != user.uid) return false;
+        if (doc.id != user.uid) {
+          return false;
+        }
       }
       return true;
     } catch (e) {
@@ -113,7 +108,9 @@ class DatabaseService {
   
   Future<void> savePeriodData({required DateTime start, int cycleLength = 28, int periodDuration = 5}) async {
     final user = _auth.currentUser;
-    if (user == null) return;
+    if (user == null) {
+      return;
+    }
     
     await _db.collection('users').doc(user.uid).set({
       'lastPeriodStartDate': Timestamp.fromDate(start),
@@ -124,7 +121,9 @@ class DatabaseService {
   
   Future<void> updateWaterGlasses(int count) async {
     final user = _auth.currentUser;
-    if (user == null) return;
+    if (user == null) {
+      return;
+    }
     final String docId = getTodayDocId();
     await _db
         .collection('users')
@@ -139,7 +138,9 @@ class DatabaseService {
 
   Future<void> updatePeriodStartDate(DateTime date) async {
     final user = _auth.currentUser;
-    if (user == null) return;
+    if (user == null) {
+      return;
+    }
     await _db.collection('users').doc(user.uid).set({
       'lastPeriodStartDate': Timestamp.fromDate(date),
     }, SetOptions(merge: true));
@@ -147,13 +148,17 @@ class DatabaseService {
 
   Stream<DocumentSnapshot> getUserData() {
     final user = _auth.currentUser;
-    if (user != null) return _db.collection('users').doc(user.uid).snapshots();
+    if (user != null) {
+      return _db.collection('users').doc(user.uid).snapshots();
+    }
     return const Stream.empty();
   }
 
   Future<String?> uploadChatImage(File imageFile, String chatId) async {
     final user = _auth.currentUser;
-    if (user == null) return null;
+    if (user == null) {
+      return null;
+    }
     try {
       final timestamp = DateTime.now().millisecondsSinceEpoch;
       final path = 'chats/$chatId/${timestamp}_${user.uid}.jpg';
@@ -219,7 +224,9 @@ class DatabaseService {
 
   Future<List<Map<String, String>>> getChatHistoryForAI(String botType) async {
     final user = _auth.currentUser;
-    if (user == null) return [];
+    if (user == null) {
+      return [];
+    }
     final snapshots = await _db
         .collection('users')
         .doc(user.uid)
@@ -227,18 +234,29 @@ class DatabaseService {
         .orderBy('timestamp', descending: true)
         .limit(10)
         .get();
+        
     return snapshots.docs.reversed.map((doc) {
       final data = doc.data();
+      String text = data['text'].toString();
+      
+      final List<dynamic> images = data['imageUrls'] ?? [];
+      final String? pdf = data['pdfUrl'];
+      if (images.isNotEmpty || pdf != null) {
+         text = "[СИСТЕМНОЕ СООБЩЕНИЕ: В этом запросе пользователь прикреплял файлы/анализы. Опирайся на то, что ты уже увидела, не проси прислать их снова.]\n$text";
+      }
+
       return {
         "role": data['role'] == 'ai' ? 'assistant' : 'user',
-        "text": data['text'].toString(),
+        "text": text,
       };
     }).toList();
   }
 
   Future<void> saveNutritionGoal(Map<String, dynamic> data) async {
     final user = _auth.currentUser;
-    if (user == null) return;
+    if (user == null) {
+      return;
+    }
 
     await _db
         .collection('users')
@@ -254,7 +272,9 @@ class DatabaseService {
         }, SetOptions(merge: true));
 
     Map<String, dynamic> profileUpdates = {};
-    if (data['bmr'] != null) profileUpdates['bmr'] = data['bmr'];
+    if (data['bmr'] != null) {
+      profileUpdates['bmr'] = data['bmr'];
+    }
     if (data['maintenanceCalories'] != null) {
       profileUpdates['maintenanceCalories'] = data['maintenanceCalories'];
     }
@@ -266,24 +286,35 @@ class DatabaseService {
     }
   }
 
- // === ЖЕЛЕЗОБЕТОННОЕ СОХРАНЕНИЕ ЕДЫ В ОДНУ КАРТОЧКУ (МГНОВЕННОЕ) ===
   Future<void> logMeal(Map<String, dynamic> data, {String? extraImageUrl, File? imageFile, Uint8List? imageBytes}) async {
     final user = _auth.currentUser;
-    if (user == null) return;
+    if (user == null) {
+      return;
+    }
     final String docId = getTodayDocId();
     
     List<dynamic> rawItems = data['items'] ?? [];
-    if (rawItems.isEmpty && (data['meal_name'] != null || data['name'] != null)) { rawItems = [data]; }
+    if (rawItems.isEmpty && (data['meal_name'] != null || data['name'] != null)) { 
+      rawItems = [data]; 
+    }
 
     int safeInt(dynamic val) {
-      if (val is num) return val.toInt();
-      if (val is String) return double.tryParse(val.replaceAll(RegExp(r'[^0-9.]'), ''))?.toInt() ?? 0;
+      if (val is num) {
+        return val.toInt();
+      }
+      if (val is String) {
+        return double.tryParse(val.replaceAll(RegExp(r'[^0-9.]'), ''))?.toInt() ?? 0;
+      }
       return 0;
     }
 
     double safeDouble(dynamic val, [double def = 100.0]) {
-      if (val is num) return val.toDouble();
-      if (val is String) return double.tryParse(val.replaceAll(RegExp(r'[^0-9.]'), '')) ?? def;
+      if (val is num) {
+        return val.toDouble();
+      }
+      if (val is String) {
+        return double.tryParse(val.replaceAll(RegExp(r'[^0-9.]'), '')) ?? def;
+      }
       return def;
     }
 
@@ -300,7 +331,9 @@ class DatabaseService {
       final double grams = safeDouble(item['weight_g'] ?? item['grams'], 100.0);
       final String name = item['meal_name'] ?? item['name'] ?? item['product_name'] ?? 'Ингредиент';
       int healthScore = safeInt(item['health_score']);
-      if (healthScore == 0) healthScore = 5;
+      if (healthScore == 0) {
+        healthScore = 5;
+      }
 
       ingredients.add({
         'id': '${DateTime.now().millisecondsSinceEpoch}_$i',
@@ -309,17 +342,21 @@ class DatabaseService {
       totalCals += c; totalProt += p; totalFat += f; totalCarbs += carb; totalFiber += fib;
     }
     
-    if (ingredients.isEmpty) return;
+    if (ingredients.isEmpty) {
+      return;
+    }
 
     double avgHealthScore = 0;
-    for (var ing in ingredients) { avgHealthScore += (ing['health_score'] as int); }
+    for (var ing in ingredients) { 
+      avgHealthScore += (ing['health_score'] as int); 
+    }
     avgHealthScore = ingredients.isNotEmpty ? avgHealthScore / ingredients.length : 5.0;
 
     final String mealId = DateTime.now().millisecondsSinceEpoch.toString();
     
     String? finalUrl = extraImageUrl ?? data['imageUrl'];
     if (finalUrl == null && imageFile == null && imageBytes == null) {
-        finalUrl = 'assets/images/empty_diary.png'; 
+        finalUrl = 'assets/images/apple_icon.png'; 
     }
 
     final mealEntry = {
@@ -334,11 +371,30 @@ class DatabaseService {
       'health_score': avgHealthScore.round(),
       'timestamp': Timestamp.now(), 
       'is_grouped': true, 
-      'ingredients_json': jsonEncode(ingredients), // <-- ИСПРАВЛЕНО! Теперь это легкая строка!
+      'ingredients_json': jsonEncode(ingredients), 
     };
 
     final docRef = _db.collection('users').doc(user.uid).collection('meals').doc(docId);
     
+    try {
+      final docSnap = await docRef.get(const GetOptions(source: Source.serverAndCache));
+      if (!docSnap.exists) {
+        await docRef.set({
+          'items': [],
+          'calories': 0,
+          'protein': 0,
+          'fat': 0,
+          'carbs': 0,
+          'fiber': 0,
+          'bonus_calories': 0,
+          'water_glasses': 0,
+          'date': Timestamp.fromDate(_getLogicalNow()),
+        });
+      }
+    } catch (e) {
+      debugPrint("Ошибка проверки документа дня: $e");
+    }
+
     docRef.set({
       'items': FieldValue.arrayUnion([mealEntry]),
       'calories': FieldValue.increment(totalCals),
@@ -353,7 +409,11 @@ class DatabaseService {
       Future.microtask(() async {
         try {
           final ref = FirebaseStorage.instance.ref().child('users/${user.uid}/meals/$mealId.jpg');
-          if (imageFile != null) await ref.putFile(imageFile); else await ref.putData(imageBytes!);
+          if (imageFile != null) {
+            await ref.putFile(imageFile); 
+          } else {
+            await ref.putData(imageBytes!);
+          }
           final String uploadedUrl = await ref.getDownloadURL();
           
           final snap = await docRef.get(const GetOptions(source: Source.cache));
@@ -365,15 +425,18 @@ class DatabaseService {
               docRef.update({'items': items});
             }
           }
-        } catch (e) { debugPrint("Ошибка загрузки фото: $e"); }
+        } catch (e) { 
+          debugPrint("Ошибка загрузки фото: $e"); 
+        }
       });
     }
   }
-  // === ФИНАЛЬНОЕ УДАЛЕНИЕ (БЕЗ ТАЙМАУТОВ И ОЖИДАНИЙ) ===
-  // === OPTIMISTIC UI УДАЛЕНИЕ (МГНОВЕННО, БЕЗ ОЖИДАНИЯ СЕРВЕРА) ===
+
   Future<void> deleteMealItem(Map<String, dynamic> itemToRemove, List<dynamic> currentItems, String dateDocId) async {
     final user = _auth.currentUser;
-    if (user == null) throw Exception('Пользователь не авторизован');
+    if (user == null) {
+      throw Exception('Пользователь не авторизован');
+    }
     
     final docRef = _db.collection('users').doc(user.uid).collection('meals').doc(dateDocId);
 
@@ -385,7 +448,6 @@ class DatabaseService {
     }
 
     if (currentItems.isEmpty) {
-      // Убрали await. Команда delete улетает в фон.
       docRef.delete().catchError((e) => debugPrint("Фоновая ошибка: $e"));
       return;
     }
@@ -399,8 +461,6 @@ class DatabaseService {
       totalFiber += (i['fiber'] as num?)?.toInt() ?? 0;
     }
 
-    // Убрали await. Firebase мгновенно обновит локальный кэш и перерисует цифры на экране.
-    // А на сервер отправит данные тогда, когда сам захочет (в фоне).
     docRef.set({
       'items': currentItems,
       'calories': totalCals,
@@ -411,10 +471,11 @@ class DatabaseService {
     }, SetOptions(merge: true)).catchError((e) => debugPrint("Фоновая ошибка: $e"));
   }
   
-  // === БЕЗОПАСНОЕ РЕДАКТИРОВАНИЕ ПОРЦИИ (УБРАНА ТРАНЗАКЦИЯ) ===
   Future<void> updateMealItemWeight(Map<String, dynamic> oldItem, int newWeightG) async {
     final user = _auth.currentUser;
-    if (user == null) return;
+    if (user == null) {
+      return;
+    }
     final String docId = getTodayDocId();
     final docRef = _db.collection('users').doc(user.uid).collection('meals').doc(docId);
 
@@ -426,15 +487,21 @@ class DatabaseService {
         snapshot = await docRef.get().timeout(const Duration(seconds: 3));
       }
 
-      if (!snapshot.exists) return;
+      if (!snapshot.exists) {
+        return;
+      }
 
       final data = snapshot.data() as Map<String, dynamic>?;
       List<dynamic> items = List.from(data?['items'] ?? []);
       final itemIndex = items.indexWhere((i) => i['id'] == oldItem['id']);
-      if (itemIndex == -1) return;
+      if (itemIndex == -1) {
+        return;
+      }
 
       double oldWeight = (oldItem['weight_g'] as num?)?.toDouble() ?? 100.0;
-      if (oldWeight <= 0) oldWeight = 100.0; 
+      if (oldWeight <= 0) {
+        oldWeight = 100.0; 
+      }
       final double ratio = newWeightG / oldWeight;
 
       final newItem = {
@@ -464,10 +531,11 @@ class DatabaseService {
     }
   }
 
-  // === БЕЗОПАСНОЕ РЕДАКТИРОВАНИЕ ИНГРЕДИЕНТА (УБРАНА ТРАНЗАКЦИЯ) ===
   Future<void> updateIngredientWeight(String mealId, Map<String, dynamic> oldIngredient, int newWeightG) async {
     final user = _auth.currentUser;
-    if (user == null) return;
+    if (user == null) {
+      return;
+    }
     final String docId = getTodayDocId();
     final docRef = _db.collection('users').doc(user.uid).collection('meals').doc(docId);
 
@@ -478,35 +546,50 @@ class DatabaseService {
       } catch (_) {
         snapshot = await docRef.get().timeout(const Duration(seconds: 3));
       }
-      if (!snapshot.exists) return;
+      if (!snapshot.exists) {
+        return;
+      }
 
       final data = snapshot.data() as Map<String, dynamic>?;
       List<dynamic> items = List.from(data?['items'] ?? []);
       final mealIndex = items.indexWhere((m) => m['id'] == mealId);
-      if (mealIndex == -1) return;
+      if (mealIndex == -1) {
+        return;
+      }
 
       Map<String, dynamic> meal = Map<String, dynamic>.from(items[mealIndex]);
-      List<dynamic> ingredients = List.from(meal['ingredients'] ?? []);
+      
+      List<dynamic> ingredients = [];
+      if (meal['ingredients_json'] != null) {
+        ingredients = jsonDecode(meal['ingredients_json']);
+      } else {
+        ingredients = List.from(meal['ingredients'] ?? []);
+      }
+
       final ingIndex = ingredients.indexWhere((i) => i['id'] == oldIngredient['id']);
-      if (ingIndex == -1) return;
+      if (ingIndex == -1) {
+        return;
+      }
 
       double oldWeight = (oldIngredient['weight_g'] as num?)?.toDouble() ?? 100.0;
-      if (oldWeight <= 0) oldWeight = 100.0; 
+      if (oldWeight <= 0) {
+        oldWeight = 100.0; 
+      }
       final double ratio = newWeightG / oldWeight;
 
-      final int newC = ((oldIngredient['calories'] as num) * ratio).round();
-      final int newP = ((oldIngredient['protein'] as num) * ratio).round();
-      final int newF = ((oldIngredient['fat'] as num) * ratio).round();
-      final int newCarb = ((oldIngredient['carbs'] as num) * ratio).round();
-      final int newFib = (((oldIngredient['fiber'] as num?) ?? 0) * ratio).round(); 
+      final int newC = ((oldIngredient['calories'] as num?)?.toInt() ?? 0 * ratio).round();
+      final int newP = ((oldIngredient['protein'] as num?)?.toInt() ?? 0 * ratio).round();
+      final int newF = ((oldIngredient['fat'] as num?)?.toInt() ?? 0 * ratio).round();
+      final int newCarb = ((oldIngredient['carbs'] as num?)?.toInt() ?? 0 * ratio).round();
+      final int newFib = ((oldIngredient['fiber'] as num?)?.toInt() ?? 0 * ratio).round(); 
       
       final int hScore = oldIngredient['health_score'] ?? 5;
 
-      final int diffC = newC - (oldIngredient['calories'] as int);
-      final int diffP = newP - (oldIngredient['protein'] as int);
-      final int diffF = newF - (oldIngredient['fat'] as int);
-      final int diffCarb = newCarb - (oldIngredient['carbs'] as int);
-      final int diffFib = newFib - ((oldIngredient['fiber'] ?? 0) as int); 
+      final int diffC = newC - ((oldIngredient['calories'] as num?)?.toInt() ?? 0);
+      final int diffP = newP - ((oldIngredient['protein'] as num?)?.toInt() ?? 0);
+      final int diffF = newF - ((oldIngredient['fat'] as num?)?.toInt() ?? 0);
+      final int diffCarb = newCarb - ((oldIngredient['carbs'] as num?)?.toInt() ?? 0);
+      final int diffFib = newFib - ((oldIngredient['fiber'] as num?)?.toInt() ?? 0); 
 
       ingredients[ingIndex] = {
         ...oldIngredient,
@@ -519,12 +602,13 @@ class DatabaseService {
         'health_score': hScore,
       };
 
-      meal['ingredients'] = ingredients;
-      meal['calories'] = (meal['calories'] as int) + diffC;
-      meal['protein'] = (meal['protein'] as int) + diffP;
-      meal['fat'] = (meal['fat'] as int) + diffF;
-      meal['carbs'] = (meal['carbs'] as int) + diffCarb;
-      meal['fiber'] = ((meal['fiber'] ?? 0) as int) + diffFib; 
+      meal['ingredients_json'] = jsonEncode(ingredients);
+      
+      meal['calories'] = ((meal['calories'] as num?)?.toInt() ?? 0) + diffC;
+      meal['protein'] = ((meal['protein'] as num?)?.toInt() ?? 0) + diffP;
+      meal['fat'] = ((meal['fat'] as num?)?.toInt() ?? 0) + diffF;
+      meal['carbs'] = ((meal['carbs'] as num?)?.toInt() ?? 0) + diffCarb;
+      meal['fiber'] = ((meal['fiber'] as num?)?.toInt() ?? 0) + diffFib; 
 
       items[mealIndex] = meal;
 
@@ -552,7 +636,9 @@ class DatabaseService {
 
   Future<void> saveMealDraft(Map<String, dynamic> data) async {
     final user = _auth.currentUser;
-    if (user == null) return;
+    if (user == null) {
+      return;
+    }
     await _db.collection('users').doc(user.uid).collection('meal_drafts').add({
       'meal_name': data['meal_name'] ?? 'Блюдо',
       'calories': (data['calories'] as num?)?.toInt() ?? 0,
@@ -565,7 +651,9 @@ class DatabaseService {
 
   Stream<DocumentSnapshot> getTodayMealsDoc() {
     final user = _auth.currentUser;
-    if (user == null) return const Stream.empty();
+    if (user == null) {
+      return const Stream.empty();
+    }
     final String docId = getTodayDocId();
     return _db
         .collection('users')
@@ -577,7 +665,9 @@ class DatabaseService {
 
   Stream<DocumentSnapshot> getNutritionGoal() {
     final user = _auth.currentUser;
-    if (user == null) return const Stream.empty();
+    if (user == null) {
+      return const Stream.empty();
+    }
     return _db
         .collection('users')
         .doc(user.uid)
@@ -588,7 +678,9 @@ class DatabaseService {
 
   Future<void> saveCustomFood(Map<String, dynamic> data) async {
     final user = _auth.currentUser;
-    if (user == null) return;
+    if (user == null) {
+      return;
+    }
     await _db.collection('users').doc(user.uid).collection('custom_foods').add({
       'name': data['product_name'] ?? data['name'] ?? 'Свой продукт',
       'calories': data['calories_100g'] ?? data['calories'] ?? 0,
@@ -601,12 +693,13 @@ class DatabaseService {
 
   Future<String> getAIContextSummary() async {
     final user = _auth.currentUser;
-    if (user == null) return "Данные пользователя недоступны.";
+    if (user == null) {
+      return "Данные пользователя недоступны.";
+    }
 
     try {
       final String todayDocId = getTodayDocId();
 
-      // === ОПТИМИЗАЦИЯ: Читаем из кэша, чтобы контекст собирался за миллисекунды ===
       const cacheOptions = GetOptions(source: Source.serverAndCache);
 
       final results = await Future.wait([
@@ -626,9 +719,6 @@ class DatabaseService {
 
       int avgCals = 0;
       try {
-        // === ИСПРАВЛЕНИЕ КРИТИЧЕСКОГО БАГА (GC SPAM & TIMEOUT) ===
-        // Больше никакого where('date')! Сортируем документы по их ID (YYYY-MM-DD)
-        // и берем ровно 7 последних. Это работает локально, мгновенно и не жрет память.
         final snap = await _db.collection('users').doc(user.uid).collection('meals')
             .orderBy(FieldPath.documentId, descending: true)
             .limit(7)
@@ -655,7 +745,9 @@ class DatabaseService {
         int weeks = 0;
         if (pregStart != null) {
           weeks = DateTime.now().difference(pregStart.toDate()).inDays ~/ 7;
-          if (weeks > 42) weeks = 42;
+          if (weeks > 42) {
+            weeks = 42;
+          }
         }
         pregnancyContext = "ПОЛЬЗОВАТЕЛЬ БЕРЕМЕННА (Срок: $weeks недель). Категорически запрещены жесткие диеты для похудения. Давай советы, адаптированные для беременных. Тон: максимально бережный и заботливый.";
         cyclePhase = "Беременность ($weeks недель)";
@@ -670,10 +762,15 @@ class DatabaseService {
 
           if (diff >= 0) {
             final int dayOfCycle = (diff % cycleLength) + 1;
-            if (dayOfCycle <= 5) cyclePhase = 'Менструация ($dayOfCycle-й день)';
-            else if (dayOfCycle <= 13) cyclePhase = 'Фолликулярная фаза ($dayOfCycle-й день)';
-            else if (dayOfCycle <= 15) cyclePhase = 'Овуляция ($dayOfCycle-й день)';
-            else cyclePhase = 'Лютеиновая фаза / ПМС ($dayOfCycle-й день)';
+            if (dayOfCycle <= 5) {
+              cyclePhase = 'Менструация ($dayOfCycle-й день)';
+            } else if (dayOfCycle <= 13) {
+              cyclePhase = 'Фолликулярная фаза ($dayOfCycle-й день)';
+            } else if (dayOfCycle <= 15) {
+              cyclePhase = 'Овуляция ($dayOfCycle-й день)';
+            } else {
+              cyclePhase = 'Лютеиновая фаза / ПМС ($dayOfCycle-й день)';
+            }
           }
         }
       }
@@ -681,15 +778,31 @@ class DatabaseService {
       String harmonyContextText = "Сегодня данные в раздел Гармония не вносились.";
       if (harmonyDoc.exists) {
         final hData = harmonyDoc.data() as Map<String, dynamic>? ?? {};
-        final symptomsList = List<String>.from(hData['symptoms'] ?? []);
-        final String symptoms = symptomsList.isEmpty ? 'Нет' : symptomsList.join(', ');
-        final String mood = hData['mood'] ?? 'Не отмечено';
+        
+        Map<String, int> sympMap = {};
+        if (hData['symptoms'] is Map) {
+          sympMap = (hData['symptoms'] as Map).map((k, v) => MapEntry(k.toString(), (v as num).toInt()));
+        }
+        final String symptoms = sympMap.isEmpty ? 'Нет' : sympMap.entries.map((e) => '${e.key} (сила: ${e.value}/10)').join(', ');
+        
+        List<String> parsedMoods = [];
+        if (hData['moods'] is List) {
+          parsedMoods = List<String>.from(hData['moods']);
+        } else if (hData['mood'] is String && hData['mood'].toString().isNotEmpty) {
+          parsedMoods = [hData['mood'].toString()]; 
+        }
+        final String mood = parsedMoods.isEmpty ? 'Не отмечено' : parsedMoods.join(', ');
+        
+        final List<String> medsList = List<String>.from(hData['meds'] ?? []);
+        final String meds = medsList.isEmpty ? 'Не принимались' : medsList.join(', ');
+
         final String sleep = hData['sleep'] ?? 'Не отмечено';
         
         harmonyContextText = """
 СЕГОДНЯШНЕЕ САМОЧУВСТВИЕ (из раздела Гармония):
 - Симптомы: $symptoms
 - Настроение: $mood
+- Медикаменты: $meds
 - Сон: $sleep
 """;
       }
@@ -707,22 +820,29 @@ class DatabaseService {
         });
       }
 
+      final String userName = userData['name']?.toString() ?? 'Пользователь';
+
       return """
 [СЕКРЕТНЫЙ СИСТЕМНЫЙ КОНТЕКСТ]
+Имя пользователя: $userName
 Статус: $planStatus
 $pregnancyContext
 Пол: ${userData['gender'] ?? 'не указан'} | Возраст: ${userData['age'] ?? 'не указан'} | Рост: ${userData['height'] ?? 'не указан'} см | Вес: ${userData['weight'] ?? 'не указан'} кг | Цель: ${userData['goals'] ?? userData['goal'] ?? 'не указана'}
 $questionnaireContext
 
-ИНСТРУКЦИЯ ПО ЦИКЛУ:
-Фаза цикла: $cyclePhase. Адаптируй советы по питанию под эту фазу. Если 'Лютеиновая фаза / ПМС', проявляй особую заботу.
+ИНСТРУКЦИЯ ПО ЦИКЛУ ПОЛЬЗОВАТЕЛЯ:
+Фаза цикла: $cyclePhase.
 
 $harmonyContextText
-ВНИМАНИЕ: Ты ВИДИШЬ раздел Гармония (он передан тебе в тексте выше). НИКОГДА не говори пользователю "Я не вижу раздел Гармония". Если пользователь просит проанализировать его показатели, используй данные из блока "СЕГОДНЯШНЕЕ САМОЧУВСТВИЕ" и дай заботливую обратную связь.
+ВНИМАНИЕ: Ты ВИДИШЬ раздел Гармония (он передан тебе в тексте выше). НИКОГДА не говори пользователю "Я не вижу раздел Гармония". Если пользователь просит проанализировать его показатели, используй данные из блока "СЕГОДНЯШНЕЕ САМОЧУВСТВИЕ".
 
-ВАЖНОЕ ПРАВИЛО ДЛЯ ЗАПИСИ ЕДЫ: Когда генерируешь JSON (log_food), ВСЕГДА заполняй поле "meal_name" на верхнем уровне, указывая общее название блюда, которое попросил пользователь (например: "Капучино", "Сэндвич", "Паста"). Не оставляй "meal_name" пустым, иначе система запишет только название первого ингредиента!
+🚨 КРИТИЧЕСКИ ВАЖНЫЕ ПРАВИЛА (ВЫПОЛНЯТЬ БЕЗУКОСНИТЕЛЬНО): 🚨
+1. АНАЛИЗ ЧУЖИХ ДАННЫХ: Если пользователь присылает анализы ДРУГОГО человека (дочери, мужа, родственника) — АНАЛИЗИРУЙ ИХ СТРОГО КАК ОТДЕЛЬНОГО ПАЦИЕНТА. КАТЕГОРИЧЕСКИ ЗАПРЕЩЕНО применять к ним цели пользователя (похудение/набор веса) и фазу цикла пользователя! 
+2. НЕ ТОРМОЗИ: Если пользователь прислал анализы с чужим именем, НЕ ОТКАЗЫВАЙСЯ их анализировать. Сразу выдавай полный разбор, и лишь в конце вежливо уточни: "Я заметила, что имя в анализах отличается, это для кого-то из близких?".
+3. СМЕНА ТЕМЫ: Если пользователь резко меняет тему (например, просит рецепт пирога, а до этого вы обсуждали анализы) — МГНОВЕННО забудь про анализы и пиши рецепт. НИКОГДА не зацикливайся на старой теме и не требуй прислать файлы, если пользователь просит о другом.
+4. ВЕС: Данные по калориям: В среднем за неделю съедено $avgCals ккал/день.
 
-Данные по калориям: В среднем за неделю съедено $avgCals ккал/день.
+ВАЖНОЕ ПРАВИЛО ДЛЯ ЗАПИСИ ЕДЫ: Когда генерируешь JSON (log_food), ВСЕГДА заполняй поле "meal_name" на верхнем уровне, указывая общее название блюда.
 """;
     } catch (e) {
       return "Контекст недоступен.";
@@ -734,27 +854,37 @@ $harmonyContextText
 
   Future<Map<String, dynamic>?> checkPromoCode(String rawCode) async {
     final String cleanCode = rawCode.trim().toUpperCase();
-    if (cleanCode.isEmpty) return null;
+    if (cleanCode.isEmpty) {
+      return null;
+    }
     try {
       final snapshot = await _db.collection('promocodes').where('code', isEqualTo: cleanCode).limit(1).get();
       if (snapshot.docs.isNotEmpty) {
-        final data = snapshot.docs.first.data() as Map<String, dynamic>;
-        if (data['isActive'] == true) return data;
+        final data = snapshot.docs.first.data();
+        if (data['isActive'] == true) {
+          return data;
+        }
       }
       return null;
-    } catch (e) { return null; }
+    } catch (e) { 
+      return null; 
+    }
   }
 
   Future<void> activateTrial(int days) async {
     final user = _auth.currentUser;
-    if (user == null) return;
+    if (user == null) {
+      return;
+    }
     final newProUntil = DateTime.now().add(Duration(days: days));
     await _db.collection('users').doc(user.uid).update({'isPro': true, 'proUntil': Timestamp.fromDate(newProUntil)});
   }
 
   Future<void> saveShoppingList(Map<String, dynamic> jsonData) async {
     final user = _auth.currentUser;
-    if (user == null) return;
+    if (user == null) {
+      return;
+    }
     final categories = jsonData['categories'] ?? [];
     List<dynamic> parsedCategories = [];
     for (var cat in categories) {
@@ -771,12 +901,16 @@ $harmonyContextText
 
   Future<void> clearCheckedShoppingItems() async {
     final user = _auth.currentUser;
-    if (user == null) return;
+    if (user == null) {
+      return;
+    }
     final docRef = _db.collection('users').doc(user.uid).collection('shopping_list').doc('current');
     
     await _db.runTransaction((transaction) async {
       final snapshot = await transaction.get(docRef);
-      if (!snapshot.exists) return;
+      if (!snapshot.exists) {
+        return;
+      }
       List<dynamic> categories = snapshot.data()?['categories'] ?? [];
       List<dynamic> updatedCategories = [];
       for (var cat in categories) {
@@ -792,12 +926,16 @@ $harmonyContextText
 
   Future<void> toggleShoppingListItem(String categoryName, String itemName, bool isChecked) async {
     final user = _auth.currentUser;
-    if (user == null) return;
+    if (user == null) {
+      return;
+    }
     final docRef = _db.collection('users').doc(user.uid).collection('shopping_list').doc('current');
     
     await _db.runTransaction((transaction) async {
       final snapshot = await transaction.get(docRef);
-      if (!snapshot.exists) return;
+      if (!snapshot.exists) {
+        return;
+      }
       List<dynamic> categories = snapshot.data()?['categories'] ?? [];
       for (var cat in categories) {
         if (cat['name'] == categoryName) {
@@ -815,7 +953,9 @@ $harmonyContextText
 
   Future<void> syncCatalogShoppingList(Set<String> selectedNames, Map<String, String> productCategories) async {
     final user = _auth.currentUser;
-    if (user == null) return;
+    if (user == null) {
+      return;
+    }
     final docRef = _db.collection('users').doc(user.uid).collection('shopping_list').doc('current');
 
     await _db.runTransaction((transaction) async {
@@ -832,7 +972,9 @@ $harmonyContextText
       Map<String, List<Map<String, dynamic>>> newCategoriesMap = {};
       for (String name in selectedNames) {
         String catName = productCategories[name] ?? 'Разное';
-        if (!newCategoriesMap.containsKey(catName)) newCategoriesMap[catName] = [];
+        if (!newCategoriesMap.containsKey(catName)) {
+          newCategoriesMap[catName] = [];
+        }
         newCategoriesMap[catName]!.add({'name': name, 'amount': oldItemData[name]?['amount'] ?? '', 'isChecked': oldItemData[name]?['isChecked'] ?? false});
       }
 
@@ -845,7 +987,9 @@ $harmonyContextText
 
   Future<void> addIngredientsToShoppingList(List<dynamic> newItems) async {
     final user = _auth.currentUser;
-    if (user == null) return;
+    if (user == null) {
+      return;
+    }
     final docRef = _db.collection('users').doc(user.uid).collection('shopping_list').doc('current');
 
     await _db.runTransaction((transaction) async {
@@ -872,16 +1016,20 @@ $harmonyContextText
     });
   }
 
-  Future<void> saveDailySymptoms(DateTime date, List<String> symptoms) async {
+  Future<void> saveDailySymptoms(DateTime date, Map<String, int> symptoms) async {
     final user = _auth.currentUser;
-    if (user == null) return;
+    if (user == null) {
+      return;
+    }
     final String docId = "${date.year}-${date.month.toString().padLeft(2, '0')}-${date.day.toString().padLeft(2, '0')}";
     await _db.collection('users').doc(user.uid).collection('cycle_logs').doc(docId).set({'symptoms': symptoms, 'updatedAt': FieldValue.serverTimestamp()}, SetOptions(merge: true));
   }
   
   Future<void> deleteBotChatMessage(String botType, String docId, String? imageUrl) async {
     final user = _auth.currentUser;
-    if (user == null) return;
+    if (user == null) {
+      return;
+    }
 
     try {
       if (imageUrl != null && imageUrl.isNotEmpty) {
@@ -910,11 +1058,15 @@ $harmonyContextText
 
   Future<void> updateActivityAndRecalculate(String activityLevel) async {
     final user = _auth.currentUser;
-    if (user == null) return;
+    if (user == null) {
+      return;
+    }
 
     try {
       final doc = await _db.collection('users').doc(user.uid).get();
-      if (!doc.exists) return;
+      if (!doc.exists) {
+        return;
+      }
 
       final data = doc.data()!;
       final double weight = (data['weight'] as num?)?.toDouble() ?? 65.0;
@@ -927,15 +1079,22 @@ $harmonyContextText
       bmr = gender == 'male' ? bmr + 5 : bmr - 161;
 
       double multiplier = 1.2; 
-      if (activityLevel.contains('Умеренная')) multiplier = 1.375;
-      else if (activityLevel.contains('Высокая')) multiplier = 1.55;
-      else if (activityLevel.contains('Очень высокая')) multiplier = 1.725;
+      if (activityLevel.contains('Умеренная')) {
+        multiplier = 1.375;
+      } else if (activityLevel.contains('Высокая')) {
+        multiplier = 1.55;
+      } else if (activityLevel.contains('Очень высокая')) {
+        multiplier = 1.725;
+      }
 
       int maintenance = (bmr * multiplier).round();
       int targetCals = maintenance;
 
-      if (goal == 'Похудеть') targetCals = (maintenance * 0.85).round(); 
-      else if (goal == 'Набрать массу') targetCals = (maintenance * 1.15).round(); 
+      if (goal == 'Похудеть') {
+        targetCals = (maintenance * 0.85).round(); 
+      } else if (goal == 'Набрать массу') {
+        targetCals = (maintenance * 1.15).round(); 
+      }
 
       int protein = (weight * 1.8).round();
       int fat = (weight * 1.0).round();
@@ -961,7 +1120,9 @@ $harmonyContextText
   
   Future<void> addCheatMealBonus(int bonusCalories) async {
     final user = _auth.currentUser;
-    if (user == null) return;
+    if (user == null) {
+      return;
+    }
     final String docId = getTodayDocId();
     
     await _db.collection('users').doc(user.uid).collection('meals').doc(docId).set({
@@ -972,7 +1133,9 @@ $harmonyContextText
   
   Future<void> updateBotChatMessage(String botType, String docId, String newText) async {
     final user = _auth.currentUser;
-    if (user == null) return;
+    if (user == null) {
+      return;
+    }
     await _db
         .collection('users')
         .doc(user.uid)
@@ -1000,5 +1163,132 @@ $harmonyContextText
 
   Future<void> updateP2PMessage(String chatId, String docId, String newText) async {
     await _db.collection('chats').doc(chatId).collection('messages').doc(docId).update({'text': newText});
+  }
+
+  Future<bool> checkAndDecrementFreeScan() async {
+    final user = _auth.currentUser;
+    if (user == null) {
+      return false;
+    }
+    
+    final docRef = _db.collection('users').doc(user.uid);
+    return await _db.runTransaction((transaction) async {
+      final snapshot = await transaction.get(docRef);
+      if (!snapshot.exists) {
+        return false;
+      }
+      
+      final data = snapshot.data()!;
+      if (data['isPro'] == true) {
+        return true; 
+      }
+
+      int freeScans = data['free_scans_left'] ?? 3; 
+      if (freeScans > 0) {
+        transaction.update(docRef, {'free_scans_left': freeScans - 1});
+        return true;
+      }
+      return false; 
+    });
+  }
+
+  Future<bool> checkAndDecrementFreeMessage() async {
+    final user = _auth.currentUser;
+    if (user == null) {
+      return false;
+    }
+    
+    final docRef = _db.collection('users').doc(user.uid);
+    return await _db.runTransaction((transaction) async {
+      final snapshot = await transaction.get(docRef);
+      if (!snapshot.exists) {
+        return false;
+      }
+      
+      final data = snapshot.data()!;
+      if (data['isPro'] == true) {
+        return true;
+      }
+
+      int freeMessages = data['free_messages_left'] ?? 5; 
+      if (freeMessages > 0) {
+        transaction.update(docRef, {'free_messages_left': freeMessages - 1});
+        return true;
+      }
+      return false; 
+    });
+  }
+
+  Future<Map<String, dynamic>> getHarmonyStatistics() async {
+    final user = _auth.currentUser;
+    if (user == null) {
+      return {};
+    }
+
+    final cutoff = DateTime.now().subtract(const Duration(days: 365));
+    final String cutoffStr = "${cutoff.year}-${cutoff.month.toString().padLeft(2, '0')}-${cutoff.day.toString().padLeft(2, '0')}";
+
+    final logsSnap = await _db.collection('users').doc(user.uid)
+        .collection('cycle_logs')
+        .where(FieldPath.documentId, isGreaterThanOrEqualTo: cutoffStr)
+        .get();
+
+    int orgasmsWeek = 0;
+    int orgasmsMonth = 0;
+    int orgasmsYear = 0;
+
+    int sexWeek = 0;
+    int sexMonth = 0;
+    int sexYear = 0;
+
+    final now = DateTime.now();
+    
+    for (var doc in logsSnap.docs) {
+      final data = doc.data();
+      final docDateStr = doc.id; 
+      final docDate = DateTime.tryParse(docDateStr);
+      if (docDate == null) {
+        continue;
+      }
+
+      final diff = now.difference(docDate).inDays;
+      
+      final orgasms = (data['orgasm_count'] as num?)?.toInt() ?? 0;
+      if (orgasms > 0) {
+        orgasmsYear += orgasms;
+        if (diff <= 30) {
+          orgasmsMonth += orgasms;
+        }
+        if (diff <= 7) {
+          orgasmsWeek += orgasms;
+        }
+      }
+
+      final sexData = data['sex_data'];
+      if (sexData is List && sexData.isNotEmpty) {
+        sexYear++;
+        if (diff <= 30) {
+          sexMonth++;
+        }
+        if (diff <= 7) {
+          sexWeek++;
+        }
+      }
+    }
+
+    final userDoc = await _db.collection('users').doc(user.uid).get();
+    final userData = userDoc.data() ?? {};
+
+    return {
+      'orgasmsWeek': orgasmsWeek,
+      'orgasmsMonth': orgasmsMonth,
+      'orgasmsYear': orgasmsYear,
+      'sexWeek': sexWeek,
+      'sexMonth': sexMonth,
+      'sexYear': sexYear,
+      'cycleLength': userData['cycleLength'] ?? 28,
+      'periodDuration': userData['periodDuration'] ?? 5,
+      'lastPeriodStartDate': userData['lastPeriodStartDate'],
+    };
   }
 }

@@ -1,3 +1,5 @@
+// Файл: lib/ui_components.dart
+
 import 'package:flutter/material.dart';
 
 // 1. ПРЕМИАЛЬНАЯ КАРТОЧКА
@@ -9,19 +11,21 @@ class GlassCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    
     return Container(
       margin: const EdgeInsets.symmetric(vertical: 8, horizontal: 16),
       decoration: BoxDecoration(
-        color: const Color(0xFF1C1C1E), // Глубокий серый
-        borderRadius: BorderRadius.circular(24), // Сильное скругление
+        color: theme.colorScheme.surface, 
+        borderRadius: BorderRadius.circular(24), 
         border: Border.all(
-          color: Colors.white.withOpacity(0.08),
-        ), // Тонкая рамка
+          color: theme.colorScheme.onSurfaceVariant.withValues(alpha: 0.1),
+        ), 
         boxShadow: [
           BoxShadow(
-            color: const Color(0xFF000000).withOpacity(0.5),
+            color: Colors.black.withValues(alpha: 0.05),
             blurRadius: 20,
-            offset: const Offset(0, 10), // Глубокая тень
+            offset: const Offset(0, 10), 
           ),
         ],
       ),
@@ -30,8 +34,8 @@ class GlassCard extends StatelessWidget {
         child: InkWell(
           borderRadius: BorderRadius.circular(24),
           onTap: onTap,
-          splashColor: const Color(0xFFB76E79).withOpacity(0.1),
-          highlightColor: const Color(0xFFB76E79).withOpacity(0.05),
+          splashColor: theme.colorScheme.primary.withValues(alpha: 0.1),
+          highlightColor: theme.colorScheme.primary.withValues(alpha: 0.05),
           child: Padding(padding: const EdgeInsets.all(20.0), child: child),
         ),
       ),
@@ -39,11 +43,11 @@ class GlassCard extends StatelessWidget {
   }
 }
 
-// 2. НЕОНОВАЯ КНОПКА
+// 2. НЕОНОВАЯ КНОПКА (с сохранением оригинального градиента)
 class NeonButton extends StatelessWidget {
   final String text;
   final VoidCallback onTap;
-  final IconData? icon; // Добавил опциональную иконку для гибкости
+  final IconData? icon; 
 
   const NeonButton({
     super.key,
@@ -59,14 +63,14 @@ class NeonButton extends StatelessWidget {
       height: 56,
       decoration: BoxDecoration(
         gradient: const LinearGradient(
-          colors: [Color(0xFFB76E79), Color(0xFFB2E600)], // Лаймовый градиент
+          colors: [Color(0xFFB76E79), Color(0xFFB2E600)], 
           begin: Alignment.topLeft,
           end: Alignment.bottomRight,
         ),
         borderRadius: BorderRadius.circular(16),
         boxShadow: [
           BoxShadow(
-            color: const Color(0xFFB76E79).withOpacity(0.4), // Свечение
+            color: const Color(0xFFB76E79).withValues(alpha: 0.4), 
             blurRadius: 16,
             offset: const Offset(0, 4),
           ),
@@ -91,7 +95,7 @@ class NeonButton extends StatelessWidget {
             Text(
               text.toUpperCase(),
               style: const TextStyle(
-                color: Colors.black, // Черный текст на лаймовом
+                color: Colors.black, 
                 fontWeight: FontWeight.w800,
                 fontSize: 16,
                 letterSpacing: 1.0,
@@ -119,26 +123,27 @@ class ModernInput extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    
     return Container(
       decoration: BoxDecoration(
-        color: const Color(0xFF121212), // Очень темный фон внутри
+        color: theme.colorScheme.onSurfaceVariant.withValues(alpha: 0.05),
         borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: Colors.white.withOpacity(0.1)),
+        border: Border.all(color: theme.colorScheme.onSurfaceVariant.withValues(alpha: 0.1)),
       ),
       child: TextField(
         controller: controller,
         onChanged: onChanged,
         textAlign: TextAlign.center,
         keyboardType: TextInputType.number,
-        style: const TextStyle(
-          color: Colors.white,
+        style: TextStyle(
+          color: theme.colorScheme.onSurface,
           fontSize: 20,
           fontWeight: FontWeight.bold,
-          // fontFamily: 'Manrope', // Убрал, чтобы не крашилось если шрифт не подключен
         ),
         decoration: InputDecoration(
           hintText: hint,
-          hintStyle: TextStyle(color: Colors.white.withOpacity(0.2)),
+          hintStyle: TextStyle(color: theme.colorScheme.onSurfaceVariant.withValues(alpha: 0.5)),
           border: InputBorder.none,
           contentPadding: const EdgeInsets.symmetric(vertical: 14),
         ),

@@ -15,6 +15,7 @@ import 'home_wrapper.dart';
 import 'p2p_chat_screen.dart';
 import '../services/local_notification_service.dart';
 import '../services/calculation_service.dart';
+import '../services/theme_service.dart';
 
 class ProfileSettingsScreen extends StatefulWidget {
   const ProfileSettingsScreen({super.key});
@@ -24,7 +25,7 @@ class ProfileSettingsScreen extends StatefulWidget {
 }
 
 class _ProfileSettingsScreenState extends State<ProfileSettingsScreen> {
-  static const String SUPPORT_ADMIN_UID = 'VlTTLh2o7GVaXUzw32sNUtQ6alD3';
+  static const String supportAdminUid = 'VlTTLh2o7GVaXUzw32sNUtQ6alD3';
 
   final TextEditingController _nameController = TextEditingController();
   final TextEditingController _nicknameController = TextEditingController();
@@ -44,9 +45,6 @@ class _ProfileSettingsScreenState extends State<ProfileSettingsScreen> {
   File? _newPhotoFile;
   final ImagePicker _picker = ImagePicker();
   String? _nicknameError;
-
-  static const Color _textColor = Color(0xFF2D2D2D);
-  static const Color _accentColor = Color(0xFFB76E79);
 
   @override
   void initState() {
@@ -72,7 +70,6 @@ class _ProfileSettingsScreenState extends State<ProfileSettingsScreen> {
       final userDoc = await FirebaseFirestore.instance.collection('users').doc(uid).get();
       if (userDoc.exists && mounted) {
         final userData = userDoc.data() as Map<String, dynamic>;
-
         setState(() {
           _nameController.text = userData['name'] ?? '';
           _notificationsEnabled = userData['notificationsEnabled'] ?? false;
@@ -101,35 +98,37 @@ class _ProfileSettingsScreenState extends State<ProfileSettingsScreen> {
   Future<void> _pickImage() async {
     try {
       final XFile? pickedFile = await _picker.pickImage(source: ImageSource.gallery, imageQuality: 70);
-      if (pickedFile != null) setState(() => _newPhotoFile = File(pickedFile.path));
-    } catch (e) {}
+      if (pickedFile != null) {
+        setState(() => _newPhotoFile = File(pickedFile.path));
+      }
+    } catch (e) {
+      debugPrint("Ошибка выбора фото: $e");
+    }
   }
 
   void _toggleNotifications(bool value) async {
     if (value) {
       final bool granted = await LocalNotificationService().requestPermissions();
-      
       if (!granted) {
-        if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(
-              content: Text('Необходимо разрешить уведомления в настройках телефона', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)), 
-              backgroundColor: _accentColor
-            )
-          );
-        }
+        if (!mounted) return;
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: const Text('Необходимо разрешить уведомления в настройках телефона', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)), 
+            backgroundColor: Theme.of(context).colorScheme.primary
+          )
+        );
         setState(() => _notificationsEnabled = false);
         return;
       }
     }
-
-    setState(() => _notificationsEnabled = value);
     
+    setState(() => _notificationsEnabled = value);
     final uid = FirebaseAuth.instance.currentUser?.uid;
+    
     if (uid != null) {
       await FirebaseFirestore.instance.collection('users').doc(uid).update({'notificationsEnabled': value});
     }
-
+    
     if (value) {
       await LocalNotificationService().scheduleDailyNotifications();
     } else {
@@ -143,7 +142,6 @@ class _ProfileSettingsScreenState extends State<ProfileSettingsScreen> {
     setState(() => _isLoading = true);
 
     final String newNickname = _nicknameController.text.trim().replaceAll('@', '');
-
     if (newNickname.isNotEmpty) {
       final isUnique = await DatabaseService().isNicknameUnique(newNickname);
       if (!isUnique) {
@@ -163,14 +161,7 @@ class _ProfileSettingsScreenState extends State<ProfileSettingsScreen> {
       final double? height = double.tryParse(_heightController.text.replaceAll(',', '.').trim());
       final double? weight = double.tryParse(_weightController.text.replaceAll(',', '.').trim());
 
-      Map<String, dynamic> userUpdates = {
-        'name': _nameController.text.trim(),
-        'nickname': newNickname,
-        'gender': _selectedGender,
-        'photoUrl': photoToSave ?? '',
-        'goal': _selectedGoal,
-      };
-
+      Map<String, dynamic> userUpdates = {'name': _nameController.text.trim(), 'nickname': newNickname, 'gender': _selectedGender, 'photoUrl': photoToSave ?? '', 'goal': _selectedGoal};
       if (age != null) userUpdates['age'] = age;
       if (height != null) userUpdates['height'] = height;
       if (weight != null) userUpdates['weight'] = weight;
@@ -178,21 +169,17 @@ class _ProfileSettingsScreenState extends State<ProfileSettingsScreen> {
       await DatabaseService().updateUserData(userUpdates);
 
       if (age != null && height != null && weight != null) {
-        await CalculationService().recalculateAndSaveGoals(
-          weight: weight,
-          height: height,
-          age: age,
-          goal: _selectedGoal,
-          activityLevel: _selectedActivity,
-          isPregnant: _selectedGoal == 'Здоровая беременность',
-        );
+        await CalculationService().recalculateAndSaveGoals(weight: weight, height: height, age: age, goal: _selectedGoal, activityLevel: _selectedActivity, isPregnant: _selectedGoal == 'Здоровая беременность');
       }
 
-      if (!context.mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("Профиль обновлен! ✨", style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)), backgroundColor: _accentColor));
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: const Text("Профиль обновлен! ✨", style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)), 
+          backgroundColor: Theme.of(context).colorScheme.primary
+        )
+      );
       Navigator.pop(context); 
-      // ИСПРАВЛЕН БАГ: Убран дублирующий Navigator.pop(context);
-      
     } catch (e) {
       debugPrint("Ошибка сохранения профиля: $e");
     } finally {
@@ -204,23 +191,29 @@ class _ProfileSettingsScreenState extends State<ProfileSettingsScreen> {
     setState(() => _isLoading = true);
     await PushNotificationService().clearToken();
     await FirebaseAuth.instance.signOut();
-    if (!context.mounted) return;
+    if (!mounted) return;
     Navigator.of(context).pushAndRemoveUntil(MaterialPageRoute(builder: (_) => const HomeWrapper()), (route) => false);
   }
 
   Future<void> _changePassword() async {
     if (_isLoading) return;
     setState(() => _isLoading = true);
-    
     final user = FirebaseAuth.instance.currentUser;
     if (user != null && user.email != null) {
       try {
         await FirebaseAuth.instance.sendPasswordResetEmail(email: user.email!);
         if (!mounted) return;
-        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("Письмо отправлено на почту!", style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)), backgroundColor: _accentColor));
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: const Text("Письмо отправлено на почту!", style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)), 
+            backgroundColor: Theme.of(context).colorScheme.primary
+          )
+        );
       } catch (e) {
         if (!mounted) return;
-        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text("Ошибка: $e"), backgroundColor: _accentColor));
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text("Ошибка: $e"), backgroundColor: Theme.of(context).colorScheme.primary)
+        );
       }
     }
     if (mounted) setState(() => _isLoading = false);
@@ -232,59 +225,76 @@ class _ProfileSettingsScreenState extends State<ProfileSettingsScreen> {
     setState(() => _isLoading = true);
     try {
       await user.delete();
-      if (!context.mounted) return;
+      if (!mounted) return;
       Navigator.of(context).pushAndRemoveUntil(MaterialPageRoute(builder: (_) => const HomeWrapper()), (route) => false);
     } on FirebaseAuthException catch (e) {
       if (e.code == 'requires-recent-login') {
-        if (!context.mounted) return;
-        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('В целях безопасности перезайдите в аккаунт.'), backgroundColor: Color(0xFFB6A6CA)));
+        if (!mounted) return;
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('В целях безопасности перезайдите в аккаунт.'), backgroundColor: Color(0xFFB6A6CA))
+        );
       }
     } finally {
       if (mounted) setState(() => _isLoading = false);
     }
   }
 
-  void _showDeleteAccountDialog(BuildContext context) {
+  void _showDeleteAccountDialog(BuildContext context, ThemeData theme) {
     showDialog(
       context: context,
       builder: (ctx) => AlertDialog(
-        backgroundColor: Colors.white,
+        backgroundColor: theme.colorScheme.surface, 
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(24)),
-        title: const Text('Удаление аккаунта', style: TextStyle(color: _textColor, fontWeight: FontWeight.bold)),
-        content: const Text('Все ваши данные будут удалены безвозвратно.', style: TextStyle(color: Color(0xFF8E8E93))),
+        title: Text('Удаление аккаунта', style: TextStyle(color: theme.colorScheme.onSurface, fontWeight: FontWeight.bold)),
+        content: Text('Все ваши данные будут удалены безвозвратно.', style: TextStyle(color: theme.colorScheme.onSurfaceVariant)),
         actions: [
-          TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Отмена', style: TextStyle(color: Color(0xFF8E8E93)))),
-          ElevatedButton(style: ElevatedButton.styleFrom(backgroundColor: _accentColor, elevation: 0), onPressed: () { Navigator.pop(ctx); _deleteAccount(); }, child: const Text('Удалить', style: TextStyle(color: Colors.white))),
+          TextButton(onPressed: () => Navigator.pop(ctx), child: Text('Отмена', style: TextStyle(color: theme.colorScheme.onSurfaceVariant))),
+          ElevatedButton(
+            style: ElevatedButton.styleFrom(backgroundColor: theme.colorScheme.primary, elevation: 0), 
+            onPressed: () { 
+              Navigator.pop(ctx); 
+              _deleteAccount(); 
+            }, 
+            child: const Text('Удалить', style: TextStyle(color: Colors.white))
+          ),
         ],
       ),
     );
   }
 
-  void _showActivityBottomSheet() {
+  void _showActivityBottomSheet(ThemeData theme) {
     final activities = ['Низкая (сидячий образ)', 'Умеренная (1-2 тренировки)', 'Высокая (3-5 тренировок)', 'Очень высокая (каждый день)'];
     showModalBottomSheet(
-      context: context,
-      backgroundColor: Colors.white,
+      context: context, 
+      backgroundColor: theme.colorScheme.surface, 
       shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(24))),
       builder: (ctx) => SafeArea(
         child: Padding(
           padding: const EdgeInsets.all(24.0),
           child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.start,
+            mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              const Text("Уровень активности", style: TextStyle(fontSize: 20, fontWeight: FontWeight.w900, color: _textColor)),
+              Text("Уровень активности", style: TextStyle(fontSize: 20, fontWeight: FontWeight.w900, color: theme.colorScheme.onSurface)),
               const SizedBox(height: 16),
               ...activities.map((act) => ListTile(
-                title: Text(act, style: TextStyle(fontWeight: _selectedActivity == act ? FontWeight.bold : FontWeight.normal, color: _selectedActivity == act ? _accentColor : _textColor)),
-                trailing: _selectedActivity == act ? const Icon(Icons.check, color: _accentColor) : null,
+                title: Text(
+                  act, 
+                  style: TextStyle(
+                    fontWeight: _selectedActivity == act ? FontWeight.bold : FontWeight.normal, 
+                    color: _selectedActivity == act ? theme.colorScheme.primary : theme.colorScheme.onSurface
+                  )
+                ),
+                trailing: _selectedActivity == act ? Icon(Icons.check, color: theme.colorScheme.primary) : null,
                 onTap: () async {
                   setState(() => _selectedActivity = act);
-                  Navigator.pop(ctx);
+                  if (ctx.mounted) Navigator.pop(ctx);
                   setState(() => _isLoading = true);
                   await DatabaseService().updateActivityAndRecalculate(act);
-                  setState(() => _isLoading = false);
-                  if (mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Активность обновлена! ✨'), backgroundColor: _accentColor));
+                  if (mounted) setState(() => _isLoading = false);
+                  if (!mounted) return;
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    SnackBar(content: const Text('Активность обновлена! ✨'), backgroundColor: theme.colorScheme.primary)
+                  );
                 },
               )),
             ],
@@ -294,32 +304,42 @@ class _ProfileSettingsScreenState extends State<ProfileSettingsScreen> {
     );
   }
 
-  void _showGoalBottomSheet() {
+  void _showGoalBottomSheet(ThemeData theme) {
     final goals = ['Похудеть', 'Поддержание веса', 'Набрать вес', 'Здоровая беременность'];
     showModalBottomSheet(
-      context: context,
-      backgroundColor: Colors.white,
+      context: context, 
+      backgroundColor: theme.colorScheme.surface, 
       shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(24))),
       builder: (ctx) => SafeArea(
         child: Padding(
           padding: const EdgeInsets.all(24.0),
           child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.start,
+            mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              const Text("Ваша цель", style: TextStyle(fontSize: 20, fontWeight: FontWeight.w900, color: _textColor)),
+              Text("Ваша цель", style: TextStyle(fontSize: 20, fontWeight: FontWeight.w900, color: theme.colorScheme.onSurface)),
               const SizedBox(height: 16),
               ...goals.map((g) => ListTile(
-                title: Text(g, style: TextStyle(fontWeight: _selectedGoal == g ? FontWeight.bold : FontWeight.normal, color: _selectedGoal == g ? _accentColor : _textColor)),
-                trailing: _selectedGoal == g ? const Icon(Icons.check, color: _accentColor) : null,
+                title: Text(
+                  g, 
+                  style: TextStyle(
+                    fontWeight: _selectedGoal == g ? FontWeight.bold : FontWeight.normal, 
+                    color: _selectedGoal == g ? theme.colorScheme.primary : theme.colorScheme.onSurface
+                  )
+                ),
+                trailing: _selectedGoal == g ? Icon(Icons.check, color: theme.colorScheme.primary) : null,
                 onTap: () async {
                   setState(() => _selectedGoal = g);
-                  Navigator.pop(ctx);
+                  if (ctx.mounted) Navigator.pop(ctx);
                   setState(() => _isLoading = true);
                   final uid = FirebaseAuth.instance.currentUser?.uid;
-                  if (uid != null) await FirebaseFirestore.instance.collection('users').doc(uid).update({'goal': g});
-                  setState(() => _isLoading = false);
-                  if (mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Цель обновлена! ✨'), backgroundColor: _accentColor));
+                  if (uid != null) {
+                    await FirebaseFirestore.instance.collection('users').doc(uid).update({'goal': g});
+                  }
+                  if (mounted) setState(() => _isLoading = false);
+                  if (!mounted) return;
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    SnackBar(content: const Text('Цель обновлена! ✨'), backgroundColor: theme.colorScheme.primary)
+                  );
                 },
               )),
             ],
@@ -329,30 +349,93 @@ class _ProfileSettingsScreenState extends State<ProfileSettingsScreen> {
     );
   }
 
-  Widget _buildSettingsCard(List<Widget> children) {
-    return Container(
-      decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(24), boxShadow: [BoxShadow(color: Colors.black.withValues(alpha: 0.04), blurRadius: 24, offset: const Offset(0, 8))]),
-      child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: children),
+  void _showThemeBottomSheet(ThemeMode currentMode, ThemeData theme) {
+    final modes = {
+      ThemeMode.system: 'Как в системе',
+      ThemeMode.light: 'Светлая',
+      ThemeMode.dark: 'Темная',
+    };
+
+    showModalBottomSheet(
+      context: context, 
+      backgroundColor: theme.colorScheme.surface, 
+      shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(24))),
+      builder: (ctx) => SafeArea(
+        child: Padding(
+          padding: const EdgeInsets.all(24.0),
+          child: Column(
+            mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text("Тема оформления", style: TextStyle(fontSize: 20, fontWeight: FontWeight.w900, color: theme.colorScheme.onSurface)),
+              const SizedBox(height: 16),
+              ...modes.entries.map((entry) => ListTile(
+                title: Text(
+                  entry.value, 
+                  style: TextStyle(
+                    fontWeight: currentMode == entry.key ? FontWeight.bold : FontWeight.normal, 
+                    color: currentMode == entry.key ? theme.colorScheme.primary : theme.colorScheme.onSurface
+                  )
+                ),
+                trailing: currentMode == entry.key ? Icon(Icons.check, color: theme.colorScheme.primary) : null,
+                onTap: () {
+                  ThemeService().toggleTheme(entry.key);
+                  Navigator.pop(ctx);
+                },
+              )),
+            ],
+          ),
+        ),
+      )
     );
   }
 
-  Widget _buildListField(String label, TextEditingController controller, String hint, IconData? icon, {int maxLines = 1, List<TextInputFormatter>? inputFormatters, String? errorText}) {
+  Widget _buildSettingsCard(List<Widget> children, ThemeData theme) {
+    return Container(
+      decoration: BoxDecoration(
+        color: theme.colorScheme.surface, 
+        borderRadius: BorderRadius.circular(24), 
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withValues(alpha: 0.04), 
+            blurRadius: 24, 
+            offset: const Offset(0, 8)
+          )
+        ]
+      ), 
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start, 
+        children: children
+      )
+    );
+  }
+
+  Widget _buildListField(String label, TextEditingController controller, String hint, IconData? icon, ThemeData theme, {int maxLines = 1, List<TextInputFormatter>? inputFormatters, String? errorText}) {
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
       child: Row(
         crossAxisAlignment: maxLines > 1 ? CrossAxisAlignment.start : CrossAxisAlignment.center,
         children: [
-          if (icon != null) ...[Icon(icon, color: const Color(0xFF8E8E93), size: 20), const SizedBox(width: 16)],
+          if (icon != null) ...[Icon(icon, color: theme.colorScheme.onSurfaceVariant, size: 20), const SizedBox(width: 16)],
           Expanded(
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Text(label, style: const TextStyle(color: Color(0xFF8E8E93), fontSize: 12, fontWeight: FontWeight.bold)),
+                Text(label, style: TextStyle(color: theme.colorScheme.onSurfaceVariant, fontSize: 12, fontWeight: FontWeight.bold)),
                 TextField(
-                  controller: controller, maxLines: maxLines, inputFormatters: inputFormatters,
-                  style: const TextStyle(color: _textColor, fontSize: 16, fontWeight: FontWeight.w500),
-                  cursorColor: _accentColor,
-                  decoration: InputDecoration(hintText: hint, hintStyle: TextStyle(color: const Color(0xFF8E8E93).withValues(alpha: 0.5), fontWeight: FontWeight.normal), errorText: errorText, errorStyle: const TextStyle(color: _accentColor, fontSize: 12), border: InputBorder.none, isDense: true, contentPadding: const EdgeInsets.only(top: 4, bottom: 4)),
+                  controller: controller, 
+                  maxLines: maxLines, 
+                  inputFormatters: inputFormatters, 
+                  style: TextStyle(color: theme.colorScheme.onSurface, fontSize: 16, fontWeight: FontWeight.w500), 
+                  cursorColor: theme.colorScheme.primary,
+                  decoration: InputDecoration(
+                    hintText: hint, 
+                    hintStyle: TextStyle(color: theme.colorScheme.onSurfaceVariant.withValues(alpha: 0.5), fontWeight: FontWeight.normal), 
+                    errorText: errorText, 
+                    errorStyle: TextStyle(color: theme.colorScheme.primary, fontSize: 12), 
+                    border: InputBorder.none, 
+                    isDense: true, 
+                    contentPadding: const EdgeInsets.only(top: 4, bottom: 4)
+                  ),
                 ),
               ],
             ),
@@ -362,18 +445,25 @@ class _ProfileSettingsScreenState extends State<ProfileSettingsScreen> {
     );
   }
 
-  Widget _buildMiniMetric(String label, TextEditingController controller, String hint) {
+  Widget _buildMiniMetric(String label, TextEditingController controller, String hint, ThemeData theme) {
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text(label, style: const TextStyle(color: Color(0xFF8E8E93), fontSize: 12, fontWeight: FontWeight.bold)),
+          Text(label, style: TextStyle(color: theme.colorScheme.onSurfaceVariant, fontSize: 12, fontWeight: FontWeight.bold)),
           TextField(
-            controller: controller, keyboardType: TextInputType.number,
-            style: const TextStyle(color: _textColor, fontSize: 16, fontWeight: FontWeight.w500),
-            cursorColor: _accentColor,
-            decoration: InputDecoration(hintText: hint, hintStyle: TextStyle(color: const Color(0xFF8E8E93).withValues(alpha: 0.5)), border: InputBorder.none, isDense: true, contentPadding: const EdgeInsets.only(top: 4, bottom: 4)),
+            controller: controller, 
+            keyboardType: TextInputType.number, 
+            style: TextStyle(color: theme.colorScheme.onSurface, fontSize: 16, fontWeight: FontWeight.w500), 
+            cursorColor: theme.colorScheme.primary, 
+            decoration: InputDecoration(
+              hintText: hint, 
+              hintStyle: TextStyle(color: theme.colorScheme.onSurfaceVariant.withValues(alpha: 0.5)), 
+              border: InputBorder.none, 
+              isDense: true, 
+              contentPadding: const EdgeInsets.only(top: 4, bottom: 4)
+            )
           ),
         ],
       ),
@@ -382,19 +472,32 @@ class _ProfileSettingsScreenState extends State<ProfileSettingsScreen> {
 
   @override
   Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    
     ImageProvider? imageProvider;
-    if (_newPhotoFile != null) imageProvider = FileImage(_newPhotoFile!);
-    else if (_currentPhotoUrl != null && _currentPhotoUrl!.isNotEmpty) {
-      if (_currentPhotoUrl!.startsWith('http')) imageProvider = NetworkImage(_currentPhotoUrl!);
-      else { try { imageProvider = MemoryImage(base64Decode(_currentPhotoUrl!)); } catch (_) {} }
+    if (_newPhotoFile != null) {
+      imageProvider = FileImage(_newPhotoFile!);
+    } else if (_currentPhotoUrl != null && _currentPhotoUrl!.isNotEmpty) {
+      if (_currentPhotoUrl!.startsWith('http')) {
+        imageProvider = NetworkImage(_currentPhotoUrl!);
+      } else { 
+        try { 
+          imageProvider = MemoryImage(base64Decode(_currentPhotoUrl!)); 
+        } catch (_) {} 
+      }
     }
 
     return BaseBackground(
       child: Scaffold(
-        backgroundColor: const Color(0xFFF9F9F9),
-        appBar: AppBar(title: const Text("Настройки", style: TextStyle(color: _textColor, fontWeight: FontWeight.bold, fontSize: 18)), backgroundColor: Colors.transparent, elevation: 0, iconTheme: const IconThemeData(color: _textColor)),
+        backgroundColor: theme.scaffoldBackgroundColor,
+        appBar: AppBar(
+          title: Text("Настройки", style: TextStyle(color: theme.colorScheme.onSurface, fontWeight: FontWeight.bold, fontSize: 18)), 
+          backgroundColor: Colors.transparent, 
+          elevation: 0, 
+          iconTheme: IconThemeData(color: theme.colorScheme.onSurface)
+        ),
         body: _isFetching
-            ? const Center(child: CircularProgressIndicator(color: _accentColor))
+            ? Center(child: CircularProgressIndicator(color: theme.colorScheme.primary))
             : SingleChildScrollView(
                 padding: const EdgeInsets.symmetric(horizontal: 20.0, vertical: 24.0),
                 child: Column(
@@ -404,84 +507,139 @@ class _ProfileSettingsScreenState extends State<ProfileSettingsScreen> {
                       child: Stack(
                         children: [
                           GestureDetector(
-                            onTap: _pickImage,
-                            child: CircleAvatar(radius: 55, backgroundColor: Colors.white, backgroundImage: imageProvider, child: imageProvider == null ? const Icon(Icons.person, size: 55, color: Color(0xFF8E8E93)) : null),
+                            onTap: _pickImage, 
+                            child: CircleAvatar(
+                              radius: 55, 
+                              backgroundColor: theme.colorScheme.onSurfaceVariant.withValues(alpha: 0.1), 
+                              backgroundImage: imageProvider, 
+                              child: imageProvider == null ? Icon(Icons.person, size: 55, color: theme.colorScheme.onSurfaceVariant) : null
+                            )
                           ),
                           Positioned(
-                            bottom: 0, right: 0,
+                            bottom: 0, right: 0, 
                             child: GestureDetector(
-                              onTap: _pickImage,
-                              child: Container(padding: const EdgeInsets.all(8), decoration: BoxDecoration(color: _accentColor, shape: BoxShape.circle, border: Border.all(color: Colors.white, width: 3)), child: const Icon(Icons.camera_alt, size: 16, color: Colors.white)),
-                            ),
+                              onTap: _pickImage, 
+                              child: Container(
+                                padding: const EdgeInsets.all(8), 
+                                decoration: BoxDecoration(
+                                  color: theme.colorScheme.primary, 
+                                  shape: BoxShape.circle, 
+                                  border: Border.all(color: theme.scaffoldBackgroundColor, width: 3)
+                                ), 
+                                child: const Icon(Icons.camera_alt, size: 16, color: Colors.white)
+                              )
+                            )
                           ),
                         ],
                       ),
                     ),
                     const SizedBox(height: 32),
 
-                    const Padding(padding: EdgeInsets.only(left: 8.0, bottom: 8.0), child: Text("ОБЩИЕ ДАННЫЕ", style: TextStyle(color: Color(0xFF8E8E93), fontSize: 12, fontWeight: FontWeight.bold, letterSpacing: 1.0))),
+                    Padding(padding: const EdgeInsets.only(left: 8.0, bottom: 8.0), child: Text("ОБЩИЕ ДАННЫЕ", style: TextStyle(color: theme.colorScheme.onSurfaceVariant, fontSize: 12, fontWeight: FontWeight.bold, letterSpacing: 1.0))),
                     _buildSettingsCard([
-                      _buildListField("Имя / Фамилия", _nameController, "Как к вам обращаться?", Icons.person),
-                      Divider(color: const Color(0xFF8E8E93).withValues(alpha: 0.1), height: 1),
-                      _buildListField("Никнейм", _nicknameController, "username", Icons.alternate_email, errorText: _nicknameError, inputFormatters: [TextInputFormatter.withFunction((oldValue, newValue) { if (!RegExp(r'^[a-zA-Z0-9_]*$').hasMatch(newValue.text)) return oldValue; return newValue.copyWith(text: newValue.text.toLowerCase()); })]),
-                    ]),
+                      _buildListField("Имя / Фамилия", _nameController, "Как к вам обращаться?", Icons.person, theme),
+                      Divider(color: theme.colorScheme.onSurfaceVariant.withValues(alpha: 0.1), height: 1),
+                      _buildListField("Никнейм", _nicknameController, "username", Icons.alternate_email, theme, errorText: _nicknameError, inputFormatters: [
+                        TextInputFormatter.withFunction((oldValue, newValue) { 
+                          if (!RegExp(r'^[a-zA-Z0-9_]*$').hasMatch(newValue.text)) {
+                            return oldValue; 
+                          }
+                          return newValue.copyWith(text: newValue.text.toLowerCase()); 
+                        })
+                      ]),
+                    ], theme),
 
                     const SizedBox(height: 24),
-                    const Padding(padding: EdgeInsets.only(left: 8.0, bottom: 8.0), child: Text("ПРОФИЛЬ", style: TextStyle(color: Color(0xFF8E8E93), fontSize: 12, fontWeight: FontWeight.bold, letterSpacing: 1.0))),
+                    Padding(padding: const EdgeInsets.only(left: 8.0, bottom: 8.0), child: Text("ПРОФИЛЬ", style: TextStyle(color: theme.colorScheme.onSurfaceVariant, fontSize: 12, fontWeight: FontWeight.bold, letterSpacing: 1.0))),
                     _buildSettingsCard([
                       IntrinsicHeight(
                         child: Row(
                           children: [
-                            Expanded(child: _buildMiniMetric("Возраст", _ageController, "Лет")),
-                            VerticalDivider(color: const Color(0xFF8E8E93).withValues(alpha: 0.1), width: 1, thickness: 1),
-                            Expanded(child: _buildMiniMetric("Рост", _heightController, "см")),
-                            VerticalDivider(color: const Color(0xFF8E8E93).withValues(alpha: 0.1), width: 1, thickness: 1),
-                            Expanded(child: _buildMiniMetric("Вес", _weightController, "кг")),
+                            Expanded(child: _buildMiniMetric("Возраст", _ageController, "Лет", theme)), 
+                            VerticalDivider(color: theme.colorScheme.onSurfaceVariant.withValues(alpha: 0.1), width: 1, thickness: 1),
+                            Expanded(child: _buildMiniMetric("Рост", _heightController, "см", theme)), 
+                            VerticalDivider(color: theme.colorScheme.onSurfaceVariant.withValues(alpha: 0.1), width: 1, thickness: 1),
+                            Expanded(child: _buildMiniMetric("Вес", _weightController, "кг", theme)),
                           ],
                         ),
                       ),
-                      Divider(color: const Color(0xFF8E8E93).withValues(alpha: 0.1), height: 1),
-                      ListTile(title: const Text("Уровень активности", style: TextStyle(color: Color(0xFF8E8E93), fontSize: 12, fontWeight: FontWeight.bold)), subtitle: Text(_selectedActivity, style: const TextStyle(color: _textColor, fontSize: 16, fontWeight: FontWeight.w500)), trailing: const Icon(Icons.arrow_forward_ios, size: 14, color: Color(0xFF8E8E93)), onTap: _showActivityBottomSheet),
-                      Divider(color: const Color(0xFF8E8E93).withValues(alpha: 0.1), height: 1),
-                      ListTile(title: const Text("Ваша цель", style: TextStyle(color: Color(0xFF8E8E93), fontSize: 12, fontWeight: FontWeight.bold)), subtitle: Text(_selectedGoal, style: const TextStyle(color: _textColor, fontSize: 16, fontWeight: FontWeight.w500)), trailing: const Icon(Icons.arrow_forward_ios, size: 14, color: Color(0xFF8E8E93)), onTap: _showGoalBottomSheet),
-                    ]),
+                      Divider(color: theme.colorScheme.onSurfaceVariant.withValues(alpha: 0.1), height: 1),
+                      ListTile(title: Text("Уровень активности", style: TextStyle(color: theme.colorScheme.onSurfaceVariant, fontSize: 12, fontWeight: FontWeight.bold)), subtitle: Text(_selectedActivity, style: TextStyle(color: theme.colorScheme.onSurface, fontSize: 16, fontWeight: FontWeight.w500)), trailing: Icon(Icons.arrow_forward_ios, size: 14, color: theme.colorScheme.onSurfaceVariant), onTap: () => _showActivityBottomSheet(theme)),
+                      Divider(color: theme.colorScheme.onSurfaceVariant.withValues(alpha: 0.1), height: 1),
+                      ListTile(title: Text("Ваша цель", style: TextStyle(color: theme.colorScheme.onSurfaceVariant, fontSize: 12, fontWeight: FontWeight.bold)), subtitle: Text(_selectedGoal, style: TextStyle(color: theme.colorScheme.onSurface, fontSize: 16, fontWeight: FontWeight.w500)), trailing: Icon(Icons.arrow_forward_ios, size: 14, color: theme.colorScheme.onSurfaceVariant), onTap: () => _showGoalBottomSheet(theme)),
+                    ], theme),
 
                     const SizedBox(height: 32),
                     Container(
                       width: double.infinity, height: 56,
-                      decoration: BoxDecoration(color: _accentColor, borderRadius: BorderRadius.circular(20), boxShadow: [BoxShadow(color: _accentColor.withValues(alpha: 0.3), blurRadius: 24, offset: const Offset(0, 8))]),
+                      decoration: BoxDecoration(
+                        color: theme.colorScheme.primary, 
+                        borderRadius: BorderRadius.circular(20), 
+                        boxShadow: [
+                          BoxShadow(color: theme.colorScheme.primary.withValues(alpha: 0.3), blurRadius: 24, offset: const Offset(0, 8))
+                        ]
+                      ),
                       child: ElevatedButton(
                         onPressed: _isLoading ? null : _saveProfile,
                         style: ElevatedButton.styleFrom(backgroundColor: Colors.transparent, shadowColor: Colors.transparent, shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20))),
-                        child: _isLoading ? const SizedBox(width: 24, height: 24, child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2)) : const Text("СОХРАНИТЬ", style: TextStyle(color: Colors.white, fontWeight: FontWeight.w900, fontSize: 16)),
+                        child: _isLoading 
+                          ? const SizedBox(width: 24, height: 24, child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2)) 
+                          : const Text("СОХРАНИТЬ", style: TextStyle(color: Colors.white, fontWeight: FontWeight.w900, fontSize: 16)),
                       ),
                     ),
 
                     const SizedBox(height: 24),
-                    const Padding(padding: EdgeInsets.only(left: 8.0, bottom: 8.0), child: Text("НАСТРОЙКИ ПРИЛОЖЕНИЯ", style: TextStyle(color: Color(0xFF8E8E93), fontSize: 12, fontWeight: FontWeight.bold, letterSpacing: 1.0))),
+                    Padding(padding: const EdgeInsets.only(left: 8.0, bottom: 8.0), child: Text("НАСТРОЙКИ ПРИЛОЖЕНИЯ", style: TextStyle(color: theme.colorScheme.onSurfaceVariant, fontSize: 12, fontWeight: FontWeight.bold, letterSpacing: 1.0))),
                     _buildSettingsCard([
-                      SwitchListTile(activeColor: _accentColor, title: const Text("Заботливые напоминания от Евы", style: TextStyle(color: _textColor, fontSize: 14, fontWeight: FontWeight.w600)), subtitle: const Text("Вода, обед и итоги дня", style: TextStyle(color: Color(0xFF8E8E93), fontSize: 12)), value: _notificationsEnabled, onChanged: _toggleNotifications),
-                    ]),
+                      SwitchListTile(
+                        activeTrackColor: theme.colorScheme.primary, 
+                        title: Text("Заботливые напоминания от Евы", style: TextStyle(color: theme.colorScheme.onSurface, fontSize: 14, fontWeight: FontWeight.w600)), 
+                        subtitle: Text("Вода, обед и итоги дня", style: TextStyle(color: theme.colorScheme.onSurfaceVariant, fontSize: 12)), 
+                        value: _notificationsEnabled, 
+                        onChanged: _toggleNotifications
+                      ),
+                      Divider(color: theme.colorScheme.onSurfaceVariant.withValues(alpha: 0.1), height: 1),
+                      
+                      ValueListenableBuilder<ThemeMode>(
+                        valueListenable: ThemeService().themeModeNotifier,
+                        builder: (context, currentMode, _) {
+                          String modeText = 'Как в системе';
+                          if (currentMode == ThemeMode.light) {
+                            modeText = 'Светлая';
+                          }
+                          if (currentMode == ThemeMode.dark) {
+                            modeText = 'Темная';
+                          }
+
+                          return ListTile(
+                            title: Text("Тема оформления", style: TextStyle(color: theme.colorScheme.onSurface, fontSize: 14, fontWeight: FontWeight.w600)), 
+                            subtitle: Text(modeText, style: TextStyle(color: theme.colorScheme.onSurfaceVariant, fontSize: 12)), 
+                            trailing: Icon(Icons.arrow_forward_ios, size: 14, color: theme.colorScheme.onSurfaceVariant), 
+                            onTap: () => _showThemeBottomSheet(currentMode, theme)
+                          );
+                        }
+                      ),
+                    ], theme),
 
                     const SizedBox(height: 32),
-                    const Padding(padding: EdgeInsets.only(left: 8.0, bottom: 8.0), child: Text("ПРАВОВАЯ ИНФОРМАЦИЯ", style: TextStyle(color: Color(0xFF8E8E93), fontSize: 12, fontWeight: FontWeight.bold, letterSpacing: 1.0))),
+                    Padding(padding: const EdgeInsets.only(left: 8.0, bottom: 8.0), child: Text("ПРАВОВАЯ ИНФОРМАЦИЯ", style: TextStyle(color: theme.colorScheme.onSurfaceVariant, fontSize: 12, fontWeight: FontWeight.bold, letterSpacing: 1.0))),
                     _buildSettingsCard([
-                      ListTile(leading: const Icon(Icons.description_outlined, color: Color(0xFF8E8E93), size: 20), title: const Text("Пользовательское соглашение", style: TextStyle(color: _textColor, fontSize: 14, fontWeight: FontWeight.w500)), trailing: const Icon(Icons.arrow_forward_ios, color: Color(0xFF8E8E93), size: 14), onTap: () { const String url = "https://docs.google.com/document/d/1GpHL1IbLlklUrKQ2jShjlNIrXd2V4V1H/edit?usp=sharing"; launchUrl(Uri.parse(url.trim()), mode: LaunchMode.externalApplication); }),
-                      Divider(color: const Color(0xFF8E8E93).withValues(alpha: 0.1), height: 1),
-                      ListTile(leading: const Icon(Icons.privacy_tip_outlined, color: Color(0xFF8E8E93), size: 20), title: const Text("Политика конфиденциальности", style: TextStyle(color: _textColor, fontSize: 14, fontWeight: FontWeight.w500)), trailing: const Icon(Icons.arrow_forward_ios, color: Color(0xFF8E8E93), size: 14), onTap: () { const String url = "https://docs.google.com/document/d/1ak-7-B2_uvmY1O7b6kJu-rUEOa5e_sDY/edit?usp=sharing"; launchUrl(Uri.parse(url.trim()), mode: LaunchMode.externalApplication); }),
-                      Divider(color: const Color(0xFF8E8E93).withValues(alpha: 0.1), height: 1),
-                      ListTile(leading: const Icon(Icons.support_agent, color: _accentColor, size: 22), title: const Text("Написать в поддержку", style: TextStyle(color: _textColor, fontWeight: FontWeight.bold, fontSize: 14)), trailing: const Icon(Icons.arrow_forward_ios, color: Color(0xFF8E8E93), size: 14), onTap: () { Navigator.push(context, MaterialPageRoute(builder: (_) => const P2PChatScreen(otherUserId: SUPPORT_ADMIN_UID, otherUserName: 'Поддержка MyEva'))); }),
-                    ]),
+                      ListTile(leading: Icon(Icons.description_outlined, color: theme.colorScheme.onSurfaceVariant, size: 20), title: Text("Пользовательское соглашение", style: TextStyle(color: theme.colorScheme.onSurface, fontSize: 14, fontWeight: FontWeight.w500)), trailing: Icon(Icons.arrow_forward_ios, color: theme.colorScheme.onSurfaceVariant, size: 14), onTap: () { const String url = "https://docs.google.com/document/d/1GpHL1IbLlklUrKQ2jShjlNIrXd2V4V1H/edit?usp=sharing"; launchUrl(Uri.parse(url.trim()), mode: LaunchMode.externalApplication); }),
+                      Divider(color: theme.colorScheme.onSurfaceVariant.withValues(alpha: 0.1), height: 1),
+                      ListTile(leading: Icon(Icons.privacy_tip_outlined, color: theme.colorScheme.onSurfaceVariant, size: 20), title: Text("Политика конфиденциальности", style: TextStyle(color: theme.colorScheme.onSurface, fontSize: 14, fontWeight: FontWeight.w500)), trailing: Icon(Icons.arrow_forward_ios, color: theme.colorScheme.onSurfaceVariant, size: 14), onTap: () { const String url = "https://docs.google.com/document/d/1ak-7-B2_uvmY1O7b6kJu-rUEOa5e_sDY/edit?usp=sharing"; launchUrl(Uri.parse(url.trim()), mode: LaunchMode.externalApplication); }),
+                      Divider(color: theme.colorScheme.onSurfaceVariant.withValues(alpha: 0.1), height: 1),
+                      ListTile(leading: Icon(Icons.support_agent, color: theme.colorScheme.primary, size: 22), title: Text("Написать в поддержку", style: TextStyle(color: theme.colorScheme.onSurface, fontWeight: FontWeight.bold, fontSize: 14)), trailing: Icon(Icons.arrow_forward_ios, color: theme.colorScheme.onSurfaceVariant, size: 14), onTap: () { Navigator.push(context, MaterialPageRoute(builder: (_) => const P2PChatScreen(otherUserId: supportAdminUid, otherUserName: 'Поддержка MyEva'))); }),
+                    ], theme),
 
                     const SizedBox(height: 24),
                     _buildSettingsCard([
-                      ListTile(leading: const Icon(Icons.lock_reset, color: Color(0xFFB6A6CA), size: 20), title: const Text("Сменить пароль", style: TextStyle(color: _textColor, fontWeight: FontWeight.w600, fontSize: 14)), onTap: _changePassword),
-                      Divider(color: const Color(0xFF8E8E93).withValues(alpha: 0.1), height: 1),
-                      ListTile(leading: const Icon(Icons.logout, color: Color(0xFF8E8E93), size: 20), title: const Text("Выйти из аккаунта", style: TextStyle(color: _textColor, fontWeight: FontWeight.w600, fontSize: 14)), onTap: _logout),
-                    ]),
+                      ListTile(leading: const Icon(Icons.lock_reset, color: Color(0xFFB6A6CA), size: 20), title: Text("Сменить пароль", style: TextStyle(color: theme.colorScheme.onSurface, fontWeight: FontWeight.w600, fontSize: 14)), onTap: _changePassword),
+                      Divider(color: theme.colorScheme.onSurfaceVariant.withValues(alpha: 0.1), height: 1),
+                      ListTile(leading: Icon(Icons.logout, color: theme.colorScheme.onSurfaceVariant, size: 20), title: Text("Выйти из аккаунта", style: TextStyle(color: theme.colorScheme.onSurface, fontWeight: FontWeight.w600, fontSize: 14)), onTap: _logout),
+                    ], theme),
 
                     const SizedBox(height: 32),
-                    Center(child: TextButton(onPressed: () => _showDeleteAccountDialog(context), child: const Text("Удалить аккаунт навсегда", style: TextStyle(color: _accentColor, fontSize: 13, fontWeight: FontWeight.w600)))),
+                    Center(child: TextButton(onPressed: () => _showDeleteAccountDialog(context, theme), child: Text("Удалить аккаунт навсегда", style: TextStyle(color: theme.colorScheme.primary, fontSize: 13, fontWeight: FontWeight.w600)))),
                     const SizedBox(height: 40),
                   ],
                 ),

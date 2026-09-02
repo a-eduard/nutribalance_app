@@ -33,12 +33,8 @@ class _P2PChatScreenState extends State<P2PChatScreen> {
   
   bool _isUploading = false; 
 
-  static const Color _accentColor = Color(0xFFB76E79);
-  static const Color _textColor = Color(0xFF2D2D2D);
-  static const Color _subTextColor = Color(0xFF8E8E93);
-
   String get currentUserId => FirebaseAuth.instance.currentUser!.uid;
-  String get _collectionName => 'chats';
+  String get _collectionName => widget.customCollection ?? 'chats';
 
   String get _chatId {
     return currentUserId.compareTo(widget.otherUserId) < 0
@@ -68,9 +64,10 @@ class _P2PChatScreenState extends State<P2PChatScreen> {
   }
 
   Future<void> _pickAndUploadImage() async {
+    final theme = Theme.of(context);
     final String? action = await showModalBottomSheet<String>(
       context: context,
-      backgroundColor: Colors.white,
+      backgroundColor: theme.colorScheme.surface,
       shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(20))),
       builder: (BuildContext ctx) {
         return SafeArea(
@@ -79,8 +76,16 @@ class _P2PChatScreenState extends State<P2PChatScreen> {
             child: Column(
               mainAxisSize: MainAxisSize.min,
               children: [
-                ListTile(leading: const Icon(Icons.camera_alt, color: _textColor, size: 28), title: const Text("Сделать фото", style: TextStyle(color: _textColor, fontSize: 16, fontWeight: FontWeight.w500)), onTap: () => Navigator.pop(ctx, 'camera')),
-                ListTile(leading: const Icon(Icons.photo_library, color: _textColor, size: 28), title: const Text("Выбрать из галереи", style: TextStyle(color: _textColor, fontSize: 16, fontWeight: FontWeight.w500)), onTap: () => Navigator.pop(ctx, 'gallery')),
+                ListTile(
+                  leading: Icon(Icons.camera_alt, color: theme.colorScheme.onSurface, size: 28), 
+                  title: Text("Сделать фото", style: TextStyle(color: theme.colorScheme.onSurface, fontSize: 16, fontWeight: FontWeight.w500)), 
+                  onTap: () => Navigator.pop(ctx, 'camera')
+                ),
+                ListTile(
+                  leading: Icon(Icons.photo_library, color: theme.colorScheme.onSurface, size: 28), 
+                  title: Text("Выбрать из галереи", style: TextStyle(color: theme.colorScheme.onSurface, fontSize: 16, fontWeight: FontWeight.w500)), 
+                  onTap: () => Navigator.pop(ctx, 'gallery')
+                ),
               ],
             ),
           ),
@@ -106,7 +111,8 @@ class _P2PChatScreenState extends State<P2PChatScreen> {
       _sendMessage(imageUrl: downloadUrl);
 
     } catch (e) {
-      if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Ошибка загрузки: $e'), backgroundColor: Colors.redAccent));
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Ошибка загрузки: $e'), backgroundColor: Colors.redAccent));
     } finally {
       if (mounted) setState(() => _isUploading = false); 
     }
@@ -134,11 +140,11 @@ class _P2PChatScreenState extends State<P2PChatScreen> {
     }, SetOptions(merge: true));
   }
 
-  // === МЕНЮ LONG PRESS ДЛЯ P2P ===
   void _showOptionsSheet(String docId, String currentText, bool hasMedia, String? mediaUrl) {
+    final theme = Theme.of(context);
     showModalBottomSheet(
       context: context,
-      backgroundColor: Colors.white,
+      backgroundColor: theme.colorScheme.surface,
       shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(20))),
       builder: (ctx) => SafeArea(
         child: Padding(
@@ -148,8 +154,8 @@ class _P2PChatScreenState extends State<P2PChatScreen> {
             children: [
               if (!hasMedia)
                 ListTile(
-                  leading: const Icon(Icons.edit_rounded, color: _textColor, size: 26),
-                  title: const Text("Редактировать", style: TextStyle(color: _textColor, fontSize: 16, fontWeight: FontWeight.w500)),
+                  leading: Icon(Icons.edit_rounded, color: theme.colorScheme.onSurface, size: 26),
+                  title: Text("Редактировать", style: TextStyle(color: theme.colorScheme.onSurface, fontSize: 16, fontWeight: FontWeight.w500)),
                   onTap: () {
                     Navigator.pop(ctx);
                     _showEditDialog(docId, currentText);
@@ -163,7 +169,8 @@ class _P2PChatScreenState extends State<P2PChatScreen> {
                   try {
                     await DatabaseService().deleteP2PMessage(_chatId, docId, mediaUrl);
                   } catch (e) {
-                    if (mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Ошибка удаления'), backgroundColor: Colors.redAccent));
+                    if (!mounted) return;
+                    ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Ошибка удаления'), backgroundColor: Colors.redAccent));
                   }
                 },
               ),
@@ -175,35 +182,48 @@ class _P2PChatScreenState extends State<P2PChatScreen> {
   }
 
   void _showEditDialog(String docId, String currentText) {
+    final theme = Theme.of(context);
     final TextEditingController editController = TextEditingController(text: currentText);
+    
     showDialog(
       context: context,
       builder: (context) => AlertDialog(
-        backgroundColor: Colors.white,
+        backgroundColor: theme.colorScheme.surface,
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
-        title: const Text("Редактировать", style: TextStyle(color: _textColor, fontWeight: FontWeight.w800)),
+        title: Text("Редактировать", style: TextStyle(color: theme.colorScheme.onSurface, fontWeight: FontWeight.w800)),
         content: TextField(
           controller: editController,
           maxLines: null,
-          style: const TextStyle(color: _textColor),
-          decoration: const InputDecoration(
-            border: OutlineInputBorder(borderRadius: BorderRadius.all(Radius.circular(12))),
-            focusedBorder: OutlineInputBorder(borderRadius: BorderRadius.all(Radius.circular(12)), borderSide: BorderSide(color: _accentColor, width: 2)),
+          style: TextStyle(color: theme.colorScheme.onSurface),
+          decoration: InputDecoration(
+            border: const OutlineInputBorder(borderRadius: BorderRadius.all(Radius.circular(12))),
+            focusedBorder: OutlineInputBorder(
+              borderRadius: const BorderRadius.all(Radius.circular(12)), 
+              borderSide: BorderSide(color: theme.colorScheme.primary, width: 2)
+            ),
           ),
-          cursorColor: _accentColor,
+          cursorColor: theme.colorScheme.primary,
         ),
         actions: [
-          TextButton(onPressed: () => Navigator.pop(context), child: const Text("Отмена", style: TextStyle(color: _subTextColor, fontWeight: FontWeight.w600))),
+          TextButton(
+            onPressed: () => Navigator.pop(context), 
+            child: Text("Отмена", style: TextStyle(color: theme.colorScheme.onSurfaceVariant, fontWeight: FontWeight.w600))
+          ),
           ElevatedButton(
-            style: ElevatedButton.styleFrom(backgroundColor: _accentColor, shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)), elevation: 0),
+            style: ElevatedButton.styleFrom(
+              backgroundColor: theme.colorScheme.primary, 
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)), 
+              elevation: 0
+            ),
             onPressed: () async {
               final newText = editController.text.trim();
               if (newText.isNotEmpty && newText != currentText) {
                 await DatabaseService().updateP2PMessage(_chatId, docId, newText);
               }
-              if (mounted) Navigator.pop(context);
+              if (!context.mounted) return;
+              Navigator.pop(context);
             },
-            child: const Text("Сохранить", style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
+            child: Text("Сохранить", style: TextStyle(color: theme.colorScheme.onPrimary, fontWeight: FontWeight.bold)),
           ),
         ],
       )
@@ -212,15 +232,17 @@ class _P2PChatScreenState extends State<P2PChatScreen> {
 
   @override
   Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    
     return Scaffold(
-      backgroundColor: const Color(0xFFF9F9F9),
+      backgroundColor: theme.scaffoldBackgroundColor,
       appBar: AppBar(
-        title: Text(widget.otherUserName, style: const TextStyle(color: _textColor, fontWeight: FontWeight.w900, fontSize: 20)),
-        backgroundColor: Colors.white,
+        title: Text(widget.otherUserName, style: TextStyle(color: theme.colorScheme.onSurface, fontWeight: FontWeight.w900, fontSize: 20)),
+        backgroundColor: theme.colorScheme.surface,
         elevation: 0,
-        iconTheme: const IconThemeData(color: _textColor),
+        iconTheme: IconThemeData(color: theme.colorScheme.onSurface),
         actions: _isUploading 
-            ? const [Padding(padding: EdgeInsets.only(right: 16.0), child: SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2, color: _accentColor)))] 
+            ? [Padding(padding: const EdgeInsets.only(right: 16.0), child: SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2, color: theme.colorScheme.primary)))] 
             : null,
       ),
       body: Column(
@@ -229,15 +251,18 @@ class _P2PChatScreenState extends State<P2PChatScreen> {
             child: StreamBuilder<QuerySnapshot>(
               stream: FirebaseFirestore.instance.collection(_collectionName).doc(_chatId).collection('messages').orderBy('timestamp', descending: true).snapshots(),
               builder: (context, snapshot) {
-                if (snapshot.connectionState == ConnectionState.waiting && !snapshot.hasData) return const Center(child: CircularProgressIndicator(color: _accentColor));
+                if (snapshot.connectionState == ConnectionState.waiting && !snapshot.hasData) {
+                  return Center(child: CircularProgressIndicator(color: theme.colorScheme.primary));
+                }
+                
                 if (!snapshot.hasData || snapshot.data!.docs.isEmpty) {
                   return Center(
                     child: Column(
                       mainAxisAlignment: MainAxisAlignment.center,
                       children: [
-                        Icon(Icons.waving_hand, size: 64, color: _subTextColor.withValues(alpha: 0.3)),
+                        Icon(Icons.waving_hand, size: 64, color: theme.colorScheme.onSurfaceVariant.withValues(alpha: 0.3)),
                         const SizedBox(height: 16),
-                        const Text("Напишите первое сообщение ✨", style: TextStyle(color: _subTextColor, fontSize: 16, fontWeight: FontWeight.w600)),
+                        Text("Напишите первое сообщение ✨", style: TextStyle(color: theme.colorScheme.onSurfaceVariant, fontSize: 16, fontWeight: FontWeight.w600)),
                       ],
                     ),
                   );
@@ -272,7 +297,7 @@ class _P2PChatScreenState extends State<P2PChatScreen> {
                           padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10), 
                           constraints: BoxConstraints(maxWidth: MediaQuery.of(context).size.width * 0.75),
                           decoration: BoxDecoration(
-                            color: isMe ? _accentColor : Colors.white,
+                            color: isMe ? theme.colorScheme.primary : theme.colorScheme.surface,
                             borderRadius: BorderRadius.only(
                               topLeft: const Radius.circular(20),
                               topRight: const Radius.circular(20),
@@ -290,12 +315,14 @@ class _P2PChatScreenState extends State<P2PChatScreen> {
                                   child: ClipRRect(
                                     borderRadius: BorderRadius.circular(12),
                                     child: GestureDetector(
-                                      onTap: () { Navigator.push(context, MaterialPageRoute(builder: (_) => Scaffold(backgroundColor: Colors.black, appBar: AppBar(backgroundColor: Colors.black, iconTheme: const IconThemeData(color: Colors.white)), body: Center(child: Hero(tag: imageUrlMessage, child: Image.network(imageUrlMessage)))))); },
+                                      onTap: () { 
+                                        Navigator.push(context, MaterialPageRoute(builder: (_) => Scaffold(backgroundColor: Colors.black, appBar: AppBar(backgroundColor: Colors.black, iconTheme: const IconThemeData(color: Colors.white)), body: Center(child: Hero(tag: imageUrlMessage, child: Image.network(imageUrlMessage)))))); 
+                                      },
                                       child: Hero(
                                         tag: imageUrlMessage,
                                         child: CachedNetworkImage(
                                           imageUrl: imageUrlMessage, fit: BoxFit.cover,
-                                          placeholder: (context, url) => const SizedBox(width: 200, height: 150, child: Center(child: CircularProgressIndicator(color: _accentColor, strokeWidth: 2))),
+                                          placeholder: (context, url) => SizedBox(width: 200, height: 150, child: Center(child: CircularProgressIndicator(color: theme.colorScheme.primary, strokeWidth: 2))),
                                           errorWidget: (context, url, error) => const SizedBox(width: 200, height: 150, child: Center(child: Icon(Icons.broken_image_outlined, size: 40, color: Colors.grey))),
                                         ),
                                       ),
@@ -306,13 +333,13 @@ class _P2PChatScreenState extends State<P2PChatScreen> {
                               if (textMessage.isNotEmpty)
                                 Padding(
                                   padding: const EdgeInsets.symmetric(horizontal: 4.0, vertical: 2),
-                                  child: Text(textMessage, style: TextStyle(color: isMe ? Colors.white : _textColor, fontSize: 15, fontWeight: FontWeight.w500, height: 1.3)),
+                                  child: Text(textMessage, style: TextStyle(color: isMe ? theme.colorScheme.onPrimary : theme.colorScheme.onSurface, fontSize: 15, fontWeight: FontWeight.w500, height: 1.3)),
                                 ),
                               
                               const SizedBox(height: 2),
                               Padding(
                                 padding: const EdgeInsets.only(right: 2.0, bottom: 0),
-                                child: Text(timeStr, style: TextStyle(color: isMe ? Colors.white.withValues(alpha: 0.7) : _subTextColor, fontSize: 10, fontWeight: FontWeight.bold)),
+                                child: Text(timeStr, style: TextStyle(color: isMe ? theme.colorScheme.onPrimary.withValues(alpha: 0.7) : theme.colorScheme.onSurfaceVariant, fontSize: 10, fontWeight: FontWeight.bold)),
                               ),
                             ],
                           ),
@@ -327,7 +354,10 @@ class _P2PChatScreenState extends State<P2PChatScreen> {
           
           Container(
             padding: const EdgeInsets.fromLTRB(16, 12, 16, 12),
-            decoration: BoxDecoration(color: Colors.white, boxShadow: [BoxShadow(color: Colors.black.withValues(alpha: 0.04), blurRadius: 24, offset: const Offset(0, -8))]),
+            decoration: BoxDecoration(
+              color: theme.colorScheme.surface, 
+              boxShadow: [BoxShadow(color: Colors.black.withValues(alpha: 0.04), blurRadius: 24, offset: const Offset(0, -8))]
+            ),
             child: SafeArea(
               bottom: true,
               child: Row(
@@ -339,7 +369,7 @@ class _P2PChatScreenState extends State<P2PChatScreen> {
                       onTap: _isUploading ? null : _pickAndUploadImage, 
                       child: Container(
                         padding: const EdgeInsets.all(14),
-                        child: const Icon(Icons.attach_file_rounded, color: _accentColor, size: 26),
+                        child: Icon(Icons.attach_file_rounded, color: theme.colorScheme.primary, size: 26),
                       ),
                     ),
                   ),
@@ -348,11 +378,14 @@ class _P2PChatScreenState extends State<P2PChatScreen> {
                       controller: _messageController,
                       textCapitalization: TextCapitalization.sentences,
                       maxLines: 4, minLines: 1,
-                      decoration: const InputDecoration(
-                        hintText: "Сообщение...", hintStyle: TextStyle(color: Color(0xFFC7C7CC)),
-                        border: OutlineInputBorder(borderRadius: BorderRadius.all(Radius.circular(24)), borderSide: BorderSide.none),
-                        filled: true, fillColor: Color(0xFFF2F2F7),
-                        contentPadding: EdgeInsets.symmetric(horizontal: 20, vertical: 14),
+                      style: TextStyle(color: theme.colorScheme.onSurface),
+                      decoration: InputDecoration(
+                        hintText: "Сообщение...", 
+                        hintStyle: TextStyle(color: theme.colorScheme.onSurfaceVariant.withValues(alpha: 0.5)),
+                        border: const OutlineInputBorder(borderRadius: BorderRadius.all(Radius.circular(24)), borderSide: BorderSide.none),
+                        filled: true, 
+                        fillColor: theme.colorScheme.onSurfaceVariant.withValues(alpha: 0.1),
+                        contentPadding: const EdgeInsets.symmetric(horizontal: 20, vertical: 14),
                       ),
                     ),
                   ),
@@ -362,8 +395,8 @@ class _P2PChatScreenState extends State<P2PChatScreen> {
                     child: Container(
                       padding: const EdgeInsets.all(14),
                       margin: const EdgeInsets.only(bottom: 2),
-                      decoration: const BoxDecoration(color: _accentColor, shape: BoxShape.circle),
-                      child: const Icon(Icons.send_rounded, color: Colors.white, size: 22),
+                      decoration: BoxDecoration(color: theme.colorScheme.primary, shape: BoxShape.circle),
+                      child: Icon(Icons.send_rounded, color: theme.colorScheme.onPrimary, size: 22),
                     ),
                   ),
                 ],

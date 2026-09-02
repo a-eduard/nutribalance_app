@@ -1,28 +1,22 @@
 import 'package:flutter/material.dart';
-import 'p2p_chat_screen.dart';
-import 'package:url_launcher/url_launcher.dart';
-import '../services/database_service.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
-import 'package:flutter_rustore_billing/flutter_rustore_billing.dart'; // <-- ДОБАВЛЕНО ДЛЯ RUSTORE
-import 'package:cloud_functions/cloud_functions.dart'; // <-- ДОБАВЛЕНО ДЛЯ СЕРВЕРНОЙ ПРОВЕРКИ
+import 'package:flutter_rustore_billing/flutter_rustore_billing.dart';
+import 'package:cloud_functions/cloud_functions.dart'; 
 
+import 'p2p_chat_screen.dart';
 
 class SpecialistPaywallScreen extends StatefulWidget {
-  final bool isFromProfile; // <-- Добавили переменную
+  final bool isFromProfile; 
 
-  const SpecialistPaywallScreen({super.key, this.isFromProfile = false}); // <-- Добавили в конструктор
+  const SpecialistPaywallScreen({super.key, this.isFromProfile = false}); 
 
   @override
-  State<SpecialistPaywallScreen> createState() =>
-      _SpecialistPaywallScreenState();
+  State<SpecialistPaywallScreen> createState() => _SpecialistPaywallScreenState();
 }
 
 class _SpecialistPaywallScreenState extends State<SpecialistPaywallScreen> {
-  static const Color _accentColor = Color(0xFFB76E79);
-  static const Color _textColor = Color(0xFF2D2D2D);
-  static const Color _subTextColor = Color(0xFF8E8E93);
-  static const String SUPPORT_ADMIN_UID = 'VlTTLh2o7GVaXUzw32sNUtQ6alD3';
+  static const String _supportAdminUid = 'VlTTLh2o7GVaXUzw32sNUtQ6alD3';
 
   bool _isLoading = false;
 
@@ -33,49 +27,44 @@ class _SpecialistPaywallScreenState extends State<SpecialistPaywallScreen> {
       final uid = FirebaseAuth.instance.currentUser?.uid;
       if (uid == null) return;
 
-      // 1. Вызываем стандартный SDK RuStore с новым ID продукта
       final purchaseResult = await RustoreBillingClient.purchase('specialist_chat_monthly', uid); 
 
-      // Пытаемся достать токен
-      String pToken = "mock_token_specialist";
-      try {
-        if (purchaseResult != null) {
-          pToken = (purchaseResult as dynamic).purchaseToken?.toString() ?? "mock_token_specialist";
-        }
-      } catch (_) {}
+      if (purchaseResult.successPurchase == null) {
+        throw Exception("Покупка не подтверждена на клиенте");
+      }
+      
+      // ИСПРАВЛЕНИЕ: Берем purchaseId
+      String pToken = purchaseResult.successPurchase!.purchaseId;
 
-      // 2. БЕЗОПАСНАЯ СЕРВЕРНАЯ ПРОВЕРКА (Cloud Functions)
       final callable = FirebaseFunctions.instance.httpsCallable('verifyRuStorePurchase');
       await callable.call({
         'productId': 'specialist_chat_monthly',
         'purchaseToken': pToken,
       });
 
-      if (mounted) {
-        Navigator.pop(context);
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('Оплата успешна! Чат со специалистом открыт. ✨'),
-            backgroundColor: Colors.teal,
-          ),
-        );
-      }
+      if (!mounted) return;
+      Navigator.pop(context);
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: const Text('Оплата успешна! Чат со специалистом открыт. ✨'),
+          backgroundColor: Theme.of(context).colorScheme.primary,
+        ),
+      );
     } catch (e) {
       debugPrint('Ошибка покупки специалиста через RuStore: $e');
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('Отмена или ошибка оплаты.'),
-            backgroundColor: Colors.redAccent,
-          ),
-        );
-      }
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Отмена или ошибка оплаты.'),
+          backgroundColor: Colors.redAccent,
+        ),
+      );
     } finally {
       if (mounted) setState(() => _isLoading = false);
     }
   }
 
-  Widget _buildFeatureItem(IconData icon, String title, String subtitle) {
+  Widget _buildFeatureItem(IconData icon, String title, String subtitle, ThemeData theme) {
     return Padding(
       padding: const EdgeInsets.only(bottom: 24.0),
       child: Row(
@@ -84,10 +73,10 @@ class _SpecialistPaywallScreenState extends State<SpecialistPaywallScreen> {
           Container(
             padding: const EdgeInsets.all(12),
             decoration: BoxDecoration(
-              color: const Color(0xFFFDECE8),
+              color: theme.colorScheme.primary.withValues(alpha: 0.1),
               borderRadius: BorderRadius.circular(16),
             ),
-            child: Icon(icon, color: _accentColor, size: 24),
+            child: Icon(icon, color: theme.colorScheme.primary, size: 24),
           ),
           const SizedBox(width: 16),
           Expanded(
@@ -96,18 +85,18 @@ class _SpecialistPaywallScreenState extends State<SpecialistPaywallScreen> {
               children: [
                 Text(
                   title,
-                  style: const TextStyle(
+                  style: TextStyle(
                     fontSize: 16,
                     fontWeight: FontWeight.w800,
-                    color: _textColor,
+                    color: theme.colorScheme.onSurface,
                   ),
                 ),
                 const SizedBox(height: 4),
                 Text(
                   subtitle,
-                  style: const TextStyle(
+                  style: TextStyle(
                     fontSize: 14,
-                    color: _subTextColor,
+                    color: theme.colorScheme.onSurfaceVariant,
                     height: 1.4,
                   ),
                 ),
@@ -121,8 +110,10 @@ class _SpecialistPaywallScreenState extends State<SpecialistPaywallScreen> {
 
   @override
   Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    
     return Scaffold(
-      backgroundColor: const Color(0xFFF9F9F9),
+      backgroundColor: theme.scaffoldBackgroundColor,
       body: SafeArea(
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
@@ -130,7 +121,7 @@ class _SpecialistPaywallScreenState extends State<SpecialistPaywallScreen> {
             Padding(
               padding: const EdgeInsets.only(left: 8.0, top: 8.0),
               child: IconButton(
-                icon: const Icon(Icons.arrow_back_ios_new, color: _textColor),
+                icon: Icon(Icons.arrow_back_ios_new, color: theme.colorScheme.onSurface),
                 onPressed: () => Navigator.pop(context),
               ),
             ),
@@ -140,32 +131,31 @@ class _SpecialistPaywallScreenState extends State<SpecialistPaywallScreen> {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    // === ИСПРАВЛЕНО: Убрана ошибка загрузки ассета (черный квадрат) ===
                     const SizedBox(height: 24),
                     Center(
                       child: Icon(
                         Icons.spa,
                         size: 80,
-                        color: _accentColor.withValues(alpha: 0.2),
+                        color: theme.colorScheme.primary.withValues(alpha: 0.2),
                       ),
                     ),
                     const SizedBox(height: 24),
-                    const Text(
+                    Text(
                       "Личный консультант\nпо беременности",
                       style: TextStyle(
                         fontSize: 32,
                         fontWeight: FontWeight.w900,
-                        color: _textColor,
+                        color: theme.colorScheme.onSurface,
                         height: 1.1,
                         letterSpacing: -0.5,
                       ),
                     ),
                     const SizedBox(height: 16),
-                    const Text(
+                    Text(
                       "Максимальная забота, индивидуальный подход и поддержка живого эксперта на каждом этапе твоего пути.",
                       style: TextStyle(
                         fontSize: 16,
-                        color: _subTextColor,
+                        color: theme.colorScheme.onSurfaceVariant,
                         height: 1.5,
                         fontWeight: FontWeight.w500,
                       ),
@@ -176,16 +166,19 @@ class _SpecialistPaywallScreenState extends State<SpecialistPaywallScreen> {
                       Icons.medical_information_outlined,
                       "Разбор анализов",
                       "Эксперт лично расшифрует твои результаты и даст понятные рекомендации.",
+                      theme,
                     ),
                     _buildFeatureItem(
                       Icons.chat_bubble_outline,
                       "Связь 24/7",
                       "Задавай любые волнующие вопросы в удобное время без записи и очередей.",
+                      theme,
                     ),
                     _buildFeatureItem(
                       Icons.psychology_outlined,
                       "Спокойствие",
                       "Мы развеем твои страхи и поможем отличить норму от поводов для беспокойства.",
+                      theme,
                     ),
 
                     const SizedBox(height: 40),
@@ -197,7 +190,7 @@ class _SpecialistPaywallScreenState extends State<SpecialistPaywallScreen> {
             Container(
               padding: const EdgeInsets.fromLTRB(28, 24, 28, 32),
               decoration: BoxDecoration(
-                color: Colors.white,
+                color: theme.colorScheme.surface,
                 borderRadius: const BorderRadius.vertical(
                   top: Radius.circular(32),
                 ),
@@ -216,29 +209,27 @@ class _SpecialistPaywallScreenState extends State<SpecialistPaywallScreen> {
                     width: double.infinity,
                     height: 60,
                     child: ElevatedButton(
-                      // 1. Блокируем нажатие, если уже идет загрузка (защита от двойного списания)
                       onPressed: _isLoading ? null : _processPremiumPayment,
                       style: ElevatedButton.styleFrom(
-                        backgroundColor: _accentColor,
+                        backgroundColor: theme.colorScheme.primary,
                         shape: RoundedRectangleBorder(
                           borderRadius: BorderRadius.circular(20),
                         ),
                         elevation: 0,
                       ),
-                      // 2. Показываем крутилку (CircularProgressIndicator) или текст
                       child: _isLoading
-                          ? const SizedBox(
+                          ? SizedBox(
                               width: 24,
                               height: 24,
                               child: CircularProgressIndicator(
-                                color: Colors.white,
+                                color: theme.colorScheme.onPrimary,
                                 strokeWidth: 2,
                               ),
                             )
-                          : const Text(
+                          : Text(
                               "Оформить за 5 000 ₽ / мес",
                               style: TextStyle(
-                                color: Colors.white,
+                                color: theme.colorScheme.onPrimary,
                                 fontWeight: FontWeight.w900,
                                 fontSize: 16,
                               ),
@@ -253,18 +244,19 @@ class _SpecialistPaywallScreenState extends State<SpecialistPaywallScreen> {
                         context,
                         MaterialPageRoute(
                           builder: (_) => const P2PChatScreen(
-                            otherUserId: SUPPORT_ADMIN_UID,
-                            otherUserName: 'Поддержка MyEva',
+                            otherUserId: _supportAdminUid,
+                            otherUserName: 'Поддержка Моя Ева',
                           ),
                         ),
                       );
                     },
-                    child: const Text(
+                    child: Text(
                       "Остались вопросы? Написать в поддержку",
                       style: TextStyle(
-                        color: _subTextColor,
+                        color: theme.colorScheme.onSurfaceVariant,
                         fontWeight: FontWeight.w600,
                         decoration: TextDecoration.underline,
+                        decorationColor: theme.colorScheme.onSurfaceVariant,
                       ),
                     ),
                   ),
@@ -278,30 +270,29 @@ class _SpecialistPaywallScreenState extends State<SpecialistPaywallScreen> {
   }
 }
 
-class _WaitingPaymentDialog extends StatefulWidget {
+class WaitingPaymentDialog extends StatefulWidget {
   final bool isSpecialist;
   final bool isFromProfile;
 
-  const _WaitingPaymentDialog({
+  const WaitingPaymentDialog({
+    super.key,
     required this.isSpecialist,
     this.isFromProfile = false,
   });
 
   @override
-  State<_WaitingPaymentDialog> createState() => _WaitingPaymentDialogState();
+  State<WaitingPaymentDialog> createState() => _WaitingPaymentDialogState();
 }
 
-class _WaitingPaymentDialogState extends State<_WaitingPaymentDialog> {
+class _WaitingPaymentDialogState extends State<WaitingPaymentDialog> {
   @override
   Widget build(BuildContext context) {
     final uid = FirebaseAuth.instance.currentUser?.uid;
     if (uid == null) return const SizedBox.shrink();
+    final theme = Theme.of(context);
 
     return StreamBuilder<DocumentSnapshot>(
-      stream: FirebaseFirestore.instance
-          .collection('users')
-          .doc(uid)
-          .snapshots(),
+      stream: FirebaseFirestore.instance.collection('users').doc(uid).snapshots(),
       builder: (context, snapshot) {
         if (snapshot.hasData && snapshot.data!.exists) {
           final data = snapshot.data!.data() as Map<String, dynamic>;
@@ -309,44 +300,41 @@ class _WaitingPaymentDialogState extends State<_WaitingPaymentDialog> {
               ? (data['hasSpecialistAccess'] == true)
               : (data['isPro'] == true);
 
-          // Если вебхук выдал доступ - автоматически закрываем окна
-          // Если вебхук выдал доступ - автоматически закрываем окна
           if (hasAccess) {
             WidgetsBinding.instance.addPostFrameCallback((_) {
-              if (mounted) {
-                Navigator.pop(context); // 1. Закрываем диалог
-                if (widget.isFromProfile) {
-                  Navigator.pop(context); // 2. Возвращаемся в профиль
-                } else {
-                  Navigator.pop(context); // Безопасный фоллбэк
-                }
-                ScaffoldMessenger.of(context).showSnackBar(
-                  const SnackBar(
-                    content: Text("Оплата успешно подтверждена! 🎉"),
-                    backgroundColor: Colors.green,
-                  ),
-                );
-              }
+              if (!mounted) return;
+              Navigator.pop(context); 
+              if (widget.isFromProfile) {
+                Navigator.pop(context); 
+              } 
+              ScaffoldMessenger.of(context).showSnackBar(
+                const SnackBar(
+                  content: Text("Оплата успешно подтверждена! 🎉"),
+                  backgroundColor: Colors.green,
+                ),
+              );
             });
           }
         }
 
         return AlertDialog(
-          title: const Text("Ожидание оплаты ⏳"),
-          content: const Column(
+          backgroundColor: theme.colorScheme.surface,
+          title: Text("Ожидание оплаты ⏳", style: TextStyle(color: theme.colorScheme.onSurface)),
+          content: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
               Text(
                 "Мы проверяем статус платежа. Окно закроется автоматически после подтверждения транзакции.",
+                style: TextStyle(color: theme.colorScheme.onSurfaceVariant),
               ),
-              SizedBox(height: 24),
-              CircularProgressIndicator(color: Color(0xFFB76E79)),
+              const SizedBox(height: 24),
+              CircularProgressIndicator(color: theme.colorScheme.primary),
             ],
           ),
           actions: [
             TextButton(
               onPressed: () => Navigator.pop(context),
-              child: const Text("Скрыть", style: TextStyle(color: Colors.grey)),
+              child: Text("Скрыть", style: TextStyle(color: theme.colorScheme.onSurfaceVariant)),
             ),
           ],
         );

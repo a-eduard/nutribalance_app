@@ -3,8 +3,9 @@ import 'package:flutter/gestures.dart';
 import 'package:url_launcher/url_launcher.dart'; 
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
-import '../services/auth_service.dart';
 
+import '../services/auth_service.dart';
+import '../services/theme_service.dart'; // <-- ИМПОРТ THEME SERVICE
 
 class AuthScreen extends StatefulWidget {
   const AuthScreen({super.key});
@@ -25,57 +26,55 @@ class _AuthScreenState extends State<AuthScreen> {
   final TextEditingController _passwordController = TextEditingController();
   final TextEditingController _nameController = TextEditingController();
 
-  static const Color _accentColor = Color(0xFFB76E79); 
-  static const Color _bgColor = Color(0xFFFCF9F9); 
-  static const Color _textColor = Color(0xFF2D2D2D);
-  static const Color _subTextColor = Color(0xFF8E8E93);
-
   Future<void> _showForgotPasswordDialog() async {
+    final theme = Theme.of(context);
     final TextEditingController resetEmailController = TextEditingController(text: _emailController.text);
+    
     showDialog(
       context: context,
       builder: (ctx) => AlertDialog(
-        backgroundColor: Colors.white,
+        backgroundColor: theme.colorScheme.surface,
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(24)),
-        title: const Text("Восстановление пароля", style: TextStyle(color: _textColor, fontWeight: FontWeight.w800)),
+        title: Text("Восстановление пароля", style: TextStyle(color: theme.colorScheme.onSurface, fontWeight: FontWeight.w800)),
         content: TextField(
           controller: resetEmailController,
           keyboardType: TextInputType.emailAddress,
-          style: const TextStyle(color: _textColor, fontWeight: FontWeight.w600),
+          style: TextStyle(color: theme.colorScheme.onSurface, fontWeight: FontWeight.w600),
           decoration: InputDecoration(
             hintText: "Введите ваш Email",
-            hintStyle: TextStyle(color: _subTextColor.withValues(alpha: 0.5), fontWeight: FontWeight.normal),
-            focusedBorder: const UnderlineInputBorder(borderSide: BorderSide(color: _accentColor)),
+            hintStyle: TextStyle(color: theme.colorScheme.onSurfaceVariant.withValues(alpha: 0.5), fontWeight: FontWeight.normal),
+            focusedBorder: UnderlineInputBorder(borderSide: BorderSide(color: theme.colorScheme.primary)),
           ),
-          cursorColor: _accentColor,
+          cursorColor: theme.colorScheme.primary,
         ),
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(ctx),
-            child: const Text("Отмена", style: TextStyle(color: _subTextColor)),
+            child: Text("Отмена", style: TextStyle(color: theme.colorScheme.onSurfaceVariant)),
           ),
           ElevatedButton(
-            style: ElevatedButton.styleFrom(backgroundColor: _accentColor, shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16))),
+            style: ElevatedButton.styleFrom(backgroundColor: theme.colorScheme.primary, shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16))),
             onPressed: () async {
               final email = resetEmailController.text.trim();
               if (email.isNotEmpty) {
+                final msg = ScaffoldMessenger.of(context);
                 Navigator.pop(ctx);
                 try {
                   await FirebaseAuth.instance.sendPasswordResetEmail(email: email);
-                  if (mounted) {
-                    ScaffoldMessenger.of(context).showSnackBar(
-                      const SnackBar(
-                        content: Text("Письмо с инструкцией отправлено на ваш Email 💌", style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)), 
-                        backgroundColor: Colors.teal
-                      )
-                    );
-                  }
+                  if (!mounted) return;
+                  msg.showSnackBar(
+                    const SnackBar(
+                      content: Text("Письмо с инструкцией отправлено на ваш Email 💌", style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)), 
+                      backgroundColor: Colors.teal
+                    )
+                  );
                 } catch (e) {
-                  if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text("Ошибка: ${e.toString()}"), backgroundColor: Colors.redAccent));
+                  if (!mounted) return;
+                  msg.showSnackBar(SnackBar(content: Text("Ошибка: ${e.toString()}"), backgroundColor: Colors.redAccent));
                 }
               }
             },
-            child: const Text("Отправить", style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
+            child: Text("Отправить", style: TextStyle(color: theme.colorScheme.onPrimary, fontWeight: FontWeight.bold)),
           ),
         ],
       ),
@@ -86,24 +85,22 @@ class _AuthScreenState extends State<AuthScreen> {
     final email = _emailController.text.trim();
     final password = _passwordController.text.trim();
     final name = _nameController.text.trim();
+    final msg = ScaffoldMessenger.of(context);
 
     if (email.isEmpty || password.isEmpty || (!_isLogin && name.isEmpty)) {
-      _showError("Заполните все поля");
+      _showError("Заполните все поля", msg);
       return;
     }
 
-    // ИСПРАВЛЕНО: Жесткая проверка согласия с правилами только для регистрации
     if (!_isLogin && !_acceptedTerms) { 
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('Пожалуйста, примите Политику конфиденциальности и Пользовательское соглашение.'),
-            backgroundColor: Colors.redAccent,
-            behavior: SnackBarBehavior.floating,
-          ),
-        );
-      }
-      return; // Жестко прерываем выполнение метода
+      msg.showSnackBar(
+        const SnackBar(
+          content: Text('Пожалуйста, примите Политику конфиденциальности и Пользовательское соглашение.'),
+          backgroundColor: Colors.redAccent,
+          behavior: SnackBarBehavior.floating,
+        ),
+      );
+      return; 
     }
 
     setState(() => _isLoading = true);
@@ -120,20 +117,22 @@ class _AuthScreenState extends State<AuthScreen> {
             'activeRole': 'user',
             'createdAt': FieldValue.serverTimestamp(),
             'isPro': false, 
-            'isOnboardingCompleted': false, // <--- МЕТКА НОВИЧКА
+            'isOnboardingCompleted': false, 
           }, SetOptions(merge: true));
         }
       }
     } on FirebaseAuthException catch (e) {
-      _showError(e.message ?? "Ошибка авторизации");
+      _showError(e.message ?? "Ошибка авторизации", msg);
     } finally {
       if (mounted) setState(() => _isLoading = false);
     }
   }
 
   Future<void> _handleGoogleSignIn() async {
+    final msg = ScaffoldMessenger.of(context);
+    
     if (!_isLogin && !_acceptedTerms) {
-      _showError("Примите условия соглашения");
+      _showError("Примите условия соглашения", msg);
       return;
     }
     setState(() => _isLoading = true);
@@ -142,18 +141,14 @@ class _AuthScreenState extends State<AuthScreen> {
           if (result is UserCredential && result.user != null) {
             final uid = result.user!.uid;
             
-            // Проверяем документ пользователя в базе
             final userDoc = await _db.collection('users').doc(uid).get();
             
-            // УМНАЯ ПРОВЕРКА: есть ли реальные данные онбординга (вес, рост)
             final hasOnboardingData = userDoc.exists &&
                 userDoc.data() != null &&
                 userDoc.data()!.containsKey('weight') && 
                 userDoc.data()!.containsKey('height');
 
             if (!hasOnboardingData) {
-              // Это НОВЫЙ пользователь через Google -> сохраняем базовые данные и ставим метку новичка.
-              // HomeWrapper автоматически отследит этот флаг и перекинет на OnboardingScreen.
               await _db.collection('users').doc(uid).set({
                 'email': result.user!.email,
                 'name': result.user!.displayName ?? 'Пользователь',
@@ -163,30 +158,31 @@ class _AuthScreenState extends State<AuthScreen> {
                 'isOnboardingCompleted': false, 
               }, SetOptions(merge: true));
             } else {
-              // Это СТАРЫЙ пользователь. Гарантируем, что флаг установлен, 
-              // чтобы HomeWrapper точно пустил его на DashboardScreen.
               await _db.collection('users').doc(uid).set({
                 'isOnboardingCompleted': true,
               }, SetOptions(merge: true));
             }
           } else if (result is String) {
-        _showError(result);
+        _showError(result, msg);
       }
     } catch (e) {
-      _showError("Произошла ошибка авторизации");
+      _showError("Произошла ошибка авторизации", msg);
     } finally {
       if (mounted) setState(() => _isLoading = false);
     }
   }
 
-  void _showError(String msg) {
-    ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(msg), backgroundColor: Colors.redAccent));
+  void _showError(String text, ScaffoldMessengerState messenger) {
+    if (!mounted) return;
+    messenger.showSnackBar(SnackBar(content: Text(text), backgroundColor: Colors.redAccent));
   }
 
   @override
   Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    
     return Scaffold(
-      backgroundColor: _bgColor,
+      backgroundColor: theme.scaffoldBackgroundColor,
       body: SafeArea(
         child: Center(
           child: SingleChildScrollView(
@@ -194,24 +190,46 @@ class _AuthScreenState extends State<AuthScreen> {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.center,
               children: [
-                const Text(
+                // === КНОПКА СМЕНЫ ТЕМЫ ===
+                Align(
+                  alignment: Alignment.topRight,
+                  child: ValueListenableBuilder<ThemeMode>(
+                    valueListenable: ThemeService().themeModeNotifier,
+                    builder: (context, currentMode, _) {
+                      final isDark = currentMode == ThemeMode.dark || 
+                                    (currentMode == ThemeMode.system && MediaQuery.of(context).platformBrightness == Brightness.dark);
+                      return IconButton(
+                        icon: Icon(
+                          isDark ? Icons.light_mode_rounded : Icons.dark_mode_rounded,
+                          color: theme.colorScheme.onSurfaceVariant,
+                        ),
+                        onPressed: () {
+                          ThemeService().toggleTheme(isDark ? ThemeMode.light : ThemeMode.dark);
+                        },
+                        tooltip: isDark ? 'Включить светлую тему' : 'Включить темную тему',
+                      );
+                    },
+                  ),
+                ),
+                
+                Text(
                   'Моя Ева',
-                  style: TextStyle(color: _accentColor, fontSize: 36, fontWeight: FontWeight.w800, letterSpacing: 0.5),
+                  style: TextStyle(color: theme.colorScheme.primary, fontSize: 36, fontWeight: FontWeight.w800, letterSpacing: 0.5),
                 ),
                 const SizedBox(height: 8),
-                const Text(
+                Text(
                   'Гармония в каждой калории', 
-                  style: TextStyle(color: _subTextColor, fontSize: 16, fontWeight: FontWeight.w500)
+                  style: TextStyle(color: theme.colorScheme.onSurfaceVariant, fontSize: 16, fontWeight: FontWeight.w500)
                 ),
-                const SizedBox(height: 56),
+                const SizedBox(height: 32), // Чуть уменьшили отступ, чтобы кнопка темы не сдвигала всё сильно вниз
 
                 if (!_isLogin) ...[
-                  _buildInput(_nameController, "Имя", Icons.person_outline),
+                  _buildInput(_nameController, "Имя", Icons.person_outline, theme),
                   const SizedBox(height: 16),
                 ],
-                _buildInput(_emailController, "Email", Icons.email_outlined),
+                _buildInput(_emailController, "Email", Icons.email_outlined, theme),
                 const SizedBox(height: 16),
-                _buildInput(_passwordController, "Пароль", Icons.lock_outline, isPassword: true),
+                _buildInput(_passwordController, "Пароль", Icons.lock_outline, theme, isPassword: true),
 
                 if (_isLogin)
                   Align(
@@ -223,13 +241,13 @@ class _AuthScreenState extends State<AuthScreen> {
                         minimumSize: Size.zero, 
                         tapTargetSize: MaterialTapTargetSize.shrinkWrap
                       ),
-                      child: const Text("Забыли пароль?", style: TextStyle(color: _subTextColor, fontWeight: FontWeight.w600, fontSize: 13)),
+                      child: Text("Забыли пароль?", style: TextStyle(color: theme.colorScheme.onSurfaceVariant, fontWeight: FontWeight.w600, fontSize: 13)),
                     ),
                   ),
 
                 if (!_isLogin) ...[
                   const SizedBox(height: 24),
-                  _buildLegalCheckbox(),
+                  _buildLegalCheckbox(theme),
                 ],
                 
                 const SizedBox(height: 48),
@@ -238,10 +256,10 @@ class _AuthScreenState extends State<AuthScreen> {
                   width: double.infinity, 
                   height: 60,
                   decoration: BoxDecoration(
-                    gradient: const LinearGradient(colors: [_accentColor, Color(0xFFD49A89)], begin: Alignment.topLeft, end: Alignment.bottomRight),
+                    gradient: LinearGradient(colors: [theme.colorScheme.primary, theme.colorScheme.secondary], begin: Alignment.topLeft, end: Alignment.bottomRight),
                     borderRadius: BorderRadius.circular(100),
                     boxShadow: [
-                      BoxShadow(color: _accentColor.withValues(alpha: 0.3), blurRadius: 16, offset: const Offset(0, 6))
+                      BoxShadow(color: theme.colorScheme.primary.withValues(alpha: 0.3), blurRadius: 16, offset: const Offset(0, 6))
                     ],
                   ),
                   child: ElevatedButton(
@@ -252,10 +270,10 @@ class _AuthScreenState extends State<AuthScreen> {
                       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(100)),
                     ),
                     child: _isLoading 
-                      ? const SizedBox(width: 24, height: 24, child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2))
+                      ? SizedBox(width: 24, height: 24, child: CircularProgressIndicator(color: theme.colorScheme.onPrimary, strokeWidth: 2))
                       : Text(
                           _isLogin ? "ВОЙТИ" : "СОЗДАТЬ АККАУНТ", 
-                          style: const TextStyle(fontWeight: FontWeight.w800, color: Colors.white, fontSize: 16, letterSpacing: 1.2)
+                          style: TextStyle(fontWeight: FontWeight.w800, color: theme.colorScheme.onPrimary, fontSize: 16, letterSpacing: 1.2)
                         ),
                   ),
                 ),
@@ -265,9 +283,9 @@ class _AuthScreenState extends State<AuthScreen> {
                 Container(
                   width: double.infinity, height: 60,
                   decoration: BoxDecoration(
-                    color: Colors.white,
+                    color: theme.colorScheme.surface,
                     borderRadius: BorderRadius.circular(100),
-                    border: Border.all(color: const Color(0xFFE5E5EA)),
+                    border: Border.all(color: theme.colorScheme.onSurfaceVariant.withValues(alpha: 0.2)),
                   ),
                   child: InkWell(
                     borderRadius: BorderRadius.circular(100),
@@ -275,16 +293,15 @@ class _AuthScreenState extends State<AuthScreen> {
                     child: Row(
                       mainAxisAlignment: MainAxisAlignment.center,
                       children: [
-                        // ФИКС: Разбитая строка и защита от ошибок загрузки
                         Image.network(
                           'https://' 'cdn-icons-png.flaticon.com/512/2991/2991148.png', 
                           width: 24,
                           errorBuilder: (context, error, stackTrace) => const Icon(Icons.g_mobiledata, color: Colors.blue, size: 32),
                         ),
                         const SizedBox(width: 12),
-                        const Text(
+                        Text(
                           "Войти через Google", 
-                          style: TextStyle(color: Color(0xFF2D2D2D), fontWeight: FontWeight.w600, fontSize: 16)
+                          style: TextStyle(color: theme.colorScheme.onSurface, fontWeight: FontWeight.w600, fontSize: 16)
                         ),
                       ],
                     ),
@@ -299,7 +316,7 @@ class _AuthScreenState extends State<AuthScreen> {
                   ),
                   child: Text(
                     _isLogin ? "Нет аккаунта? Зарегистрироваться" : "Уже есть аккаунт? Войти",
-                    style: const TextStyle(color: _accentColor, fontWeight: FontWeight.bold, fontSize: 15),
+                    style: TextStyle(color: theme.colorScheme.primary, fontWeight: FontWeight.bold, fontSize: 15),
                   ),
                 ),
               ],
@@ -310,10 +327,10 @@ class _AuthScreenState extends State<AuthScreen> {
     );
   }
 
-  Widget _buildInput(TextEditingController controller, String hint, IconData icon, {bool isPassword = false}) {
+  Widget _buildInput(TextEditingController controller, String hint, IconData icon, ThemeData theme, {bool isPassword = false}) {
     return Container(
       decoration: BoxDecoration(
-        color: Colors.white, 
+        color: theme.colorScheme.surface, 
         borderRadius: BorderRadius.circular(16), 
         boxShadow: [
           BoxShadow(color: Colors.black.withValues(alpha: 0.03), blurRadius: 20, offset: const Offset(0, 4))
@@ -321,11 +338,11 @@ class _AuthScreenState extends State<AuthScreen> {
       ),
       child: TextField(
         controller: controller, obscureText: isPassword,
-        style: const TextStyle(color: _textColor, fontWeight: FontWeight.w600),
+        style: TextStyle(color: theme.colorScheme.onSurface, fontWeight: FontWeight.w600),
         decoration: InputDecoration(
-          prefixIcon: Icon(icon, color: _accentColor.withValues(alpha: 0.7), size: 22),
+          prefixIcon: Icon(icon, color: theme.colorScheme.primary.withValues(alpha: 0.7), size: 22),
           hintText: hint, 
-          hintStyle: const TextStyle(color: Color(0xFFC7C7CC), fontWeight: FontWeight.w400),
+          hintStyle: TextStyle(color: theme.colorScheme.onSurfaceVariant.withValues(alpha: 0.5), fontWeight: FontWeight.w400),
           border: InputBorder.none, 
           contentPadding: const EdgeInsets.symmetric(vertical: 20),
         ),
@@ -333,8 +350,7 @@ class _AuthScreenState extends State<AuthScreen> {
     );
   }
 
-  // === ИСПРАВЛЕННЫЕ ССЫЛКИ С ЗАЩИТОЙ ОТ ПРОБЕЛОВ ===
-  Widget _buildLegalCheckbox() {
+  Widget _buildLegalCheckbox(ThemeData theme) {
     return Row(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
@@ -344,7 +360,7 @@ class _AuthScreenState extends State<AuthScreen> {
           child: Checkbox(
             value: _acceptedTerms, 
             onChanged: (val) => setState(() => _acceptedTerms = val ?? false), 
-            activeColor: _accentColor,
+            activeColor: theme.colorScheme.primary,
             shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(6)),
           ),
         ),
@@ -354,12 +370,12 @@ class _AuthScreenState extends State<AuthScreen> {
             padding: const EdgeInsets.only(top: 2.0),
             child: RichText(
               text: TextSpan(
-                style: const TextStyle(color: _subTextColor, fontSize: 13, fontWeight: FontWeight.w500, height: 1.5),
+                style: TextStyle(color: theme.colorScheme.onSurfaceVariant, fontSize: 13, fontWeight: FontWeight.w500, height: 1.5),
                 children: [
                   const TextSpan(text: "Я соглашаюсь с "),
                   TextSpan(
                     text: "Пользовательским соглашением",
-                    style: const TextStyle(color: _accentColor, decoration: TextDecoration.underline),
+                    style: TextStyle(color: theme.colorScheme.primary, decoration: TextDecoration.underline),
                     recognizer: TapGestureRecognizer()..onTap = () {
                       const String url = "https://docs.google.com/document/d/1GpHL1IbLlklUrKQ2jShjlNIrXd2V4V1H/edit?usp=sharing";
                       launchUrl(Uri.parse(url.trim()), mode: LaunchMode.externalApplication);
@@ -368,7 +384,7 @@ class _AuthScreenState extends State<AuthScreen> {
                   const TextSpan(text: " и "),
                   TextSpan(
                     text: "Политикой конфиденциальности",
-                    style: const TextStyle(color: _accentColor, decoration: TextDecoration.underline),
+                    style: TextStyle(color: theme.colorScheme.primary, decoration: TextDecoration.underline),
                     recognizer: TapGestureRecognizer()..onTap = () {
                       const String url = "https://docs.google.com/document/d/1ak-7-B2_uvmY1O7b6kJu-rUEOa5e_sDY/edit?usp=sharing";
                       launchUrl(Uri.parse(url.trim()), mode: LaunchMode.externalApplication);

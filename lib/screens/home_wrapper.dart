@@ -4,10 +4,9 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 
 import 'auth_screen.dart'; 
 import 'dashboard_screen.dart'; 
-import '../paywall_screen.dart'; 
 import '../services/push_notification_service.dart';
 import '../services/local_notification_service.dart';
-import '../services/database_service.dart'; // <-- 1. ИМПОРТИРУЕМ СЕРВИС
+import '../services/database_service.dart'; 
 import 'onboarding_screen.dart';
 
 class HomeWrapper extends StatelessWidget {
@@ -15,13 +14,15 @@ class HomeWrapper extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    
     return StreamBuilder<User?>(
       stream: FirebaseAuth.instance.authStateChanges(),
       builder: (context, snapshot) {
         if (snapshot.connectionState == ConnectionState.waiting) {
-          return const Scaffold(
-            backgroundColor: Color(0xFF1A1A1C), 
-            body: Center(child: CircularProgressIndicator(color: Color(0xFFB76E79)))
+          return Scaffold(
+            backgroundColor: theme.scaffoldBackgroundColor, 
+            body: Center(child: CircularProgressIndicator(color: theme.colorScheme.primary))
           );
         }
         if (!snapshot.hasData || snapshot.data == null) return const AuthScreen();
@@ -40,7 +41,7 @@ class FirestoreRoleLoader extends StatefulWidget {
 }
 
 class _FirestoreRoleLoaderState extends State<FirestoreRoleLoader> {
-  bool? _isAppInReview; // <-- 2. ПЕРЕМЕННАЯ ДЛЯ СТАТУСА РУБИЛЬНИКА
+  bool? _isAppInReview; 
 
   // Асинхронно спрашиваем у базы, находимся ли мы на модерации
   Future<void> _checkReviewStatus() async {
@@ -69,16 +70,18 @@ class _FirestoreRoleLoaderState extends State<FirestoreRoleLoader> {
     _checkReviewStatus(); 
     
     LocalNotificationService().requestPermissions(); 
-    LocalNotificationService().scheduleDailyNotifications();
+    LocalNotificationService().syncNotificationsOnStartup();
   }
 
   @override
   Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+
     // Ждем долю секунды, пока загрузится статус рубильника
     if (_isAppInReview == null) {
-      return const Scaffold(
-        backgroundColor: Color(0xFF1A1A1C),
-        body: Center(child: CircularProgressIndicator(color: Color(0xFFB76E79)))
+      return Scaffold(
+        backgroundColor: theme.scaffoldBackgroundColor,
+        body: Center(child: CircularProgressIndicator(color: theme.colorScheme.primary))
       );
     }
 
@@ -86,39 +89,31 @@ class _FirestoreRoleLoaderState extends State<FirestoreRoleLoader> {
       stream: FirebaseFirestore.instance.collection('users').doc(widget.user.uid).snapshots(),
       builder: (context, snapshot) {
         if (snapshot.connectionState == ConnectionState.waiting) {
-          return const Scaffold(
-            backgroundColor: Color(0xFF1A1A1C), 
-            body: Center(child: CircularProgressIndicator(color: Color(0xFFB76E79)))
+          return Scaffold(
+            backgroundColor: theme.scaffoldBackgroundColor, 
+            body: Center(child: CircularProgressIndicator(color: theme.colorScheme.primary))
           );
         }
         if (snapshot.hasError || !snapshot.hasData) {
-          return const Scaffold(
-            backgroundColor: Color(0xFF1A1A1C), 
-            body: Center(child: CircularProgressIndicator(color: Color(0xFFB76E79)))
+          return Scaffold(
+            backgroundColor: theme.scaffoldBackgroundColor, 
+            body: Center(child: CircularProgressIndicator(color: theme.colorScheme.primary))
           );
         }
 
-        // ИСПРАВЛЕНО: Защита от вечной загрузки! 
-        // Если база пустая или документ не успел создаться - отправляем на онбординг.
+        // Защита от вечной загрузки: отправляем на онбординг, если документа нет
         if (!snapshot.data!.exists) {
           return const OnboardingScreen();
         }
 
         final data = snapshot.data!.data() as Map<String, dynamic>;
-        final bool isPro = data['isPro'] == true;
         
-        // === НОВАЯ ЛОГИКА: ПРОВЕРКА ОНБОРДИНГА ===
-        // Если флага нет (старый юзер), по умолчанию считаем true (пускаем дальше).
-        // Если флаг false (новый юзер после регистрации) — кидаем на онбординг.
         final bool isOnboardingCompleted = data['isOnboardingCompleted'] ?? true;
 
         if (isOnboardingCompleted == false) {
-          return const OnboardingScreen(); // Отправляем новичков заполнять профиль
+          return const OnboardingScreen(); 
         }
 
-        // === НОВАЯ ЛОГИКА: СРАЗУ НА ГЛАВНЫЙ ЭКРАН ===
-        // Мы больше не показываем пейвол принудительно при входе.
-        // Пользователь должен сначала увидеть ценность продукта.
         return const DashboardScreen();
       },
     );

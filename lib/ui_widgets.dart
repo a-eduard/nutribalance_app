@@ -67,6 +67,8 @@ class NeonActionButton extends StatelessWidget {
   }
 }
 
+// В файле: lib/ui_widgets.dart
+
 class HeavyInput extends StatelessWidget {
   final TextEditingController controller;
   final String hint;
@@ -75,22 +77,51 @@ class HeavyInput extends StatelessWidget {
   final bool obscureText;           
   final TextAlign textAlign;        
 
-  const HeavyInput({super.key, required this.controller, required this.hint, required this.onChanged, this.keyboardType = TextInputType.number, this.obscureText = false, this.textAlign = TextAlign.center});
+  const HeavyInput({
+    super.key, 
+    required this.controller, 
+    required this.hint, 
+    required this.onChanged, 
+    this.keyboardType = TextInputType.number, 
+    this.obscureText = false, 
+    this.textAlign = TextAlign.center
+  });
 
   @override
   Widget build(BuildContext context) {
+    // Получаем текущую тему (Светлая или Темная)
+    final theme = Theme.of(context);
+
     return Container(
       decoration: BoxDecoration(
-        color: const Color(0xFFF0F0F0), // Светло-серый фон поля ввода
-        borderRadius: BorderRadius.circular(16)
+        // Используем адаптивный цвет поверхности вместо жесткого Color(0xFFF0F0F0)
+        color: theme.colorScheme.surface, 
+        borderRadius: BorderRadius.circular(16),
+        // Добавляем легкую границу, чтобы поле выделялось на фоне Scaffold
+        border: Border.all(
+          color: theme.colorScheme.onSurface.withValues(alpha: 0.1),
+          width: 1,
+        ),
       ),
       child: TextField(
-        controller: controller, onChanged: onChanged, keyboardType: keyboardType, obscureText: obscureText,
-        style: const TextStyle(color: Color(0xFF2D2D2D), fontWeight: FontWeight.bold, fontSize: 18), // Темный текст
+        controller: controller, 
+        onChanged: onChanged, 
+        keyboardType: keyboardType, 
+        obscureText: obscureText,
+        // Адаптивный цвет текста (белый в темной теме, черный в светлой)
+        style: TextStyle(
+          color: theme.colorScheme.onSurface, 
+          fontWeight: FontWeight.bold, 
+          fontSize: 18
+        ), 
         textAlign: textAlign,
+        cursorColor: theme.colorScheme.primary, // Цвет курсора в цвет бренда
         decoration: InputDecoration(
           hintText: hint, 
-          hintStyle: TextStyle(color: Colors.grey.withValues(alpha: 0.8)), 
+          // Адаптивный цвет плейсхолдера
+          hintStyle: TextStyle(
+            color: theme.colorScheme.onSurfaceVariant.withValues(alpha: 0.5)
+          ), 
           border: InputBorder.none, 
           contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 16)
         ),

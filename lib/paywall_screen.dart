@@ -1,10 +1,11 @@
+// Файл: lib/paywall_screen.dart
+
 import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
+import 'package:flutter_rustore_billing/flutter_rustore_billing.dart';
+import 'package:cloud_functions/cloud_functions.dart';
 import 'screens/dashboard_screen.dart';
-import 'package:flutter_rustore_billing/flutter_rustore_billing.dart'; // <-- ИМПОРТ RUSTORE SDK
-import 'package:cloud_functions/cloud_functions.dart'; // <-- ДОБАВЛЕНО ДЛЯ СЕРВЕРНОЙ ПРОВЕРКИ
-
 
 class PaywallScreen extends StatefulWidget {
   final bool isFromProfile;
@@ -17,20 +18,28 @@ class PaywallScreen extends StatefulWidget {
 
 class _PaywallScreenState extends State<PaywallScreen> {
   bool _isLoading = false;
-  String _selectedPlan = 'year';
+  String _selectedPlan = 'month';
   String? _appliedPromo;
 
-  static const Color _accentColor = Color(0xFFB76E79);
-  static const Color _textColor = Color(0xFF2D2D2D);
-  static const Color _subTextColor = Color(0xFF8E8E93);
-
-  // === ОБНОВЛЕНИЕ ЦЕН: новые базовые тарифы ===
   final double _basePriceMonth = 299;
   final double _basePriceYear = 1490;
 
+  // АРХИТЕКТУРНОЕ ИСПРАВЛЕНИЕ: Предотвращение утечки памяти
+  late final TextEditingController _promoController;
+
+  @override
+  void initState() {
+    super.initState();
+    _promoController = TextEditingController();
+  }
+
+  @override
+  void dispose() {
+    _promoController.dispose();
+    super.dispose();
+  }
+
   void _closePaywall() {
-    // ИСПРАВЛЕНО: Безопасное закрытие экрана без изменения стейта авторизации.
-    // Если пейвол открыт поверх другого экрана (например, сканера) — он просто аккуратно смахнется.
     if (Navigator.canPop(context)) {
       Navigator.pop(context);
     }
@@ -38,24 +47,27 @@ class _PaywallScreenState extends State<PaywallScreen> {
 
   void _applyPromoCode(String code) {
     final cleanCode = code.trim().toUpperCase();
+    final nav = Navigator.of(context);
+    final msg = ScaffoldMessenger.of(context);
+
     if (cleanCode == 'START3') {
       setState(() => _appliedPromo = cleanCode);
-      Navigator.pop(context);
+      nav.pop();
       _processPayment();
     } else if (cleanCode == 'SALE50EVA' || cleanCode == 'SALE50') {
-      setState(() => _appliedPromo = 'SALE50'); // Оставляем SALE50 для применения скидки в UI
-      Navigator.pop(context);
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text(
+      setState(() => _appliedPromo = 'SALE50');
+      nav.pop();
+      msg.showSnackBar(
+        SnackBar(
+          content: const Text(
             "Промокод активирован! Скидка 50% применена ✨",
             style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold),
           ),
-          backgroundColor: Colors.teal,
+          backgroundColor: Theme.of(context).colorScheme.primary,
         ),
       );
     } else {
-      ScaffoldMessenger.of(context).showSnackBar(
+      msg.showSnackBar(
         const SnackBar(
           content: Text("Неверный промокод"),
           backgroundColor: Colors.redAccent,
@@ -65,51 +77,53 @@ class _PaywallScreenState extends State<PaywallScreen> {
   }
 
   void _showPromoDialog() {
-    final TextEditingController promoController = TextEditingController();
+    final theme = Theme.of(context);
+    _promoController.clear(); // Очищаем поле при каждом новом открытии
+    
     showDialog(
       context: context,
       builder: (ctx) => AlertDialog(
-        backgroundColor: Colors.white,
+        backgroundColor: theme.colorScheme.surface,
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(24)),
-        title: const Text(
+        title: Text(
           "Промокод",
-          style: TextStyle(color: _textColor, fontWeight: FontWeight.w800),
+          style: TextStyle(color: theme.colorScheme.onSurface, fontWeight: FontWeight.w800),
         ),
         content: TextField(
-          controller: promoController,
-          style: const TextStyle(
-            color: _textColor,
+          controller: _promoController,
+          style: TextStyle(
+            color: theme.colorScheme.onSurface,
             fontWeight: FontWeight.w600,
           ),
           decoration: InputDecoration(
             hintText: "Введите код (START3, SALE50)",
             hintStyle: TextStyle(
-              color: _subTextColor.withValues(alpha: 0.5),
+              color: theme.colorScheme.onSurfaceVariant.withValues(alpha: 0.5),
               fontWeight: FontWeight.normal,
             ),
-            focusedBorder: const UnderlineInputBorder(
-              borderSide: BorderSide(color: _accentColor),
+            focusedBorder: UnderlineInputBorder(
+              borderSide: BorderSide(color: theme.colorScheme.primary),
             ),
           ),
-          cursorColor: _accentColor,
+          cursorColor: theme.colorScheme.primary,
         ),
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(ctx),
-            child: const Text("Отмена", style: TextStyle(color: _subTextColor)),
+            child: Text("Отмена", style: TextStyle(color: theme.colorScheme.onSurfaceVariant)),
           ),
           ElevatedButton(
             style: ElevatedButton.styleFrom(
-              backgroundColor: _accentColor,
+              backgroundColor: theme.colorScheme.primary,
               shape: RoundedRectangleBorder(
                 borderRadius: BorderRadius.circular(16),
               ),
             ),
-            onPressed: () => _applyPromoCode(promoController.text),
-            child: const Text(
+            onPressed: () => _applyPromoCode(_promoController.text),
+            child: Text(
               "Применить",
               style: TextStyle(
-                color: Colors.white,
+                color: theme.colorScheme.onPrimary,
                 fontWeight: FontWeight.bold,
               ),
             ),
@@ -119,94 +133,134 @@ class _PaywallScreenState extends State<PaywallScreen> {
     );
   }
 
-  // === НОВЫЙ МЕТОД: Покупка через RuStore ===
   Future<void> _buySubscription(String productId, int daysToAdd) async {
     final user = FirebaseAuth.instance.currentUser;
     if (user == null) return;
 
+    final nav = Navigator.of(context);
+    final msg = ScaffoldMessenger.of(context);
+    final theme = Theme.of(context);
+
+    String pToken = '';
+
+    // БЛОК 1: Нативная покупка (RuStore)
     try {
-      // 1. Вызываем нативное окно оплаты RuStore
-      final purchaseResult = await RustoreBillingClient.purchase(productId, user.uid);
+      final purchaseResult = await RustoreBillingClient.purchase(
+        productId,
+        user.uid,
+      );
+
+      if (purchaseResult.successPurchase == null) {
+        debugPrint("Оплата отменена пользователем или не удалась на устройстве.");
+        if (mounted) setState(() => _isLoading = false);
+        return;
+      }
+
+      pToken = purchaseResult.successPurchase!.purchaseId ?? '';
       
-      // Пытаемся достать токен (зависит от версии SDK). Если нет - передаем заглушку для mock-сервера
-      String pToken = "mock_token";
-      try {
-        if (purchaseResult != null) {
-          pToken = (purchaseResult as dynamic).purchaseToken?.toString() ?? "mock_token";
-        }
-      } catch (_) {}
-
-      // 2. БЕЗОПАСНАЯ СЕРВЕРНАЯ ПРОВЕРКА (Cloud Functions)
-      final callable = FirebaseFunctions.instance.httpsCallable('verifyRuStorePurchase');
-      await callable.call({
-        'productId': productId,
-        'purchaseToken': pToken,
-      });
-
-      // 3. Выводим радостное сообщение и пускаем в приложение
+    } catch (nativeError) {
+      debugPrint("🔥 Ошибка SDK RuStore: $nativeError");
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text(
-              "Оплата прошла успешно! Добро пожаловать в Моя Ева Премиум ✨",
-              style: TextStyle(
-                color: Colors.white,
-                fontWeight: FontWeight.bold,
+        final errorText = nativeError.toString().toLowerCase();
+        
+        if (errorText.contains('already') || 
+            errorText.contains('purchased') || 
+            errorText.contains('owned') || 
+            errorText.contains('приобретен')) {
+          
+          msg.showSnackBar(
+            SnackBar(
+              content: const Text(
+                "Подписка уже активна! Пытаемся восстановить доступ... ✨",
+                style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold),
               ),
+              backgroundColor: theme.colorScheme.primary,
+              duration: const Duration(seconds: 4),
             ),
-            backgroundColor: Color(0xFFB76E79),
+          );
+          _restorePurchases();
+        } else {
+          msg.showSnackBar(
+            const SnackBar(
+              content: Text(
+                "Оплата отменена или магазин не найден",
+                style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold),
+              ),
+              backgroundColor: Colors.redAccent,
+            ),
+          );
+          setState(() => _isLoading = false);
+        }
+      }
+      return; // Прерываем выполнение, если нативная оплата провалилась
+    }
+
+    // БЛОК 2: Серверная валидация (Firebase Cloud Functions)
+    // Выполняется ТОЛЬКО если RuStore успешно списал деньги (выдал токен)
+    try {
+      final callable = FirebaseFunctions.instance.httpsCallable('verifyRuStorePurchase');
+      await callable.call({'productId': productId, 'purchaseToken': pToken});
+
+      if (mounted) {
+        msg.showSnackBar(
+          SnackBar(
+            content: const Text(
+              "Оплата прошла успешно! Добро пожаловать в Моя Ева Премиум ✨",
+              style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold),
+            ),
+            backgroundColor: theme.colorScheme.primary,
           ),
         );
 
-        // Разделяем логику закрытия (из профиля или из онбординга)
         if (widget.isFromProfile) {
-          Navigator.pop(context);
+          nav.pop();
         } else {
-          Navigator.of(context).pushReplacement(
+          nav.pushReplacement(
             MaterialPageRoute(builder: (_) => const DashboardScreen()),
           );
         }
       }
-    } catch (e) {
-      debugPrint("🔥 Ошибка RuStore: $e");
+    } catch (serverError) {
+      debugPrint("🔥 Ошибка Firebase Cloud Function: $serverError");
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
+        // Мы НЕ говорим пользователю "Ошибка оплаты", потому что деньги уже списаны!
+        msg.showSnackBar(
           const SnackBar(
             content: Text(
-              "Оплата отменена или магазин не найден",
-              style: TextStyle(
-                color: Colors.white,
-                fontWeight: FontWeight.bold,
-              ),
+              "Оплата прошла, но серверная проверка задерживается. Пожалуйста, нажмите 'Восстановить покупки' через пару минут.",
+              style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold),
             ),
-            backgroundColor: Colors.redAccent,
+            backgroundColor: Colors.orange,
+            duration: Duration(seconds: 8),
           ),
         );
       }
+    } finally {
+      if (mounted) setState(() => _isLoading = false);
     }
   }
-
+  
   Future<void> _processPayment() async {
     setState(() => _isLoading = true);
+    
+    final nav = Navigator.of(context);
+    final msg = ScaffoldMessenger.of(context);
+    final theme = Theme.of(context);
 
     try {
-      // === 1. ЛОГИКА ДЛЯ ПРОМОКОДА START3 (БЕСПЛАТНЫЙ ТРИАЛ) ===
       if (_appliedPromo == 'START3') {
         final user = FirebaseAuth.instance.currentUser;
         if (user != null) {
-          // НОВЫЙ КОД: Читаем профиль пользователя для проверки
           final userDoc = await FirebaseFirestore.instance
               .collection('users')
               .doc(user.uid)
               .get();
-          // Исправлено: убрали ненужный cast (unnecessary_cast), так как data() уже возвращает Map<String, dynamic>?
           final userData = userDoc.data() ?? {};
           final List<dynamic> usedPromos = userData['usedPromoCodes'] ?? [];
 
-          // Если промокод уже использован - выдаем ошибку и останавливаем процесс
           if (usedPromos.contains('START3')) {
             if (mounted) {
-              ScaffoldMessenger.of(context).showSnackBar(
+              msg.showSnackBar(
                 const SnackBar(
                   content: Text(
                     "Вы уже использовали этот промокод 😔",
@@ -220,10 +274,9 @@ class _PaywallScreenState extends State<PaywallScreen> {
               );
               setState(() => _isLoading = false);
             }
-            return; // СТОП!
+            return;
           }
 
-          // Если промокода нет - даем доступ и записываем код в базу
           final untilDate = DateTime.now().add(const Duration(days: 3));
           await FirebaseFirestore.instance
               .collection('users')
@@ -231,49 +284,55 @@ class _PaywallScreenState extends State<PaywallScreen> {
               .update({
                 'isPro': true,
                 'proUntil': Timestamp.fromDate(untilDate),
-                'usedPromoCodes': FieldValue.arrayUnion([
-                  'START3',
-                ]), // Навсегда сохраняем в профиль
+                'usedPromoCodes': FieldValue.arrayUnion(['START3']),
               });
         }
 
         if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(
-              content: Text(
+          msg.showSnackBar(
+            SnackBar(
+              content: const Text(
                 "Промокод активирован! Премиум доступен ✨",
                 style: TextStyle(
                   color: Colors.white,
                   fontWeight: FontWeight.bold,
                 ),
               ),
-              backgroundColor: Color(0xFFB76E79),
+              backgroundColor: theme.colorScheme.primary,
             ),
           );
           if (widget.isFromProfile) {
-            Navigator.pop(context);
+            nav.pop();
           } else {
-            Navigator.of(context).pushReplacement(
+            nav.pushReplacement(
               MaterialPageRoute(builder: (_) => const DashboardScreen()),
             );
           }
         }
-        return; // Выходим отсюда, ЮKassa для триала не нужна.
+        return;
       }
 
-      /// === 2. ЛОГИКА ДЛЯ ПЛАТНОЙ ПОДПИСКИ (RUSTORE) ===
+      bool hasDiscount = _appliedPromo == 'SALE50';
+
+      String monthProductId = hasDiscount
+          ? 'eva_sub_1_month_promo'
+          : 'eva_sub_1_month';
+      String yearProductId = hasDiscount
+          ? 'eva_sub_1_year_promo'
+          : 'eva_sub_1_year';
+
       if (_selectedPlan == 'month') {
-        await _buySubscription('eva_sub_1_month', 30);
+        await _buySubscription(monthProductId, 30);
       } else if (_selectedPlan == 'year') {
-        await _buySubscription('eva_sub_1_year', 365);
+        await _buySubscription(yearProductId, 365);
       }
     } catch (e) {
-      debugPrint("🔥 ОШИБКА ПЛАТЕЖА: $e");
+      debugPrint("🔥 ОШИБКА ИНИЦИАЛИЗАЦИИ ПЛАТЕЖА: $e");
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
+        msg.showSnackBar(
           SnackBar(
             content: Text(
-              'Ошибка бэкенда: $e',
+              'Системная ошибка: $e',
               style: const TextStyle(fontSize: 12),
             ),
             backgroundColor: Colors.red,
@@ -286,13 +345,116 @@ class _PaywallScreenState extends State<PaywallScreen> {
     }
   }
 
+  Future<void> _restorePurchases() async {
+    setState(() => _isLoading = true);
+    
+    final nav = Navigator.of(context);
+    final msg = ScaffoldMessenger.of(context);
+    final theme = Theme.of(context);
+    
+    final user = FirebaseAuth.instance.currentUser;
+    if (user == null) {
+      setState(() => _isLoading = false);
+      return;
+    }
+
+    try {
+      final response = await RustoreBillingClient.purchases();
+      final purchasesList = response.purchases; 
+
+      bool hasActiveSub = false;
+
+      for (var p in purchasesList) {
+        if (p == null) continue; 
+        final stateStr = p.purchaseState?.toString().toUpperCase() ?? '';
+        if (stateStr.contains('PAID') ||
+            stateStr.contains('CONFIRMED') ||
+            stateStr.contains('COMPLETED')) {
+          
+          String pToken = p.purchaseId ?? "";
+          String pId = p.productId ?? "";
+
+          if (pToken.isNotEmpty) {
+            try {
+              final callable = FirebaseFunctions.instance.httpsCallable('verifyRuStorePurchase');
+              await callable.call({'productId': pId, 'purchaseToken': pToken});
+              hasActiveSub = true;
+            } catch (cfError) {
+              debugPrint("🔥 Ошибка восстановления чека $pToken: $cfError");
+              // Продолжаем цикл: если серверов RuStore (502) не отвечает на один чек, 
+              // попытаемся восстановить другие, не краша весь процесс.
+            }
+          }
+        }
+      }
+
+      if (hasActiveSub) {
+        if (mounted) {
+          msg.showSnackBar(
+            SnackBar(
+              content: const Text(
+                "Покупки успешно восстановлены! ✨",
+                style: TextStyle(
+                  color: Colors.white,
+                  fontWeight: FontWeight.bold,
+                ),
+              ),
+              backgroundColor: theme.colorScheme.primary,
+            ),
+          );
+          if (widget.isFromProfile) {
+            nav.pop();
+          } else {
+            nav.pushReplacement(
+              MaterialPageRoute(builder: (_) => const DashboardScreen()),
+            );
+          }
+        }
+      } else {
+        if (mounted) {
+          msg.showSnackBar(
+            const SnackBar(
+              content: Text(
+                "Сервер временно недоступен или активных подписок нет.",
+                style: TextStyle(
+                  color: Colors.white,
+                  fontWeight: FontWeight.bold,
+                ),
+              ),
+              backgroundColor: Colors.redAccent,
+            ),
+          );
+        }
+      }
+    } catch (e) {
+      debugPrint("Ошибка нативного восстановления: $e");
+      if (mounted) {
+        msg.showSnackBar(
+          const SnackBar(
+            content: Text(
+              "Ошибка при связи с магазином на устройстве",
+              style: TextStyle(
+                color: Colors.white,
+                fontWeight: FontWeight.bold,
+              ),
+            ),
+            backgroundColor: Colors.redAccent,
+          ),
+        );
+      }
+    } finally {
+      if (mounted) setState(() => _isLoading = false);
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    
     String ctaText = "НАЧАТЬ ПРЕОБРАЖЕНИЕ";
     if (_appliedPromo == 'START3') ctaText = "Начать 3 дня бесплатно";
     if (_appliedPromo == 'SALE50') ctaText = "ОПЛАТИТЬ СО СКИДКОЙ";
 
-    // ПЕРЕХВАТ КНОПКИ НАЗАД
     return PopScope(
       canPop: widget.isFromProfile,
       onPopInvokedWithResult: (didPop, result) {
@@ -300,18 +462,21 @@ class _PaywallScreenState extends State<PaywallScreen> {
         _closePaywall();
       },
       child: Scaffold(
-        backgroundColor: const Color(0xFFF9F9F9),
+        backgroundColor: theme.scaffoldBackgroundColor,
         body: SafeArea(
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              // === КРЕСТИК ЗАКРЫТИЯ В ПРАВОМ ВЕРХНЕМ УГЛУ ===
               Padding(
                 padding: const EdgeInsets.only(right: 16.0, top: 8.0),
                 child: Align(
                   alignment: Alignment.topRight,
                   child: IconButton(
-                    icon: const Icon(Icons.close, color: _subTextColor, size: 24), // Сделали менее массивным
+                    icon: Icon(
+                      Icons.close,
+                      color: theme.colorScheme.onSurfaceVariant,
+                      size: 24,
+                    ), 
                     onPressed: _closePaywall,
                   ),
                 ),
@@ -323,65 +488,67 @@ class _PaywallScreenState extends State<PaywallScreen> {
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      const Text(
+                      Text(
                         "✨ Забота о себе,\nа не строгие диеты",
                         style: TextStyle(
-                          fontSize: 34,
+                          fontSize: 28, 
                           fontWeight: FontWeight.w900,
-                          color: _textColor,
-                          height: 1.2,
+                          color: theme.colorScheme.onSurface,
+                          height: 1.1, 
                           letterSpacing: -0.5,
                         ),
                       ),
-                      const SizedBox(height: 16),
-                      const Text(
+                      const SizedBox(height: 8), 
+                      Text(
                         "Твой личный ИИ-коуч и подруга. Поможет с питанием, женским здоровьем и мотивацией без ругани за калории.",
                         style: TextStyle(
-                          fontSize: 16,
-                          color: _subTextColor,
-                          height: 1.5,
+                          fontSize: 14, 
+                          color: theme.colorScheme.onSurfaceVariant,
+                          height: 1.3,
                           fontWeight: FontWeight.w500,
                         ),
                       ),
 
-                      const SizedBox(height: 32),
-
-                      // ИСПРАВЛЕНЫ ИМЕНА ИКОНОК (auto_awesome, health_and_safety, support_agent)
+                      const SizedBox(height: 16), 
+                      
                       _buildFeatureItem(
                         Icons.auto_awesome,
                         "Умный план питания",
                         "Индивидуальное меню на основе анализов.",
+                        theme,
                       ),
                       _buildFeatureItem(
                         Icons.health_and_safety,
                         "Анализ симптомов",
                         "Мгновенная расшифровка самочувствия.",
+                        theme,
                       ),
                       _buildFeatureItem(
                         Icons.support_agent,
                         "Поддержка 24/7",
                         "Приоритетные ответы от специалистов.",
+                        theme,
                       ),
 
-                      const SizedBox(height: 32),
+                      const SizedBox(height: 16), 
 
                       IntrinsicHeight(
                         child: Row(
                           crossAxisAlignment: CrossAxisAlignment.stretch,
                           children: [
-                            // === ОБНОВЛЕНИЕ ЦЕН: Карточка на 1 месяц ===
                             _buildPlanCard(
                               'month',
                               '1 месяц',
                               _basePriceMonth,
+                              theme,
                               oldPrice: 590,
                             ),
                             const SizedBox(width: 16),
-                            // === ОБНОВЛЕНИЕ ЦЕН: Карточка на 1 год ===
                             _buildPlanCard(
                               'year',
                               '1 год',
                               _basePriceYear,
+                              theme,
                               oldPrice: 3588,
                               label: 'ВЫГОДА 58%',
                               subtitle: 'Всего 124 ₽ в месяц!',
@@ -392,16 +559,14 @@ class _PaywallScreenState extends State<PaywallScreen> {
 
                       const SizedBox(height: 24),
 
-                      const SizedBox(height: 16),
-
                       if (!widget.isFromProfile)
                         Center(
                           child: TextButton(
                             onPressed: _closePaywall,
-                            child: const Text(
+                            child: Text(
                               "Уже есть аккаунт? Войти",
                               style: TextStyle(
-                                color: _subTextColor,
+                                color: theme.colorScheme.onSurfaceVariant,
                                 fontWeight: FontWeight.w600,
                                 decoration: TextDecoration.underline,
                               ),
@@ -418,7 +583,7 @@ class _PaywallScreenState extends State<PaywallScreen> {
               Container(
                 padding: const EdgeInsets.fromLTRB(28, 20, 28, 32),
                 decoration: BoxDecoration(
-                  color: Colors.white,
+                  color: theme.colorScheme.surface,
                   borderRadius: const BorderRadius.vertical(
                     top: Radius.circular(32),
                   ),
@@ -437,15 +602,15 @@ class _PaywallScreenState extends State<PaywallScreen> {
                       width: double.infinity,
                       height: 60,
                       decoration: BoxDecoration(
-                        gradient: const LinearGradient(
-                          colors: [_accentColor, Color(0xFFD49A89)],
+                        gradient: LinearGradient(
+                          colors: [theme.colorScheme.primary, theme.colorScheme.secondary],
                           begin: Alignment.topLeft,
                           end: Alignment.bottomRight,
                         ),
                         borderRadius: BorderRadius.circular(24),
                         boxShadow: [
                           BoxShadow(
-                            color: _accentColor.withValues(alpha: 0.3),
+                            color: theme.colorScheme.primary.withValues(alpha: 0.3),
                             blurRadius: 24,
                             offset: const Offset(0, 8),
                           ),
@@ -461,18 +626,18 @@ class _PaywallScreenState extends State<PaywallScreen> {
                           ),
                         ),
                         child: _isLoading
-                            ? const SizedBox(
+                            ? SizedBox(
                                 width: 24,
                                 height: 24,
                                 child: CircularProgressIndicator(
-                                  color: Colors.white,
+                                  color: theme.colorScheme.onPrimary,
                                   strokeWidth: 2,
                                 ),
                               )
                             : Text(
                                 ctaText,
-                                style: const TextStyle(
-                                  color: Colors.white,
+                                style: TextStyle(
+                                  color: theme.colorScheme.onPrimary,
                                   fontWeight: FontWeight.w800,
                                   fontSize: 16,
                                   letterSpacing: 0.5,
@@ -481,12 +646,14 @@ class _PaywallScreenState extends State<PaywallScreen> {
                       ),
                     ),
                     const SizedBox(height: 12),
-                    const Text(
-                      "3 дня бесплатно, затем отмена в любой момент",
+                    Text(
+                      _selectedPlan == 'month'
+                          ? "3 дня бесплатно, затем ${(_appliedPromo == 'SALE50' ? _basePriceMonth / 2 : _basePriceMonth).toInt()} ₽ / месяц"
+                          : "3 дня бесплатно, затем ${(_appliedPromo == 'SALE50' ? _basePriceYear / 2 : _basePriceYear).toInt()} ₽ / год",
                       textAlign: TextAlign.center,
                       style: TextStyle(
-                        color: Color(0xFFC7C7CC), // Сделали светлее
-                        fontSize: 13, // Сделали крупнее
+                        color: theme.colorScheme.onSurfaceVariant.withValues(alpha: 0.7), 
+                        fontSize: 12,
                         fontWeight: FontWeight.w500,
                       ),
                     ),
@@ -494,13 +661,33 @@ class _PaywallScreenState extends State<PaywallScreen> {
                     GestureDetector(
                       onTap: _showPromoDialog,
                       child: Text(
-                        _appliedPromo != null ? "Промокод $_appliedPromo применен" : "У меня есть промокод",
+                        _appliedPromo != null
+                            ? "Промокод $_appliedPromo применен"
+                            : "У меня есть промокод",
                         style: TextStyle(
-                          color: _appliedPromo != null ? Colors.teal : const Color(0xFFC7C7CC),
+                          color: _appliedPromo != null
+                              ? Colors.teal
+                              : theme.colorScheme.onSurfaceVariant.withValues(alpha: 0.5),
                           fontSize: 13,
                           fontWeight: FontWeight.w600,
                           decoration: TextDecoration.underline,
-                          decorationColor: _appliedPromo != null ? Colors.teal : const Color(0xFFC7C7CC),
+                          decorationColor: _appliedPromo != null
+                              ? Colors.teal
+                              : theme.colorScheme.onSurfaceVariant.withValues(alpha: 0.5),
+                        ),
+                      ),
+                    ),
+                    const SizedBox(height: 16),
+                    GestureDetector(
+                      onTap: _isLoading ? null : _restorePurchases,
+                      child: Text(
+                        "Восстановить покупки",
+                        style: TextStyle(
+                          color: theme.colorScheme.onSurfaceVariant,
+                          fontSize: 13,
+                          fontWeight: FontWeight.w600,
+                          decoration: TextDecoration.underline,
+                          decorationColor: theme.colorScheme.onSurfaceVariant,
                         ),
                       ),
                     ),
@@ -514,37 +701,41 @@ class _PaywallScreenState extends State<PaywallScreen> {
     );
   }
 
-  Widget _buildFeatureItem(IconData icon, String title, String subtitle) {
+  Widget _buildFeatureItem(IconData icon, String title, String subtitle, ThemeData theme) {
     return Padding(
-      padding: const EdgeInsets.only(bottom: 20.0),
+      padding: const EdgeInsets.only(bottom: 12.0), 
       child: Row(
         children: [
           Container(
-            padding: const EdgeInsets.all(10),
+            padding: const EdgeInsets.all(8), 
             decoration: BoxDecoration(
-              color: const Color(0xFFFDECE8),
-              borderRadius: BorderRadius.circular(12),
+              color: theme.colorScheme.primary.withValues(alpha: 0.1),
+              borderRadius: BorderRadius.circular(10), 
             ),
-            child: Icon(icon, color: _accentColor, size: 22),
+            child: Icon(
+              icon,
+              color: theme.colorScheme.primary,
+              size: 20,
+            ), 
           ),
-          const SizedBox(width: 16),
+          const SizedBox(width: 12), 
           Expanded(
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Text(
                   title,
-                  style: const TextStyle(
+                  style: TextStyle(
                     fontSize: 16,
                     fontWeight: FontWeight.w700,
-                    color: _textColor,
+                    color: theme.colorScheme.onSurface,
                   ),
                 ),
                 Text(
                   subtitle,
-                  style: const TextStyle(
+                  style: TextStyle(
                     fontSize: 13,
-                    color: _subTextColor,
+                    color: theme.colorScheme.onSurfaceVariant,
                     fontWeight: FontWeight.w500,
                   ),
                 ),
@@ -559,7 +750,8 @@ class _PaywallScreenState extends State<PaywallScreen> {
   Widget _buildPlanCard(
     String planId,
     String title,
-    double basePrice, {
+    double basePrice,
+    ThemeData theme, {
     double? oldPrice,
     String? label,
     String? subtitle,
@@ -576,16 +768,16 @@ class _PaywallScreenState extends State<PaywallScreen> {
         child: Container(
           padding: const EdgeInsets.all(16),
           decoration: BoxDecoration(
-            color: isSelected ? const Color(0xFFFDECE8) : Colors.white,
+            color: isSelected ? theme.colorScheme.primary.withValues(alpha: 0.1) : theme.colorScheme.surface,
             borderRadius: BorderRadius.circular(24),
             border: Border.all(
-              color: isSelected ? _accentColor : Colors.transparent,
+              color: isSelected ? theme.colorScheme.primary : Colors.transparent,
               width: 2,
             ),
             boxShadow: [
               BoxShadow(
                 color: isSelected
-                    ? _accentColor.withValues(alpha: 0.15)
+                    ? theme.colorScheme.primary.withValues(alpha: 0.15)
                     : Colors.black.withValues(alpha: 0.04),
                 blurRadius: 32,
                 offset: const Offset(0, 8),
@@ -604,13 +796,13 @@ class _PaywallScreenState extends State<PaywallScreen> {
                     vertical: 4,
                   ),
                   decoration: BoxDecoration(
-                    color: _accentColor,
+                    color: theme.colorScheme.primary,
                     borderRadius: BorderRadius.circular(8),
                   ),
                   child: Text(
                     label.toUpperCase(),
-                    style: const TextStyle(
-                      color: Colors.white,
+                    style: TextStyle(
+                      color: theme.colorScheme.onPrimary,
                       fontSize: 9,
                       fontWeight: FontWeight.w900,
                       letterSpacing: 0.5,
@@ -620,18 +812,18 @@ class _PaywallScreenState extends State<PaywallScreen> {
               Text(
                 title,
                 style: TextStyle(
-                  fontSize: 15, // Чуть компактнее
+                  fontSize: 15, 
                   fontWeight: FontWeight.w800,
-                  color: isSelected ? _accentColor : _subTextColor,
+                  color: isSelected ? theme.colorScheme.primary : theme.colorScheme.onSurfaceVariant,
                 ),
               ),
-              const SizedBox(height: 4), // Уменьшили отступ
+              const SizedBox(height: 4), 
 
               Text(
                 "${finalOldPrice.toInt()} ₽",
-                style: const TextStyle(
-                  fontSize: 13, // Чуть компактнее
-                  color: _subTextColor,
+                style: TextStyle(
+                  fontSize: 13, 
+                  color: theme.colorScheme.onSurfaceVariant,
                   decoration: TextDecoration.lineThrough,
                   fontWeight: FontWeight.w600,
                 ),
@@ -639,29 +831,29 @@ class _PaywallScreenState extends State<PaywallScreen> {
 
               Text(
                 "${finalPrice.toInt()} ₽",
-                style: const TextStyle(
-                  fontSize: 26, // Было 32, делаем аккуратнее
+                style: TextStyle(
+                  fontSize: 26, 
                   fontWeight: FontWeight.w900,
-                  color: _textColor,
+                  color: theme.colorScheme.onSurface,
                   letterSpacing: -1.0,
                 ),
               ),
 
               if (subtitle != null) ...[
-                const SizedBox(height: 8), // Уменьшили отступ
+                const SizedBox(height: 8), 
                 Container(
                   padding: const EdgeInsets.symmetric(
                     horizontal: 8,
                     vertical: 6,
                   ),
                   decoration: BoxDecoration(
-                    color: _accentColor.withValues(alpha: 0.15),
+                    color: theme.colorScheme.primary.withValues(alpha: 0.15),
                     borderRadius: BorderRadius.circular(8),
                   ),
                   child: Text(
                     subtitle,
-                    style: const TextStyle(
-                      color: _accentColor,
+                    style: TextStyle(
+                      color: theme.colorScheme.primary,
                       fontSize: 11,
                       fontWeight: FontWeight.w800,
                     ),

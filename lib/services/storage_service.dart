@@ -1,5 +1,8 @@
+// Файл: lib/services/storage_service.dart
+
 import 'dart:io';
 import 'package:firebase_storage/firebase_storage.dart';
+import 'package:flutter/foundation.dart';
 
 class StorageService {
   final FirebaseStorage _storage = FirebaseStorage.instance;
@@ -10,14 +13,14 @@ class StorageService {
     try {
       // ФИКС КЭША: Генерируем уникальное имя файла с помощью timestamp
       final String fileName = 'avatar_${DateTime.now().millisecondsSinceEpoch}.jpg';
-      final ref = FirebaseStorage.instance.ref().child('users/$uid/$fileName');
+      final ref = _storage.ref().child('users/$uid/$fileName');
       
       await ref.putFile(imageFile);
       final downloadUrl = await ref.getDownloadURL();
       
       return downloadUrl;
     } catch (e) {
-      print("Ошибка загрузки аватарки: $e");
+      debugPrint("Ошибка загрузки аватарки: $e");
       return null;
     }
   }

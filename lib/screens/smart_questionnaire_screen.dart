@@ -1,6 +1,7 @@
 // Файл: lib/screens/smart_questionnaire_screen.dart
 
 import 'package:flutter/material.dart';
+import '../theme/eva_colors.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 
@@ -162,12 +163,16 @@ class _SmartQuestionnaireScreenState extends State<SmartQuestionnaireScreen> {
     }
 
     try {
-      await FirebaseFirestore.instance.collection('users').doc(uid).set({
-        'questionnaire': finalAnswers, 
-      }, SetOptions(merge: true));
-      
+      // mergeFields полностью заменяет анкету (снятые ответы действительно удаляются),
+      // а запись не блокирует экран при медленной сети/VPN.
+      FirebaseFirestore.instance
+          .collection('users')
+          .doc(uid)
+          .set({'questionnaire': finalAnswers}, SetOptions(mergeFields: ['questionnaire']))
+          .catchError((e) => debugPrint('questionnaire: $e'));
+
       if (!mounted) return;
-      msg.showSnackBar(const SnackBar(content: Text('Анкета сохранена! Ева стала умнее 🧠✨', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)), backgroundColor: Colors.teal));
+      msg.showSnackBar(const SnackBar(content: Text('Анкета сохранена! Ева стала умнее 🧠✨')));
       nav.pop();
       
     } catch (e) {
@@ -228,7 +233,7 @@ class _SmartQuestionnaireScreenState extends State<SmartQuestionnaireScreen> {
               children: [
                 Text("Вопрос ${index + 1} из ${_questions.length}", style: TextStyle(color: theme.colorScheme.onSurfaceVariant, fontWeight: FontWeight.bold, fontSize: 14)),
                 const SizedBox(height: 16),
-                Text(q['q'], style: TextStyle(color: theme.colorScheme.onSurface, fontSize: 28, fontWeight: FontWeight.w900, height: 1.2)),
+                Text(q['q'], style: TextStyle(color: theme.colorScheme.onSurface, fontSize: 28, fontFamily: EvaFonts.serif, fontWeight: FontWeight.w500, height: 1.2)),
                 const SizedBox(height: 32),
 
                 Expanded(

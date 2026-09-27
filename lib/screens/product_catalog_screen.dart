@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import '../theme/eva_colors.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 
@@ -74,7 +75,7 @@ class _ProductCatalogScreenState extends State<ProductCatalogScreen> {
       builder: (ctx) => AlertDialog(
         backgroundColor: theme.colorScheme.surface,
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(24)),
-        title: Text("Свой продукт", style: TextStyle(color: theme.colorScheme.onSurface, fontWeight: FontWeight.w800, fontSize: 20)),
+        title: Text("Свой продукт", style: TextStyle(color: theme.colorScheme.onSurface, fontFamily: EvaFonts.serif, fontWeight: FontWeight.w500, fontSize: 20)),
         content: TextField(
           controller: customController,
           style: TextStyle(color: theme.colorScheme.onSurface, fontWeight: FontWeight.w600),
@@ -154,7 +155,7 @@ class _ProductCatalogScreenState extends State<ProductCatalogScreen> {
     return Scaffold(
       backgroundColor: theme.scaffoldBackgroundColor,
       appBar: AppBar(
-        title: Text("Выбрать продукты", style: TextStyle(color: theme.colorScheme.onSurface, fontWeight: FontWeight.w800, fontSize: 20)),
+        title: Text("Выбрать продукты", style: TextStyle(color: theme.colorScheme.onSurface, fontFamily: EvaFonts.serif, fontWeight: FontWeight.w500, fontSize: 20)),
         backgroundColor: Colors.transparent,
         elevation: 0,
         iconTheme: IconThemeData(color: theme.colorScheme.onSurface),

@@ -1,241 +1,321 @@
-import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:cloud_functions/cloud_functions.dart';
 import 'package:firebase_auth/firebase_auth.dart';
-import 'package:cached_network_image/cached_network_image.dart';
-import 'package:url_launcher/url_launcher.dart';
+import 'package:flutter/material.dart';
 import 'package:font_awesome_flutter/font_awesome_flutter.dart';
+import 'package:intl/intl.dart';
+import 'package:url_launcher/url_launcher.dart';
 
-import '../widgets/base_background.dart';
-import 'profile_settings_screen.dart';
 import '../paywall_screen.dart';
+import '../services/database_service.dart';
+import '../theme/eva_colors.dart';
+import '../widgets/eva_ui.dart';
 import 'p2p_chat_screen.dart';
+import 'profile_settings_screen.dart';
+import 'progress_screen.dart';
 import 'smart_questionnaire_screen.dart';
 import 'specialist_paywall_screen.dart';
-import '../services/database_service.dart';
-import 'progress_screen.dart';
+import 'weekly_insights_screen.dart';
 
-class ProfileScreen extends StatelessWidget {
+class ProfileScreen extends StatefulWidget {
   const ProfileScreen({super.key});
 
   static const String supportAdminUid = 'VlTTLh2o7GVaXUzw32sNUtQ6alD3';
 
-  Widget _buildMenuItem(
-    BuildContext context,
-    IconData icon,
-    String title, {
-    Color? iconColor,
-    required VoidCallback onTap,
-  }) {
-    final theme = Theme.of(context);
-    return ListTile(
-      leading: Icon(
-        icon,
-        color: iconColor ?? theme.colorScheme.onSurface,
-        size: 24,
-      ),
-      title: Text(
-        title,
-        style: TextStyle(
-          color: theme.colorScheme.onSurface,
-          fontSize: 16,
-          fontWeight: FontWeight.w600,
-        ),
-      ),
-      trailing: Icon(
-        Icons.arrow_forward_ios,
-        color: theme.colorScheme.onSurfaceVariant.withValues(alpha: 0.5),
-        size: 16,
-      ),
-      onTap: onTap,
-    );
+  @override
+  State<ProfileScreen> createState() => _ProfileScreenState();
+}
+
+class _ProfileScreenState extends State<ProfileScreen> {
+  Stream<DocumentSnapshot<Map<String, dynamic>>>? _userStream;
+  bool _openingSpecialist = false;
+
+  @override
+  void initState() {
+    super.initState();
+    final uid = FirebaseAuth.instance.currentUser?.uid;
+    if (uid != null) _userStream = FirebaseFirestore.instance.collection('users').doc(uid).snapshots();
   }
 
-  Widget _divider(BuildContext context) =>
-      Divider(color: Theme.of(context).colorScheme.onSurfaceVariant.withValues(alpha: 0.1), height: 1, indent: 56);
+  Future<void> _openUrl(String url) async {
+    final uri = Uri.parse(url);
+    try {
+      await launchUrl(uri, mode: LaunchMode.externalApplication);
+    } catch (_) {
+      if (mounted) EvaSnack.show(context, 'Не удалось открыть ссылку', type: EvaSnackType.error);
+    }
+  }
+
+  static bool _specialistActive(Map<String, dynamic> data) {
+    if (data['hasSpecialistAccess'] != true) return false;
+    final dynamic until = data['specialistUntil'];
+    if (until is Timestamp) return until.toDate().isAfter(DateTime.now());
+    return true;
+  }
+
+  Future<void> _openSpecialist(bool hasAccess) async {
+    if (_openingSpecialist) return;
+    setState(() => _openingSpecialist = true);
+    final nav = Navigator.of(context);
+    try {
+      final bool inReview = hasAccess ? false : await DatabaseService().isAppInReview().timeout(const Duration(seconds: 6), onTimeout: () => false);
+      if (hasAccess || inReview) {
+        final spec = await DatabaseService().getSpecialistInfo().timeout(
+              const Duration(seconds: 6),
+              onTimeout: () => {'uid': ProfileScreen.supportAdminUid, 'name': 'Личный специалист'},
+            );
+        nav.push(MaterialPageRoute(builder: (_) => P2PChatScreen(otherUserId: spec['uid']!, otherUserName: spec['name']!)));
+      } else {
+        nav.push(MaterialPageRoute(builder: (_) => const SpecialistPaywallScreen()));
+      }
+    } catch (e) {
+      debugPrint('specialist: $e');
+    } finally {
+      if (mounted) setState(() => _openingSpecialist = false);
+    }
+  }
+
+  Future<void> _runBackfill() async {
+    EvaSnack.show(context, 'Обновляю публичные профили…');
+    try {
+      final res = await FirebaseFunctions.instance
+          .httpsCallable('backfillPublicProfiles', options: HttpsCallableOptions(timeout: const Duration(minutes: 9)))
+          .call();
+      if (!mounted) return;
+      final count = res.data is Map ? (res.data as Map)['count'] : null;
+      EvaSnack.show(context, 'Готово: $count профилей', type: EvaSnackType.success);
+    } catch (e) {
+      if (mounted) EvaSnack.show(context, 'Ошибка: $e', type: EvaSnackType.error);
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
-    final uid = FirebaseAuth.instance.currentUser?.uid;
     final theme = Theme.of(context);
-    
-    if (uid == null) return Scaffold(backgroundColor: theme.scaffoldBackgroundColor);
+    final uid = FirebaseAuth.instance.currentUser?.uid;
+    if (uid == null || _userStream == null) return const SizedBox.shrink();
 
-    return BaseBackground(
-      child: Scaffold(
-        backgroundColor: Colors.transparent,
-        appBar: AppBar(
-          title: Text(
-            'Профиль',
-            style: TextStyle(
-              color: theme.colorScheme.onSurface,
-              fontWeight: FontWeight.w900,
-              fontSize: 26,
-              letterSpacing: -0.5,
-            ),
-          ),
-          backgroundColor: Colors.transparent,
-          elevation: 0,
-        ),
-        body: StreamBuilder<DocumentSnapshot>(
-          stream: FirebaseFirestore.instance.collection('users').doc(uid).snapshots(),
-          builder: (context, snapshot) {
-            if (!snapshot.hasData || !snapshot.data!.exists) {
-              return Center(child: CircularProgressIndicator(color: theme.colorScheme.primary));
-            }
+    return EvaBackground(
+      child: StreamBuilder<DocumentSnapshot<Map<String, dynamic>>>(
+        stream: _userStream,
+        builder: (context, snapshot) {
+          if (!snapshot.hasData) return const Center(child: CircularProgressIndicator());
+          final data = snapshot.data!.data() ?? <String, dynamic>{};
+          final String name = (data['name']?.toString().trim().isNotEmpty ?? false) ? data['name'].toString().trim() : 'Пользователь';
+          final String photoUrl = (data['photoUrl'] ?? '').toString();
+          final String nickname = (data['nickname'] ?? '').toString().trim();
+          final bool pro = DatabaseService.isProActive(data);
+          final DateTime? proUntil = DatabaseService.proUntil(data);
+          final bool specialist = _specialistActive(data);
+          final int freeLeft = data['free_messages_left'] is num ? (data['free_messages_left'] as num).toInt() : 5;
 
-            final data = snapshot.data!.data() as Map<String, dynamic>;
-            final String name = data['name']?.toString().trim() ?? 'Пользователь';
-            final String photoUrl = data['photoUrl'] ?? '';
-            final String nickname = data['nickname']?.toString().trim() ?? '';
-            final String displayNickname = nickname.isNotEmpty ? '@$nickname' : '';
-            final bool hasSpecialistAccess = data['hasSpecialistAccess'] ?? false;
-
-            return SingleChildScrollView(
-              padding: const EdgeInsets.symmetric(horizontal: 24.0, vertical: 16.0),
-              child: SizedBox(
-                width: double.infinity,
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.center,
+          return SafeArea(
+            bottom: false,
+            child: ListView(
+              padding: const EdgeInsets.fromLTRB(EvaSpace.page, 14, EvaSpace.page, 130),
+              children: [
+                Row(
                   children: [
-                    const SizedBox(height: 16),
-                    Container(
-                      width: 120, height: 120,
-                      decoration: BoxDecoration(
-                        shape: BoxShape.circle,
-                        border: Border.all(color: theme.colorScheme.surface, width: 4),
-                        boxShadow: [
-                          BoxShadow(
-                            color: theme.colorScheme.primary.withValues(alpha: 0.2),
-                            blurRadius: 32,
-                            offset: const Offset(0, 8),
-                          ),
-                        ],
-                        color: theme.scaffoldBackgroundColor,
-                      ),
-                      child: ClipOval(
-                        child: photoUrl.isNotEmpty
-                            ? CachedNetworkImage(
-                                imageUrl: photoUrl, fit: BoxFit.cover,
-                                errorWidget: (c, u, e) => Container(
-                                  decoration: BoxDecoration(gradient: LinearGradient(colors: [theme.colorScheme.primary, const Color(0xFFB6A6CA)], begin: Alignment.topLeft, end: Alignment.bottomRight)),
-                                  alignment: Alignment.center,
-                                  child: Text(name[0].toUpperCase(), style: const TextStyle(color: Colors.white, fontSize: 36, fontWeight: FontWeight.bold)),
-                                ),
-                              )
-                            : Container(
-                                decoration: BoxDecoration(gradient: LinearGradient(colors: [theme.colorScheme.primary, const Color(0xFFB6A6CA)], begin: Alignment.topLeft, end: Alignment.bottomRight)),
-                                alignment: Alignment.center,
-                                child: Text(name[0].toUpperCase(), style: const TextStyle(color: Colors.white, fontSize: 36, fontWeight: FontWeight.bold)),
-                              ),
-                      ),
+                    Expanded(child: Text('Профиль', style: theme.textTheme.displaySmall)),
+                    EvaCircleButton(
+                      icon: Icons.settings_outlined,
+                      tooltip: 'Настройки',
+                      onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const ProfileSettingsScreen())),
                     ),
-                    const SizedBox(height: 24),
-                    Text(
-                      name,
-                      style: TextStyle(
-                        color: theme.colorScheme.onSurface,
-                        fontSize: 28,
-                        fontWeight: FontWeight.w900,
-                        letterSpacing: -0.5,
-                      ),
-                    ),
-                    if (displayNickname.isNotEmpty)
-                      Padding(
-                        padding: const EdgeInsets.only(top: 6),
-                        child: Text(
-                          displayNickname,
-                          style: TextStyle(
-                            color: theme.colorScheme.onSurfaceVariant,
-                            fontSize: 15,
-                            fontWeight: FontWeight.w600,
-                          ),
-                        ),
-                      ),
-                    const SizedBox(height: 40),
-                    Container(
-                      decoration: BoxDecoration(
-                        color: theme.colorScheme.surface,
-                        borderRadius: BorderRadius.circular(24),
-                        boxShadow: [
-                          BoxShadow(
-                            color: Colors.black.withValues(alpha: 0.04),
-                            blurRadius: 32,
-                            offset: const Offset(0, 8),
-                          ),
-                        ],
-                      ),
-                      child: Column(
-                        children: [
-                          _buildMenuItem(context, Icons.psychology_alt, 'Сделать Еву умнее (Пройти опрос)', iconColor: theme.colorScheme.primary, onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const SmartQuestionnaireScreen()))),
-                          _divider(context),
-                         _buildMenuItem(context, Icons.tune, 'Мои параметры', onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const ProfileSettingsScreen()))),
-                          _divider(context),
-                          _buildMenuItem(context, Icons.insights, 'Мой прогресс', iconColor: theme.colorScheme.primary, onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const ProgressScreen()))),
-                          _divider(context),
-                          _buildMenuItem(context, Icons.workspace_premium, 'Управление подпиской', iconColor: theme.colorScheme.primary, onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const PaywallScreen(isFromProfile: true)))),
-                          _divider(context),
-                          _buildMenuItem(context, Icons.favorite_border, 'Заботливая поддержка', onTap: () { Navigator.push(context, MaterialPageRoute(builder: (_) => const P2PChatScreen(otherUserId: supportAdminUid, otherUserName: 'Поддержка Моя Ева'))); }),
-                          _divider(context),
-                          _buildMenuItem(context, FontAwesomeIcons.vk, 'Наше комьюнити в VK', iconColor: theme.colorScheme.onSurfaceVariant, onTap: () async { const url = 'https://vk.com/club237160300'; final uri = Uri.parse(url); if (await canLaunchUrl(uri)) await launchUrl(uri, mode: LaunchMode.externalApplication); }),
-                          _divider(context),
-                          _buildMenuItem(context, Icons.play_circle_fill_outlined, 'Видео-обзор приложения', iconColor: theme.colorScheme.primary, onTap: () async { const url = 'https://vkvideo.ru/video-237160300_456239022'; final uri = Uri.parse(url); if (await canLaunchUrl(uri)) await launchUrl(uri, mode: LaunchMode.externalApplication); }),
-                          _divider(context),
-                          Builder(
-                            builder: (builderContext) {
-                              bool isOpeningChat = false;
-                              return StatefulBuilder(
-                                builder: (ctx, setTileState) {
-                                  return ListTile(
-                                    leading: Container(
-                                      padding: const EdgeInsets.all(6),
-                                      decoration: BoxDecoration(color: Colors.amber.withValues(alpha: 0.2), shape: BoxShape.circle),
-                                      child: const Icon(Icons.star, color: Colors.amber, size: 20),
-                                    ),
-                                    title: Text('Связь со специалистом', style: TextStyle(color: theme.colorScheme.onSurface, fontSize: 16, fontWeight: FontWeight.w800)),
-                                    trailing: isOpeningChat ? SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2, color: theme.colorScheme.primary)) : Icon(Icons.arrow_forward_ios, color: theme.colorScheme.onSurfaceVariant.withValues(alpha: 0.5), size: 16),
-                                    onTap: () async {
-                                      if (isOpeningChat) return; 
-                                      setTileState(() => isOpeningChat = true);
-                                      
-                                      // Сохраняем Navigator заранее, чтобы не обращаться к context после await
-                                      final nav = Navigator.of(context);
-                                      
-                                      try {
-                                        final bool inReview = await DatabaseService().isAppInReview();
-                                        if (hasSpecialistAccess || inReview) {
-                                          final specInfo = await DatabaseService().getSpecialistInfo();
-                                          if (ctx.mounted) {
-                                            setTileState(() => isOpeningChat = false);
-                                          }
-                                          nav.push(MaterialPageRoute(builder: (_) => P2PChatScreen(otherUserId: specInfo['uid']!, otherUserName: specInfo['name']!)));
-                                        } else {
-                                          if (ctx.mounted) {
-                                            setTileState(() => isOpeningChat = false);
-                                          }
-                                          nav.push(MaterialPageRoute(builder: (_) => const SpecialistPaywallScreen()));
-                                        }
-                                      } catch (e) {
-                                        if (ctx.mounted) {
-                                          setTileState(() => isOpeningChat = false);
-                                        }
-                                      }
-                                    },
-                                  );
-                                },
-                              );
-                            }
-                          ),
-                          const SizedBox(height: 8),
-                        ],
-                      ),
-                    ),
-                    const SizedBox(height: 40),
                   ],
                 ),
-              ),
-            );
-          },
-        ),
+                const SizedBox(height: 20),
+                Center(child: EvaAvatar(name: name, photoUrl: photoUrl, size: 108, ring: true)),
+                const SizedBox(height: 14),
+                Center(child: Text(name, textAlign: TextAlign.center, style: theme.textTheme.headlineLarge)),
+                if (nickname.isNotEmpty)
+                  Padding(
+                    padding: const EdgeInsets.only(top: 2),
+                    child: Center(child: Text('@$nickname', style: theme.textTheme.bodyMedium?.copyWith(color: theme.colorScheme.onSurfaceVariant))),
+                  ),
+                const SizedBox(height: 10),
+                Center(
+                  child: pro
+                      ? EvaPill(
+                          text: proUntil != null ? 'Premium до ${DateFormat('d MMMM', 'ru').format(proUntil)}' : 'Premium',
+                          icon: Icons.workspace_premium_rounded,
+                          color: context.eva.gold,
+                        )
+                      : EvaPill(text: 'Бесплатный план', icon: Icons.spa_outlined, color: theme.colorScheme.onSurfaceVariant),
+                ),
+                const SizedBox(height: 22),
+                if (!pro) _buildPremiumCard(theme, freeLeft),
+                if (!pro) const SizedBox(height: 22),
+                Row(
+                  children: [
+                    Expanded(
+                      child: _QuickTile(
+                        icon: Icons.insights_rounded,
+                        color: context.eva.lavender,
+                        title: 'Итоги недели',
+                        onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const WeeklyInsightsScreen())),
+                      ),
+                    ),
+                    const SizedBox(width: 12),
+                    Expanded(
+                      child: _QuickTile(
+                        icon: Icons.show_chart_rounded,
+                        color: context.eva.sage,
+                        title: 'Мой прогресс',
+                        onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const ProgressScreen())),
+                      ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 22),
+                EvaMenuGroup(
+                  title: 'Персонализация',
+                  children: [
+                    EvaMenuTile(
+                      icon: Icons.psychology_alt_outlined,
+                      title: 'Сделать Еву умнее',
+                      subtitle: 'Короткая анкета о привычках и здоровье',
+                      onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const SmartQuestionnaireScreen())),
+                    ),
+                    EvaMenuTile(
+                      icon: Icons.tune_rounded,
+                      title: 'Мои параметры',
+                      subtitle: 'Вес, рост, цель, активность',
+                      onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const ProfileSettingsScreen())),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 22),
+                EvaMenuGroup(
+                  title: 'Забота и поддержка',
+                  children: [
+                    EvaMenuTile(
+                      icon: Icons.star_rounded,
+                      iconColor: context.eva.gold,
+                      title: 'Личный специалист',
+                      subtitle: specialist ? 'Чат открыт' : 'Консультации живого эксперта',
+                      trailing: _openingSpecialist ? const SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2)) : null,
+                      onTap: () => _openSpecialist(specialist),
+                    ),
+                    EvaMenuTile(
+                      icon: Icons.favorite_border_rounded,
+                      title: 'Заботливая поддержка',
+                      subtitle: 'Вопросы о приложении и подписке',
+                      onTap: () => Navigator.push(
+                        context,
+                        MaterialPageRoute(builder: (_) => const P2PChatScreen(otherUserId: ProfileScreen.supportAdminUid, otherUserName: 'Поддержка «Моя Ева»')),
+                      ),
+                    ),
+                    EvaMenuTile(
+                      icon: FontAwesomeIcons.vk,
+                      iconColor: const Color(0xFF4C75A3),
+                      title: 'Наше комьюнити в VK',
+                      onTap: () => _openUrl('https://vk.com/club237160300'),
+                    ),
+                    EvaMenuTile(
+                      icon: Icons.play_circle_outline_rounded,
+                      title: 'Видео-обзор приложения',
+                      onTap: () => _openUrl('https://vkvideo.ru/video-237160300_456239022'),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 22),
+                EvaMenuGroup(
+                  title: 'Подписка',
+                  children: [
+                    EvaMenuTile(
+                      icon: Icons.workspace_premium_outlined,
+                      iconColor: context.eva.gold,
+                      title: pro ? 'Моя подписка' : 'Оформить Premium',
+                      subtitle: pro
+                          ? (proUntil != null ? 'Активна до ${DateFormat('d MMMM yyyy', 'ru').format(proUntil)}' : 'Активна')
+                          : 'Безлимитное общение с Евой',
+                      onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const PaywallScreen(isFromProfile: true))),
+                    ),
+                  ],
+                ),
+                if (uid == ProfileScreen.supportAdminUid) ...[
+                  const SizedBox(height: 22),
+                  EvaMenuGroup(
+                    title: 'Администратор',
+                    children: [
+                      EvaMenuTile(
+                        icon: Icons.manage_accounts_outlined,
+                        title: 'Обновить публичные профили',
+                        subtitle: 'Один раз после обновления сервера — для поиска в чатах',
+                        onTap: _runBackfill,
+                      ),
+                    ],
+                  ),
+                ],
+              ],
+            ),
+          );
+        },
+      ),
+    );
+  }
+
+  Widget _buildPremiumCard(ThemeData theme, int freeLeft) {
+    return EvaCard(
+      onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const PaywallScreen(isFromProfile: true))),
+      gradient: LinearGradient(
+        colors: [const Color(0xFF2E2226), Color.lerp(const Color(0xFF2E2226), context.eva.gold, 0.35)!],
+        begin: Alignment.topLeft,
+        end: Alignment.bottomRight,
+      ),
+      border: false,
+      padding: const EdgeInsets.all(20),
+      child: Row(
+        children: [
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                EvaOverline('Моя Ева Premium', color: context.eva.gold),
+                const SizedBox(height: 6),
+                Text('Ева без ограничений', style: theme.textTheme.titleLarge?.copyWith(color: Colors.white)),
+                const SizedBox(height: 4),
+                Text(
+                  freeLeft > 0 ? 'Осталось бесплатных сообщений: $freeLeft' : 'Бесплатные сообщения закончились',
+                  style: theme.textTheme.bodySmall?.copyWith(color: Colors.white.withValues(alpha: 0.8)),
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(width: 12),
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 9),
+            decoration: BoxDecoration(color: context.eva.gold, borderRadius: BorderRadius.circular(100)),
+            child: Text('Подробнее', style: theme.textTheme.labelLarge?.copyWith(color: const Color(0xFF2E2226))),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _QuickTile extends StatelessWidget {
+  final IconData icon;
+  final Color color;
+  final String title;
+  final VoidCallback onTap;
+
+  const _QuickTile({required this.icon, required this.color, required this.title, required this.onTap});
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return EvaCard(
+      onTap: onTap,
+      padding: const EdgeInsets.all(16),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          EvaIconBubble(icon: icon, color: color, size: 38, iconSize: 20),
+          const SizedBox(height: 12),
+          Text(title, style: theme.textTheme.titleMedium),
+        ],
       ),
     );
   }

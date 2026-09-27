@@ -1,11 +1,14 @@
-import 'package:flutter/material.dart';
-import 'package:flutter/gestures.dart'; 
-import 'package:url_launcher/url_launcher.dart'; 
-import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:firebase_auth/firebase_auth.dart';
+import 'package:flutter/gestures.dart';
+import 'package:flutter/material.dart';
+import 'package:font_awesome_flutter/font_awesome_flutter.dart';
+import 'package:url_launcher/url_launcher.dart';
 
 import '../services/auth_service.dart';
-import '../services/theme_service.dart'; // <-- ИМПОРТ THEME SERVICE
+import '../services/theme_service.dart';
+import '../theme/eva_colors.dart';
+import '../widgets/eva_ui.dart';
 
 class AuthScreen extends StatefulWidget {
   const AuthScreen({super.key});
@@ -21,60 +24,79 @@ class _AuthScreenState extends State<AuthScreen> {
   bool _isLogin = true;
   bool _isLoading = false;
   bool _acceptedTerms = false;
+  bool _obscure = true;
 
   final TextEditingController _emailController = TextEditingController();
   final TextEditingController _passwordController = TextEditingController();
   final TextEditingController _nameController = TextEditingController();
 
+  static const String _termsUrl = "https://docs.google.com/document/d/1GpHL1IbLlklUrKQ2jShjlNIrXd2V4V1H/edit?usp=sharing";
+  static const String _privacyUrl = "https://docs.google.com/document/d/1ak-7-B2_uvmY1O7b6kJu-rUEOa5e_sDY/edit?usp=sharing";
+
+  @override
+  void dispose() {
+    _emailController.dispose();
+    _passwordController.dispose();
+    _nameController.dispose();
+    super.dispose();
+  }
+
+  /// Понятные сообщения вместо англоязычных ошибок Firebase.
+  String _authErrorText(FirebaseAuthException e) {
+    switch (e.code) {
+      case 'invalid-email':
+        return 'Проверьте email — кажется, в нём опечатка';
+      case 'user-disabled':
+        return 'Этот аккаунт заблокирован';
+      case 'user-not-found':
+      case 'wrong-password':
+      case 'invalid-credential':
+        return 'Неверный email или пароль';
+      case 'email-already-in-use':
+        return 'Аккаунт с таким email уже есть — попробуйте войти';
+      case 'weak-password':
+        return 'Пароль слишком простой — минимум 6 символов';
+      case 'too-many-requests':
+        return 'Слишком много попыток. Подождите пару минут';
+      case 'network-request-failed':
+        return 'Нет соединения с сервером. Проверьте интернет или VPN';
+      default:
+        return e.message ?? 'Ошибка авторизации';
+    }
+  }
+
   Future<void> _showForgotPasswordDialog() async {
+    final TextEditingController resetEmailController = TextEditingController(text: _emailController.text.trim());
+    final messenger = ScaffoldMessenger.of(context);
     final theme = Theme.of(context);
-    final TextEditingController resetEmailController = TextEditingController(text: _emailController.text);
-    
-    showDialog(
+
+    showDialog<void>(
       context: context,
       builder: (ctx) => AlertDialog(
-        backgroundColor: theme.colorScheme.surface,
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(24)),
-        title: Text("Восстановление пароля", style: TextStyle(color: theme.colorScheme.onSurface, fontWeight: FontWeight.w800)),
+        title: const Text('Восстановление пароля'),
         content: TextField(
           controller: resetEmailController,
           keyboardType: TextInputType.emailAddress,
-          style: TextStyle(color: theme.colorScheme.onSurface, fontWeight: FontWeight.w600),
-          decoration: InputDecoration(
-            hintText: "Введите ваш Email",
-            hintStyle: TextStyle(color: theme.colorScheme.onSurfaceVariant.withValues(alpha: 0.5), fontWeight: FontWeight.normal),
-            focusedBorder: UnderlineInputBorder(borderSide: BorderSide(color: theme.colorScheme.primary)),
-          ),
-          cursorColor: theme.colorScheme.primary,
+          autofocus: true,
+          decoration: const InputDecoration(hintText: 'Ваш email', prefixIcon: Icon(Icons.mail_outline_rounded)),
         ),
         actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(ctx),
-            child: Text("Отмена", style: TextStyle(color: theme.colorScheme.onSurfaceVariant)),
-          ),
-          ElevatedButton(
-            style: ElevatedButton.styleFrom(backgroundColor: theme.colorScheme.primary, shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16))),
+          TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Отмена')),
+          FilledButton(
             onPressed: () async {
               final email = resetEmailController.text.trim();
-              if (email.isNotEmpty) {
-                final msg = ScaffoldMessenger.of(context);
-                Navigator.pop(ctx);
-                try {
-                  await FirebaseAuth.instance.sendPasswordResetEmail(email: email);
-                  if (!mounted) return;
-                  msg.showSnackBar(
-                    const SnackBar(
-                      content: Text("Письмо с инструкцией отправлено на ваш Email 💌", style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)), 
-                      backgroundColor: Colors.teal
-                    )
-                  );
-                } catch (e) {
-                  if (!mounted) return;
-                  msg.showSnackBar(SnackBar(content: Text("Ошибка: ${e.toString()}"), backgroundColor: Colors.redAccent));
-                }
+              if (email.isEmpty) return;
+              Navigator.pop(ctx);
+              try {
+                await FirebaseAuth.instance.sendPasswordResetEmail(email: email);
+                EvaSnack.showOn(messenger, theme, 'Письмо для сброса пароля отправлено 💌', type: EvaSnackType.success);
+              } on FirebaseAuthException catch (e) {
+                EvaSnack.showOn(messenger, theme, _authErrorText(e), type: EvaSnackType.error);
+              } catch (e) {
+                EvaSnack.showOn(messenger, theme, 'Не удалось отправить письмо', type: EvaSnackType.error);
               }
             },
-            child: Text("Отправить", style: TextStyle(color: theme.colorScheme.onPrimary, fontWeight: FontWeight.bold)),
+            child: const Text('Отправить'),
           ),
         ],
       ),
@@ -83,268 +105,214 @@ class _AuthScreenState extends State<AuthScreen> {
 
   Future<void> _submit() async {
     final email = _emailController.text.trim();
-    final password = _passwordController.text.trim();
+    final password = _passwordController.text;
     final name = _nameController.text.trim();
-    final msg = ScaffoldMessenger.of(context);
 
     if (email.isEmpty || password.isEmpty || (!_isLogin && name.isEmpty)) {
-      _showError("Заполните все поля", msg);
+      EvaSnack.show(context, 'Заполните все поля', type: EvaSnackType.error);
+      return;
+    }
+    if (!_isLogin && !_acceptedTerms) {
+      EvaSnack.show(context, 'Примите Пользовательское соглашение и Политику конфиденциальности', type: EvaSnackType.error);
       return;
     }
 
-    if (!_isLogin && !_acceptedTerms) { 
-      msg.showSnackBar(
-        const SnackBar(
-          content: Text('Пожалуйста, примите Политику конфиденциальности и Пользовательское соглашение.'),
-          backgroundColor: Colors.redAccent,
-          behavior: SnackBarBehavior.floating,
-        ),
-      );
-      return; 
-    }
-
+    FocusScope.of(context).unfocus();
     setState(() => _isLoading = true);
-
     try {
       if (_isLogin) {
         await _auth.signInWithEmailAndPassword(email: email, password: password);
       } else {
-        UserCredential cred = await _auth.createUserWithEmailAndPassword(email: email, password: password);
+        final cred = await _auth.createUserWithEmailAndPassword(email: email, password: password);
         if (cred.user != null) {
-          await _db.collection('users').doc(cred.user!.uid).set({
+          // Не ждём сервер: профиль создастся локально сразу и досинхронизируется.
+          _db.collection('users').doc(cred.user!.uid).set({
             'name': name,
             'email': email,
             'activeRole': 'user',
             'createdAt': FieldValue.serverTimestamp(),
-            'isPro': false, 
-            'isOnboardingCompleted': false, 
-          }, SetOptions(merge: true));
+            'isPro': false,
+            'isOnboardingCompleted': false,
+          }, SetOptions(merge: true)).catchError((e) => debugPrint('create user doc: $e'));
         }
       }
     } on FirebaseAuthException catch (e) {
-      _showError(e.message ?? "Ошибка авторизации", msg);
+      if (mounted) EvaSnack.show(context, _authErrorText(e), type: EvaSnackType.error);
+    } catch (e) {
+      if (mounted) EvaSnack.show(context, 'Что-то пошло не так. Попробуйте ещё раз', type: EvaSnackType.error);
     } finally {
       if (mounted) setState(() => _isLoading = false);
     }
   }
 
   Future<void> _handleGoogleSignIn() async {
-    final msg = ScaffoldMessenger.of(context);
-    
     if (!_isLogin && !_acceptedTerms) {
-      _showError("Примите условия соглашения", msg);
+      EvaSnack.show(context, 'Примите условия соглашения', type: EvaSnackType.error);
       return;
     }
     setState(() => _isLoading = true);
     try {
       final result = await AuthService().signInWithGoogle();
-          if (result is UserCredential && result.user != null) {
-            final uid = result.user!.uid;
-            
-            final userDoc = await _db.collection('users').doc(uid).get();
-            
-            final hasOnboardingData = userDoc.exists &&
-                userDoc.data() != null &&
-                userDoc.data()!.containsKey('weight') && 
-                userDoc.data()!.containsKey('height');
+      if (result is UserCredential && result.user != null) {
+        final uid = result.user!.uid;
+        DocumentSnapshot<Map<String, dynamic>>? userDoc;
+        try {
+          userDoc = await _db.collection('users').doc(uid).get().timeout(const Duration(seconds: 10));
+        } catch (_) {}
+        final data = userDoc?.data();
+        final bool hasOnboardingData = data != null && data.containsKey('weight') && data.containsKey('height');
 
-            if (!hasOnboardingData) {
-              await _db.collection('users').doc(uid).set({
-                'email': result.user!.email,
-                'name': result.user!.displayName ?? 'Пользователь',
-                'activeRole': 'user',
-                'createdAt': FieldValue.serverTimestamp(),
-                'isPro': false,
-                'isOnboardingCompleted': false, 
-              }, SetOptions(merge: true));
-            } else {
-              await _db.collection('users').doc(uid).set({
-                'isOnboardingCompleted': true,
-              }, SetOptions(merge: true));
-            }
-          } else if (result is String) {
-        _showError(result, msg);
+        _db.collection('users').doc(uid).set(
+              hasOnboardingData
+                  ? {'isOnboardingCompleted': true}
+                  : {
+                      'email': result.user!.email,
+                      'name': result.user!.displayName ?? 'Пользователь',
+                      'activeRole': 'user',
+                      'createdAt': FieldValue.serverTimestamp(),
+                      'isPro': false,
+                      'isOnboardingCompleted': false,
+                    },
+              SetOptions(merge: true),
+            ).catchError((e) => debugPrint('google user doc: $e'));
+      } else if (result is String && mounted) {
+        EvaSnack.show(context, result, type: EvaSnackType.error);
       }
     } catch (e) {
-      _showError("Произошла ошибка авторизации", msg);
+      if (mounted) EvaSnack.show(context, 'Произошла ошибка авторизации', type: EvaSnackType.error);
     } finally {
       if (mounted) setState(() => _isLoading = false);
     }
   }
 
-  void _showError(String text, ScaffoldMessengerState messenger) {
-    if (!mounted) return;
-    messenger.showSnackBar(SnackBar(content: Text(text), backgroundColor: Colors.redAccent));
-  }
-
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    
+    final palette = context.eva;
+
     return Scaffold(
-      backgroundColor: theme.scaffoldBackgroundColor,
-      body: SafeArea(
-        child: Center(
-          child: SingleChildScrollView(
-            padding: const EdgeInsets.symmetric(horizontal: 28.0, vertical: 24.0),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.center,
-              children: [
-                // === КНОПКА СМЕНЫ ТЕМЫ ===
-                Align(
-                  alignment: Alignment.topRight,
-                  child: ValueListenableBuilder<ThemeMode>(
-                    valueListenable: ThemeService().themeModeNotifier,
-                    builder: (context, currentMode, _) {
-                      final isDark = currentMode == ThemeMode.dark || 
-                                    (currentMode == ThemeMode.system && MediaQuery.of(context).platformBrightness == Brightness.dark);
-                      return IconButton(
-                        icon: Icon(
-                          isDark ? Icons.light_mode_rounded : Icons.dark_mode_rounded,
-                          color: theme.colorScheme.onSurfaceVariant,
-                        ),
-                        onPressed: () {
-                          ThemeService().toggleTheme(isDark ? ThemeMode.light : ThemeMode.dark);
+      body: EvaBackground(
+        child: SafeArea(
+          child: Center(
+            child: SingleChildScrollView(
+              padding: const EdgeInsets.fromLTRB(24, 12, 24, 24),
+              child: ConstrainedBox(
+                constraints: const BoxConstraints(maxWidth: 460),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    Align(
+                      alignment: Alignment.topRight,
+                      child: ValueListenableBuilder<ThemeMode>(
+                        valueListenable: ThemeService().themeModeNotifier,
+                        builder: (context, mode, _) {
+                          final bool isDark = mode == ThemeMode.dark || (mode == ThemeMode.system && MediaQuery.platformBrightnessOf(context) == Brightness.dark);
+                          return EvaCircleButton(
+                            icon: isDark ? Icons.light_mode_rounded : Icons.dark_mode_rounded,
+                            size: 40,
+                            tooltip: isDark ? 'Светлая тема' : 'Тёмная тема',
+                            onTap: () => ThemeService().toggleTheme(isDark ? ThemeMode.light : ThemeMode.dark),
+                          );
                         },
-                        tooltip: isDark ? 'Включить светлую тему' : 'Включить темную тему',
-                      );
-                    },
-                  ),
-                ),
-                
-                Text(
-                  'Моя Ева',
-                  style: TextStyle(color: theme.colorScheme.primary, fontSize: 36, fontWeight: FontWeight.w800, letterSpacing: 0.5),
-                ),
-                const SizedBox(height: 8),
-                Text(
-                  'Гармония в каждой калории', 
-                  style: TextStyle(color: theme.colorScheme.onSurfaceVariant, fontSize: 16, fontWeight: FontWeight.w500)
-                ),
-                const SizedBox(height: 32), // Чуть уменьшили отступ, чтобы кнопка темы не сдвигала всё сильно вниз
-
-                if (!_isLogin) ...[
-                  _buildInput(_nameController, "Имя", Icons.person_outline, theme),
-                  const SizedBox(height: 16),
-                ],
-                _buildInput(_emailController, "Email", Icons.email_outlined, theme),
-                const SizedBox(height: 16),
-                _buildInput(_passwordController, "Пароль", Icons.lock_outline, theme, isPassword: true),
-
-                if (_isLogin)
-                  Align(
-                    alignment: Alignment.centerRight,
-                    child: TextButton(
-                      onPressed: _showForgotPasswordDialog,
-                      style: TextButton.styleFrom(
-                        padding: const EdgeInsets.symmetric(vertical: 8), 
-                        minimumSize: Size.zero, 
-                        tapTargetSize: MaterialTapTargetSize.shrinkWrap
                       ),
-                      child: Text("Забыли пароль?", style: TextStyle(color: theme.colorScheme.onSurfaceVariant, fontWeight: FontWeight.w600, fontSize: 13)),
                     ),
-                  ),
-
-                if (!_isLogin) ...[
-                  const SizedBox(height: 24),
-                  _buildLegalCheckbox(theme),
-                ],
-                
-                const SizedBox(height: 48),
-
-                Container(
-                  width: double.infinity, 
-                  height: 60,
-                  decoration: BoxDecoration(
-                    gradient: LinearGradient(colors: [theme.colorScheme.primary, theme.colorScheme.secondary], begin: Alignment.topLeft, end: Alignment.bottomRight),
-                    borderRadius: BorderRadius.circular(100),
-                    boxShadow: [
-                      BoxShadow(color: theme.colorScheme.primary.withValues(alpha: 0.3), blurRadius: 16, offset: const Offset(0, 6))
+                    const SizedBox(height: 12),
+                    Center(
+                      child: Container(
+                        width: 84,
+                        height: 84,
+                        decoration: BoxDecoration(gradient: palette.hero, shape: BoxShape.circle, boxShadow: palette.floatingShadow),
+                        child: const Icon(Icons.spa_rounded, color: Colors.white, size: 40),
+                      ),
+                    ),
+                    const SizedBox(height: 20),
+                    Text('Моя Ева', textAlign: TextAlign.center, style: theme.textTheme.displayMedium),
+                    const SizedBox(height: 6),
+                    Text(
+                      'Гармония в каждой калории',
+                      textAlign: TextAlign.center,
+                      style: TextStyle(fontFamily: EvaFonts.serif, fontStyle: FontStyle.italic, fontSize: 18, color: theme.colorScheme.primary),
+                    ),
+                    const SizedBox(height: 32),
+                    _ModeSwitch(
+                      isLogin: _isLogin,
+                      onChanged: (v) => setState(() => _isLogin = v),
+                    ),
+                    const SizedBox(height: 20),
+                    AnimatedSize(
+                      duration: const Duration(milliseconds: 220),
+                      child: _isLogin
+                          ? const SizedBox(width: double.infinity)
+                          : Padding(
+                              padding: const EdgeInsets.only(bottom: 12),
+                              child: TextField(
+                                controller: _nameController,
+                                textCapitalization: TextCapitalization.words,
+                                textInputAction: TextInputAction.next,
+                                decoration: const InputDecoration(hintText: 'Имя', prefixIcon: Icon(Icons.person_outline_rounded)),
+                              ),
+                            ),
+                    ),
+                    TextField(
+                      controller: _emailController,
+                      keyboardType: TextInputType.emailAddress,
+                      textInputAction: TextInputAction.next,
+                      autofillHints: const [AutofillHints.email],
+                      decoration: const InputDecoration(hintText: 'Email', prefixIcon: Icon(Icons.mail_outline_rounded)),
+                    ),
+                    const SizedBox(height: 12),
+                    TextField(
+                      controller: _passwordController,
+                      obscureText: _obscure,
+                      textInputAction: TextInputAction.done,
+                      onSubmitted: (_) => _submit(),
+                      autofillHints: const [AutofillHints.password],
+                      decoration: InputDecoration(
+                        hintText: 'Пароль',
+                        prefixIcon: const Icon(Icons.lock_outline_rounded),
+                        suffixIcon: IconButton(
+                          icon: Icon(_obscure ? Icons.visibility_outlined : Icons.visibility_off_outlined),
+                          onPressed: () => setState(() => _obscure = !_obscure),
+                        ),
+                      ),
+                    ),
+                    if (_isLogin)
+                      Align(
+                        alignment: Alignment.centerRight,
+                        child: TextButton(onPressed: _showForgotPasswordDialog, child: const Text('Забыли пароль?')),
+                      )
+                    else ...[
+                      const SizedBox(height: 16),
+                      _buildLegalCheckbox(theme),
                     ],
-                  ),
-                  child: ElevatedButton(
-                    onPressed: _isLoading ? null : _submit,
-                    style: ElevatedButton.styleFrom(
-                      backgroundColor: Colors.transparent,
-                      shadowColor: Colors.transparent,
-                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(100)),
+                    const SizedBox(height: 20),
+                    EvaPrimaryButton(
+                      label: _isLogin ? 'Войти' : 'Создать аккаунт',
+                      loading: _isLoading,
+                      onPressed: _submit,
                     ),
-                    child: _isLoading 
-                      ? SizedBox(width: 24, height: 24, child: CircularProgressIndicator(color: theme.colorScheme.onPrimary, strokeWidth: 2))
-                      : Text(
-                          _isLogin ? "ВОЙТИ" : "СОЗДАТЬ АККАУНТ", 
-                          style: TextStyle(fontWeight: FontWeight.w800, color: theme.colorScheme.onPrimary, fontSize: 16, letterSpacing: 1.2)
-                        ),
-                  ),
-                ),
-
-                const SizedBox(height: 20),
-
-                Container(
-                  width: double.infinity, height: 60,
-                  decoration: BoxDecoration(
-                    color: theme.colorScheme.surface,
-                    borderRadius: BorderRadius.circular(100),
-                    border: Border.all(color: theme.colorScheme.onSurfaceVariant.withValues(alpha: 0.2)),
-                  ),
-                  child: InkWell(
-                    borderRadius: BorderRadius.circular(100),
-                    onTap: _isLoading ? null : _handleGoogleSignIn,
-                    child: Row(
-                      mainAxisAlignment: MainAxisAlignment.center,
+                    const SizedBox(height: 14),
+                    Row(
                       children: [
-                        Image.network(
-                          'https://' 'cdn-icons-png.flaticon.com/512/2991/2991148.png', 
-                          width: 24,
-                          errorBuilder: (context, error, stackTrace) => const Icon(Icons.g_mobiledata, color: Colors.blue, size: 32),
+                        const Expanded(child: Divider()),
+                        Padding(
+                          padding: const EdgeInsets.symmetric(horizontal: 12),
+                          child: Text('или', style: theme.textTheme.bodySmall),
                         ),
-                        const SizedBox(width: 12),
-                        Text(
-                          "Войти через Google", 
-                          style: TextStyle(color: theme.colorScheme.onSurface, fontWeight: FontWeight.w600, fontSize: 16)
-                        ),
+                        const Expanded(child: Divider()),
                       ],
                     ),
-                  ),
+                    const SizedBox(height: 14),
+                    EvaSecondaryButton(
+                      label: 'Продолжить с Google',
+                      leading: const FaIcon(FontAwesomeIcons.google, size: 18, color: Color(0xFFDB4437)),
+                      onPressed: _isLoading ? null : _handleGoogleSignIn,
+                    ),
+                  ],
                 ),
-
-                const SizedBox(height: 32),
-                TextButton(
-                  onPressed: () => setState(() => _isLogin = !_isLogin),
-                  style: TextButton.styleFrom(
-                    splashFactory: NoSplash.splashFactory,
-                  ),
-                  child: Text(
-                    _isLogin ? "Нет аккаунта? Зарегистрироваться" : "Уже есть аккаунт? Войти",
-                    style: TextStyle(color: theme.colorScheme.primary, fontWeight: FontWeight.bold, fontSize: 15),
-                  ),
-                ),
-              ],
+              ),
             ),
           ),
-        ),
-      ),
-    );
-  }
-
-  Widget _buildInput(TextEditingController controller, String hint, IconData icon, ThemeData theme, {bool isPassword = false}) {
-    return Container(
-      decoration: BoxDecoration(
-        color: theme.colorScheme.surface, 
-        borderRadius: BorderRadius.circular(16), 
-        boxShadow: [
-          BoxShadow(color: Colors.black.withValues(alpha: 0.03), blurRadius: 20, offset: const Offset(0, 4))
-        ],
-      ),
-      child: TextField(
-        controller: controller, obscureText: isPassword,
-        style: TextStyle(color: theme.colorScheme.onSurface, fontWeight: FontWeight.w600),
-        decoration: InputDecoration(
-          prefixIcon: Icon(icon, color: theme.colorScheme.primary.withValues(alpha: 0.7), size: 22),
-          hintText: hint, 
-          hintStyle: TextStyle(color: theme.colorScheme.onSurfaceVariant.withValues(alpha: 0.5), fontWeight: FontWeight.w400),
-          border: InputBorder.none, 
-          contentPadding: const EdgeInsets.symmetric(vertical: 20),
         ),
       ),
     );
@@ -357,45 +325,72 @@ class _AuthScreenState extends State<AuthScreen> {
         SizedBox(
           height: 24,
           width: 24,
-          child: Checkbox(
-            value: _acceptedTerms, 
-            onChanged: (val) => setState(() => _acceptedTerms = val ?? false), 
-            activeColor: theme.colorScheme.primary,
-            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(6)),
-          ),
+          child: Checkbox(value: _acceptedTerms, onChanged: (val) => setState(() => _acceptedTerms = val ?? false)),
         ),
         const SizedBox(width: 12),
         Expanded(
-          child: Padding(
-            padding: const EdgeInsets.only(top: 2.0),
-            child: RichText(
-              text: TextSpan(
-                style: TextStyle(color: theme.colorScheme.onSurfaceVariant, fontSize: 13, fontWeight: FontWeight.w500, height: 1.5),
-                children: [
-                  const TextSpan(text: "Я соглашаюсь с "),
-                  TextSpan(
-                    text: "Пользовательским соглашением",
-                    style: TextStyle(color: theme.colorScheme.primary, decoration: TextDecoration.underline),
-                    recognizer: TapGestureRecognizer()..onTap = () {
-                      const String url = "https://docs.google.com/document/d/1GpHL1IbLlklUrKQ2jShjlNIrXd2V4V1H/edit?usp=sharing";
-                      launchUrl(Uri.parse(url.trim()), mode: LaunchMode.externalApplication);
-                    }
-                  ),
-                  const TextSpan(text: " и "),
-                  TextSpan(
-                    text: "Политикой конфиденциальности",
-                    style: TextStyle(color: theme.colorScheme.primary, decoration: TextDecoration.underline),
-                    recognizer: TapGestureRecognizer()..onTap = () {
-                      const String url = "https://docs.google.com/document/d/1ak-7-B2_uvmY1O7b6kJu-rUEOa5e_sDY/edit?usp=sharing";
-                      launchUrl(Uri.parse(url.trim()), mode: LaunchMode.externalApplication);
-                    }
-                  ),
-                ],
-              ),
+          child: RichText(
+            text: TextSpan(
+              style: theme.textTheme.bodySmall?.copyWith(height: 1.5),
+              children: [
+                const TextSpan(text: 'Я соглашаюсь с '),
+                TextSpan(
+                  text: 'Пользовательским соглашением',
+                  style: TextStyle(color: theme.colorScheme.primary, decoration: TextDecoration.underline),
+                  recognizer: TapGestureRecognizer()..onTap = () => launchUrl(Uri.parse(_termsUrl), mode: LaunchMode.externalApplication),
+                ),
+                const TextSpan(text: ' и '),
+                TextSpan(
+                  text: 'Политикой конфиденциальности',
+                  style: TextStyle(color: theme.colorScheme.primary, decoration: TextDecoration.underline),
+                  recognizer: TapGestureRecognizer()..onTap = () => launchUrl(Uri.parse(_privacyUrl), mode: LaunchMode.externalApplication),
+                ),
+              ],
             ),
           ),
         ),
       ],
+    );
+  }
+}
+
+class _ModeSwitch extends StatelessWidget {
+  final bool isLogin;
+  final ValueChanged<bool> onChanged;
+  const _ModeSwitch({required this.isLogin, required this.onChanged});
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final palette = context.eva;
+    Widget seg(String label, bool value) {
+      final bool active = isLogin == value;
+      return Expanded(
+        child: GestureDetector(
+          behavior: HitTestBehavior.opaque,
+          onTap: () => onChanged(value),
+          child: AnimatedContainer(
+            duration: const Duration(milliseconds: 200),
+            padding: const EdgeInsets.symmetric(vertical: 12),
+            decoration: BoxDecoration(
+              color: active ? theme.colorScheme.surface : Colors.transparent,
+              borderRadius: BorderRadius.circular(100),
+              boxShadow: active ? palette.cardShadow : null,
+            ),
+            alignment: Alignment.center,
+            child: Text(
+              label,
+              style: theme.textTheme.labelLarge?.copyWith(color: active ? theme.colorScheme.onSurface : theme.colorScheme.onSurfaceVariant),
+            ),
+          ),
+        ),
+      );
+    }
+
+    return Container(
+      padding: const EdgeInsets.all(4),
+      decoration: BoxDecoration(color: palette.fieldFill, borderRadius: BorderRadius.circular(100)),
+      child: Row(children: [seg('Вход', true), seg('Регистрация', false)]),
     );
   }
 }

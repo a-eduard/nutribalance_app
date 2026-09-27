@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import '../../../theme/eva_colors.dart';
 import 'package:flutter/cupertino.dart';
 import '../../../../services/database_service.dart';
 
@@ -150,7 +151,7 @@ class _HarmonySymptomsSheetState extends State<HarmonySymptomsSheet> {
             child: Column(
               mainAxisSize: MainAxisSize.min,
               children: [
-                Text(symptom, style: TextStyle(fontSize: 20, fontWeight: FontWeight.w900, color: theme.colorScheme.onSurface), textAlign: TextAlign.center),
+                Text(symptom, style: TextStyle(fontSize: 20, fontFamily: EvaFonts.serif, fontWeight: FontWeight.w500, color: theme.colorScheme.onSurface), textAlign: TextAlign.center),
                 const SizedBox(height: 8),
                 Text(_getHintForScore(currentScore), style: TextStyle(color: theme.colorScheme.onSurfaceVariant, fontSize: 14, fontWeight: FontWeight.w600)),
                 const SizedBox(height: 24),
@@ -228,7 +229,7 @@ class _HarmonySymptomsSheetState extends State<HarmonySymptomsSheet> {
           Row(
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
-              Text("Симптомы", style: TextStyle(color: theme.colorScheme.onSurface, fontSize: 24, fontWeight: FontWeight.w900)),
+              Text("Симптомы", style: TextStyle(color: theme.colorScheme.onSurface, fontSize: 24, fontFamily: EvaFonts.serif, fontWeight: FontWeight.w500)),
               TextButton(onPressed: _saveAndClose, child: Text("Готово", style: TextStyle(color: theme.colorScheme.primary, fontWeight: FontWeight.bold, fontSize: 16))),
             ],
           ),

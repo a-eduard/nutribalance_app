@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import '../../../theme/eva_colors.dart';
 import 'package:flutter/cupertino.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
@@ -76,21 +77,21 @@ class _HarmonyOverviewScreenState extends State<HarmonyOverviewScreen> {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Text("Цикл", style: TextStyle(fontSize: 20, fontWeight: FontWeight.w900, color: theme.colorScheme.onSurface)),
+              Text("Цикл", style: TextStyle(fontSize: 20, fontFamily: EvaFonts.serif, fontWeight: FontWeight.w500, color: theme.colorScheme.onSurface)),
               const SizedBox(height: 16),
               _buildStatCard("Последняя менструация", lastPeriodStr, Icons.water_drop, theme.colorScheme.primary, theme),
               _buildStatCard("Средняя длина цикла", "${data['cycleLength'] ?? 0} дн.", Icons.loop, Colors.teal, theme),
               _buildStatCard("Продолжительность месячных", "${data['periodDuration'] ?? 0} дн.", Icons.calendar_today, Colors.orange, theme),
               
               const SizedBox(height: 32),
-              Text("Секс (Количество занятий)", style: TextStyle(fontSize: 20, fontWeight: FontWeight.w900, color: theme.colorScheme.onSurface)),
+              Text("Секс (Количество занятий)", style: TextStyle(fontSize: 20, fontFamily: EvaFonts.serif, fontWeight: FontWeight.w500, color: theme.colorScheme.onSurface)),
               const SizedBox(height: 16),
               _buildStatCard("За неделю", "${data['sexWeek'] ?? 0}", Icons.favorite, Colors.pinkAccent, theme),
               _buildStatCard("За месяц", "${data['sexMonth'] ?? 0}", Icons.favorite, Colors.pinkAccent, theme),
               _buildStatCard("За год", "${data['sexYear'] ?? 0}", Icons.favorite, Colors.pinkAccent, theme),
 
               const SizedBox(height: 32),
-              Text("Интимность (Оргазмы)", style: TextStyle(fontSize: 20, fontWeight: FontWeight.w900, color: theme.colorScheme.onSurface)),
+              Text("Интимность (Оргазмы)", style: TextStyle(fontSize: 20, fontFamily: EvaFonts.serif, fontWeight: FontWeight.w500, color: theme.colorScheme.onSurface)),
               const SizedBox(height: 16),
               _buildStatCard("За неделю", "${data['orgasmsWeek'] ?? 0}", Icons.auto_awesome, Colors.deepPurpleAccent, theme),
               _buildStatCard("За месяц", "${data['orgasmsMonth'] ?? 0}", Icons.auto_awesome, Colors.deepPurpleAccent, theme),
@@ -221,7 +222,7 @@ class _HarmonyOverviewScreenState extends State<HarmonyOverviewScreen> {
               children: [
                 Icon(Icons.picture_as_pdf_rounded, size: 64, color: theme.colorScheme.primary),
                 const SizedBox(height: 24),
-                Text("Экспорт для врача", style: TextStyle(fontSize: 22, fontWeight: FontWeight.w900, color: theme.colorScheme.onSurface)),
+                Text("Экспорт для врача", style: TextStyle(fontSize: 22, fontFamily: EvaFonts.serif, fontWeight: FontWeight.w500, color: theme.colorScheme.onSurface)),
                 const SizedBox(height: 12),
                 Text("Сгенерируйте подробный отчет о циклах, симптомах и весе в формате PDF.", textAlign: TextAlign.center, style: TextStyle(color: theme.colorScheme.onSurfaceVariant, fontSize: 14, height: 1.4)),
                 const SizedBox(height: 24),

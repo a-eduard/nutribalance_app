@@ -1,6 +1,7 @@
 // Файл: lib/screens/shopping_list_screen.dart
 
 import 'package:flutter/material.dart';
+import '../theme/eva_colors.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import '../services/database_service.dart';
@@ -17,7 +18,7 @@ class ShoppingListScreen extends StatelessWidget {
     return Scaffold(
       backgroundColor: theme.scaffoldBackgroundColor,
       appBar: AppBar(
-        title: Text('Мои покупки', style: TextStyle(color: theme.colorScheme.onSurface, fontWeight: FontWeight.w900, fontSize: 24, letterSpacing: -0.5)),
+        title: Text('Мои покупки', style: TextStyle(color: theme.colorScheme.onSurface, fontFamily: EvaFonts.serif, fontWeight: FontWeight.w500, fontSize: 24, letterSpacing: -0.5)),
         backgroundColor: Colors.transparent,
         elevation: 0,
         iconTheme: IconThemeData(color: theme.colorScheme.onSurface),
@@ -62,7 +63,7 @@ class ShoppingListScreen extends StatelessWidget {
                         const SizedBox(height: 16),
                         Text(
                           'Твой список пуст', 
-                          style: TextStyle(color: theme.colorScheme.onSurface, fontSize: 20, fontWeight: FontWeight.w800)
+                          style: TextStyle(color: theme.colorScheme.onSurface, fontSize: 20, fontFamily: EvaFonts.serif, fontWeight: FontWeight.w500)
                         ),
                         const SizedBox(height: 8),
                         Text(

@@ -1,6 +1,7 @@
 // Файл: lib/screens/harmony/widgets/harmony_meds_sheet.dart
 
 import 'package:flutter/material.dart';
+import '../../../theme/eva_colors.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 
@@ -106,7 +107,7 @@ class _HarmonyMedsSheetState extends State<HarmonyMedsSheet> {
     final uid = FirebaseAuth.instance.currentUser?.uid;
     if (uid != null) {
       final String docId = "${widget.selectedDay.year}-${widget.selectedDay.month.toString().padLeft(2, '0')}-${widget.selectedDay.day.toString().padLeft(2, '0')}";
-      await FirebaseFirestore.instance.collection('users').doc(uid).collection('cycle_logs').doc(docId).set({'meds': list, 'updatedAt': FieldValue.serverTimestamp()}, SetOptions(merge: true));
+      FirebaseFirestore.instance.collection('users').doc(uid).collection('cycle_logs').doc(docId).set({'meds': list, 'updatedAt': FieldValue.serverTimestamp()}, SetOptions(merge: true)).catchError((e) => debugPrint('harmony save: $e'));
     }
     widget.onSave(list);
     if (mounted) Navigator.pop(context);
@@ -123,7 +124,7 @@ class _HarmonyMedsSheetState extends State<HarmonyMedsSheet> {
           Row(
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
-              Text("Медикаменты", style: TextStyle(color: theme.colorScheme.onSurface, fontSize: 24, fontWeight: FontWeight.w900)),
+              Text("Медикаменты", style: TextStyle(color: theme.colorScheme.onSurface, fontSize: 24, fontFamily: EvaFonts.serif, fontWeight: FontWeight.w500)),
               TextButton(onPressed: _saveAndClose, child: Text("Готово", style: TextStyle(color: theme.colorScheme.primary, fontWeight: FontWeight.bold, fontSize: 16))),
             ],
           ),

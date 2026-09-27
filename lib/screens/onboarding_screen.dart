@@ -1,10 +1,12 @@
-import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
+import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:intl/intl.dart';
+
 import '../services/calculation_service.dart';
-import '../ui_widgets.dart';
-import 'dashboard_screen.dart';
+import '../theme/eva_colors.dart';
+import '../widgets/eva_ui.dart';
 
 class OnboardingScreen extends StatefulWidget {
   const OnboardingScreen({super.key});
@@ -23,13 +25,25 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
   final TextEditingController _heightController = TextEditingController();
   final TextEditingController _weightController = TextEditingController();
   final TextEditingController _pregWeekController = TextEditingController();
-  
+
   String _selectedGoal = '';
   String _selectedActivity = '';
   DateTime? _lastPeriodDate;
 
-  final List<String> _goals = ['Похудеть', 'Поддержание веса', 'Набрать вес', 'Здоровая беременность'];
-  final List<String> _activities = ['Низкая (сидячий образ)', 'Умеренная (1-2 тренировки)', 'Высокая (3-5 тренировок)', 'Очень высокая (каждый день)'];
+  static const List<(String, String, IconData)> _goals = [
+    ('Похудеть', 'Мягкий дефицит без жёстких диет', Icons.trending_down_rounded),
+    ('Поддержание веса', 'Баланс и хорошее самочувствие', Icons.balance_rounded),
+    ('Набрать вес', 'Энергия и сила', Icons.trending_up_rounded),
+    ('Здоровая беременность', 'Бережное питание для двоих', Icons.child_friendly_rounded),
+  ];
+  static const List<(String, String, IconData)> _activities = [
+    ('Низкая (сидячий образ)', 'Офис, мало движения', Icons.chair_outlined),
+    ('Умеренная (1-2 тренировки)', 'Прогулки и 1–2 тренировки в неделю', Icons.directions_walk_rounded),
+    ('Высокая (3-5 тренировок)', 'Регулярный спорт', Icons.fitness_center_rounded),
+    ('Очень высокая (каждый день)', 'Ежедневные нагрузки', Icons.bolt_rounded),
+  ];
+
+  static const int _steps = 4;
 
   @override
   void initState() {
@@ -39,13 +53,12 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
 
   Future<void> _prefillName() async {
     final uid = FirebaseAuth.instance.currentUser?.uid;
-    if (uid != null) {
-      final doc = await FirebaseFirestore.instance.collection('users').doc(uid).get();
-      if (doc.exists && mounted) {
-        final data = doc.data() as Map<String, dynamic>;
-        setState(() => _nameController.text = data['name'] ?? '');
-      }
-    }
+    if (uid == null) return;
+    try {
+      final doc = await FirebaseFirestore.instance.collection('users').doc(uid).get().timeout(const Duration(seconds: 8));
+      final name = doc.data()?['name']?.toString() ?? FirebaseAuth.instance.currentUser?.displayName ?? '';
+      if (mounted && _nameController.text.isEmpty) setState(() => _nameController.text = name);
+    } catch (_) {}
   }
 
   @override
@@ -59,154 +72,159 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
     super.dispose();
   }
 
-  List<Widget> get _screens {
-    final theme = Theme.of(context);
-    List<Widget> steps = [];
-    steps.add(_buildParamsStep(theme));
-    steps.add(_buildSelectionStep("Ваша главная цель?", _goals, _selectedGoal, (v) => setState(() => _selectedGoal = v), theme));
-    
-    if (_selectedGoal == 'Здоровая беременность') {
-      steps.add(_buildPregnancyStep(theme));
-    } else {
-      steps.add(_buildCycleStep(theme));
+  bool get _isPregnancy => _selectedGoal == 'Здоровая беременность';
+
+  double? _num(TextEditingController c) => double.tryParse(c.text.replaceAll(',', '.').trim());
+
+  String? _validateStep() {
+    switch (_currentIndex) {
+      case 0:
+        final age = _num(_ageController), height = _num(_heightController), weight = _num(_weightController);
+        if (_nameController.text.trim().isEmpty) return 'Как тебя зовут?';
+        if (age == null || age < 12 || age > 100) return 'Укажи возраст от 12 до 100 лет';
+        if (height == null || height < 120 || height > 230) return 'Укажи рост в сантиметрах (120–230)';
+        if (weight == null || weight < 30 || weight > 300) return 'Укажи вес в килограммах (30–300)';
+        return null;
+      case 1:
+        return _selectedGoal.isEmpty ? 'Выбери цель' : null;
+      case 2:
+        if (_isPregnancy) {
+          final w = int.tryParse(_pregWeekController.text.trim());
+          return (w == null || w < 1 || w > 42) ? 'Укажи неделю беременности от 1 до 42' : null;
+        }
+        return _lastPeriodDate == null ? 'Укажи дату начала последних месячных' : null;
+      case 3:
+        return _selectedActivity.isEmpty ? 'Выбери уровень активности' : null;
     }
-    
-    steps.add(_buildSelectionStep("Уровень активности?", _activities, _selectedActivity, (v) => setState(() => _selectedActivity = v), theme));
-    return steps;
+    return null;
   }
 
-  void _nextPage() {
-    if (_currentIndex == 0) {
-      if (_nameController.text.isEmpty || _ageController.text.isEmpty || _heightController.text.isEmpty || _weightController.text.isEmpty) {
-        _showError("Пожалуйста, заполните все параметры");
-        return;
-      }
-    } else if (_currentIndex == 1) {
-      if (_selectedGoal.isEmpty) {
-        _showError("Выберите цель");
-        return;
-      }
-    } else if (_currentIndex == 2) {
-      if (_selectedGoal == 'Здоровая беременность' && _pregWeekController.text.isEmpty) {
-        _showError("Укажите неделю беременности");
-        return;
-      } else if (_selectedGoal != 'Здоровая беременность' && _lastPeriodDate == null) {
-        _showError("Укажите дату начала цикла");
-        return;
-      }
+  void _next() {
+    final error = _validateStep();
+    if (error != null) {
+      HapticFeedback.lightImpact();
+      EvaSnack.show(context, error, type: EvaSnackType.error);
+      return;
     }
-    
-    if (_currentIndex < _screens.length - 1) {
-      _pageController.nextPage(duration: const Duration(milliseconds: 300), curve: Curves.easeInOut);
+    FocusScope.of(context).unfocus();
+    if (_currentIndex < _steps - 1) {
+      _pageController.nextPage(duration: const Duration(milliseconds: 350), curve: Curves.easeOutCubic);
     } else {
-      if (_selectedActivity.isEmpty) {
-        _showError("Выберите уровень активности");
-        return;
-      }
       _saveProfileAndCalculate();
     }
   }
 
-  void _showError(String msg) {
-    final theme = Theme.of(context);
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Text(msg, style: TextStyle(color: theme.colorScheme.onPrimary, fontWeight: FontWeight.bold)), 
-        backgroundColor: theme.colorScheme.primary
-      )
-    );
+  void _back() {
+    if (_currentIndex == 0) return;
+    FocusScope.of(context).unfocus();
+    _pageController.previousPage(duration: const Duration(milliseconds: 300), curve: Curves.easeOutCubic);
   }
 
   Future<void> _saveProfileAndCalculate() async {
+    final uid = FirebaseAuth.instance.currentUser?.uid;
+    if (uid == null) return;
     setState(() => _isLoading = true);
 
+    final double weight = _num(_weightController) ?? 65.0;
+    final double height = _num(_heightController) ?? 165.0;
+    final int age = (_num(_ageController) ?? 25).round();
+
+    final Map<String, dynamic> userData = {
+      'name': _nameController.text.trim(),
+      'gender': 'female',
+      'age': age,
+      'height': height,
+      'weight': weight,
+      'goal': _selectedGoal,
+      'activityLevel': _selectedActivity,
+      'isPregnant': _isPregnancy,
+      'appMode': _isPregnancy ? 'pregnancy' : 'standard',
+      'isOnboardingCompleted': true,
+      'joinDate': FieldValue.serverTimestamp(),
+    };
+    if (_isPregnancy) {
+      final int weeks = int.tryParse(_pregWeekController.text.trim()) ?? 1;
+      userData['pregnancyStartDate'] = Timestamp.fromDate(DateTime.now().subtract(Duration(days: weeks * 7)));
+    } else if (_lastPeriodDate != null) {
+      userData['lastPeriodStartDate'] = Timestamp.fromDate(_lastPeriodDate!);
+    }
+
     try {
-      final uid = FirebaseAuth.instance.currentUser!.uid;
-      final double weight = double.tryParse(_weightController.text.replaceAll(',', '.')) ?? 65.0;
-      final double height = double.tryParse(_heightController.text.replaceAll(',', '.')) ?? 165.0;
-      final int age = int.tryParse(_ageController.text) ?? 25;
-      final bool isPregnant = _selectedGoal == 'Здоровая беременность';
-
-      Map<String, dynamic> userData = {
-        'name': _nameController.text.trim(),
-        'gender': 'female', 
-        'age': age,
-        'height': height,
-        'weight': weight,
-        'goal': _selectedGoal,
-        'activityLevel': _selectedActivity,
-        'isPregnant': isPregnant,
-        'isOnboardingCompleted': true, 
-        'joinDate': FieldValue.serverTimestamp(),
-      };
-
-      if (isPregnant) {
-        int weeks = int.tryParse(_pregWeekController.text) ?? 1;
-        userData['pregnancyStartDate'] = Timestamp.fromDate(DateTime.now().subtract(Duration(days: weeks * 7)));
-      } else if (_lastPeriodDate != null) {
-        userData['lastPeriodStartDate'] = Timestamp.fromDate(_lastPeriodDate!);
-      }
-
-      await FirebaseFirestore.instance.collection('users').doc(uid).set(userData, SetOptions(merge: true));
-      await CalculationService().recalculateAndSaveGoals(weight: weight, height: height, age: age, goal: _selectedGoal, activityLevel: _selectedActivity, isPregnant: isPregnant);
-
-      if (mounted) {
-        Navigator.of(context).pushAndRemoveUntil(MaterialPageRoute(builder: (context) => const DashboardScreen()), (route) => false);
-      }
+      // Расчёт нормы — локально и мгновенно; запись уйдёт на сервер в фоне.
+      await CalculationService().recalculateAndSaveGoals(
+        weight: weight,
+        height: height,
+        age: age,
+        goal: _selectedGoal,
+        activityLevel: _selectedActivity,
+        isPregnant: _isPregnancy,
+      );
+      // Флаг завершения онбординга пишем последним — HomeWrapper сам откроет главный экран.
+      FirebaseFirestore.instance.collection('users').doc(uid).set(userData, SetOptions(merge: true)).catchError((e) => debugPrint('onboarding save: $e'));
     } catch (e) {
-      _showError("Ошибка сохранения: $e");
-    } finally {
-      if (mounted) setState(() => _isLoading = false);
+      if (mounted) {
+        setState(() => _isLoading = false);
+        EvaSnack.show(context, 'Не удалось сохранить. Попробуйте ещё раз', type: EvaSnackType.error);
+      }
     }
   }
 
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    
+    final palette = context.eva;
+
     return Scaffold(
-      backgroundColor: theme.scaffoldBackgroundColor,
-      appBar: AppBar(
-        backgroundColor: Colors.transparent, 
-        elevation: 0,
-        title: ClipRRect(
-          borderRadius: BorderRadius.circular(8),
-          child: LinearProgressIndicator(
-            value: (_currentIndex + 1) / _screens.length,
-            backgroundColor: theme.colorScheme.onSurfaceVariant.withValues(alpha: 0.2),
-            valueColor: AlwaysStoppedAnimation<Color>(theme.colorScheme.primary),
-            minHeight: 6,
-          ),
-        ),
-      ),
-      body: SafeArea(
-        child: Padding(
-          padding: const EdgeInsets.all(24.0),
+      body: EvaBackground(
+        child: SafeArea(
           child: Column(
             children: [
+              Padding(
+                padding: const EdgeInsets.fromLTRB(12, 8, 20, 0),
+                child: Row(
+                  children: [
+                    AnimatedOpacity(
+                      duration: const Duration(milliseconds: 200),
+                      opacity: _currentIndex == 0 ? 0 : 1,
+                      child: IconButton(
+                        onPressed: _currentIndex == 0 ? null : _back,
+                        icon: const Icon(Icons.arrow_back_ios_new_rounded, size: 20),
+                      ),
+                    ),
+                    Expanded(
+                      child: ClipRRect(
+                        borderRadius: BorderRadius.circular(10),
+                        child: TweenAnimationBuilder<double>(
+                          tween: Tween(begin: 0, end: (_currentIndex + 1) / _steps),
+                          duration: const Duration(milliseconds: 350),
+                          builder: (_, v, __) => LinearProgressIndicator(value: v, minHeight: 6),
+                        ),
+                      ),
+                    ),
+                    const SizedBox(width: 12),
+                    Text('${_currentIndex + 1}/$_steps', style: theme.textTheme.labelMedium?.copyWith(color: theme.colorScheme.onSurfaceVariant)),
+                  ],
+                ),
+              ),
               Expanded(
                 child: PageView(
                   controller: _pageController,
                   physics: const NeverScrollableScrollPhysics(),
                   onPageChanged: (idx) => setState(() => _currentIndex = idx),
-                  children: _screens,
+                  children: [
+                    _buildParamsStep(theme),
+                    _buildOptionsStep(theme, 'Твоя главная цель?', 'Ева подстроит норму и советы под неё', _goals, _selectedGoal, (v) => setState(() => _selectedGoal = v)),
+                    _isPregnancy ? _buildPregnancyStep(theme) : _buildCycleStep(theme, palette),
+                    _buildOptionsStep(theme, 'Уровень активности', 'Нужен для точного расчёта калорий', _activities, _selectedActivity, (v) => setState(() => _selectedActivity = v)),
+                  ],
                 ),
               ),
-              SizedBox(
-                width: double.infinity, height: 56,
-                child: ElevatedButton(
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: theme.colorScheme.primary, 
-                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)), 
-                    elevation: 0
-                  ),
-                  onPressed: _isLoading ? null : _nextPage,
-                  child: _isLoading 
-                    ? CircularProgressIndicator(color: theme.colorScheme.onPrimary)
-                    : Text(
-                        _currentIndex == _screens.length - 1 ? "РАССЧИТАТЬ НОРМУ" : "ДАЛЕЕ", 
-                        style: TextStyle(color: theme.colorScheme.onPrimary, fontWeight: FontWeight.w800, fontSize: 16, letterSpacing: 1.0)
-                      ),
+              Padding(
+                padding: const EdgeInsets.fromLTRB(24, 8, 24, 16),
+                child: EvaPrimaryButton(
+                  label: _currentIndex == _steps - 1 ? 'Рассчитать мою норму' : 'Далее',
+                  loading: _isLoading,
+                  onPressed: _next,
                 ),
               ),
             ],
@@ -216,109 +234,142 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
     );
   }
 
-  Widget _buildParamsStep(ThemeData theme) {
-    return SingleChildScrollView(
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text("Давай знакомиться ✨", style: TextStyle(color: theme.colorScheme.onSurface, fontSize: 28, fontWeight: FontWeight.w900, height: 1.2)),
-          const SizedBox(height: 12),
-          Text("Это нужно для точного расчета нормы калорий", style: TextStyle(color: theme.colorScheme.onSurfaceVariant, fontSize: 16)),
-          const SizedBox(height: 32),
-          HeavyInput(controller: _nameController, hint: "Твое имя", onChanged: (v) {}, keyboardType: TextInputType.name),
-          const SizedBox(height: 16),
-          HeavyInput(controller: _ageController, hint: "Возраст (лет)", onChanged: (v) {}, keyboardType: TextInputType.number),
-          const SizedBox(height: 16),
-          HeavyInput(controller: _heightController, hint: "Рост (см)", onChanged: (v) {}, keyboardType: TextInputType.number),
-          const SizedBox(height: 16),
-          HeavyInput(controller: _weightController, hint: "Вес (кг)", onChanged: (v) {}, keyboardType: TextInputType.number),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildSelectionStep(String title, List<String> options, String currentValue, Function(String) onSelect, ThemeData theme) {
+  Widget _stepHeader(ThemeData theme, String title, String subtitle) {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Text(title, style: TextStyle(color: theme.colorScheme.onSurface, fontSize: 28, fontWeight: FontWeight.w900, height: 1.2)),
-        const SizedBox(height: 32),
-        ...options.map((opt) {
-          final isSelected = currentValue == opt;
-          return GestureDetector(
-            onTap: () => onSelect(opt),
-            child: Container(
-              margin: const EdgeInsets.only(bottom: 12),
-              padding: const EdgeInsets.symmetric(vertical: 20, horizontal: 20),
-              decoration: BoxDecoration(
-                color: isSelected ? theme.colorScheme.primary.withValues(alpha: 0.1) : theme.colorScheme.surface,
-                borderRadius: BorderRadius.circular(20),
-                boxShadow: isSelected ? [BoxShadow(color: Colors.black.withValues(alpha: 0.04), blurRadius: 24, offset: const Offset(0, 8))] : [],
-                border: Border.all(color: isSelected ? theme.colorScheme.primary : Colors.transparent, width: 2),
-              ),
-              child: Row(
-                children: [
-                  Icon(isSelected ? Icons.radio_button_checked : Icons.radio_button_off, color: isSelected ? theme.colorScheme.primary : theme.colorScheme.onSurfaceVariant.withValues(alpha: 0.2)),
-                  const SizedBox(width: 16),
-                  Expanded(child: Text(opt, style: TextStyle(color: theme.colorScheme.onSurface, fontSize: 16, fontWeight: isSelected ? FontWeight.w800 : FontWeight.w600))),
-                ],
-              ),
-            ),
-          );
-        }),
+        Text(title, style: theme.textTheme.displaySmall),
+        const SizedBox(height: 8),
+        Text(subtitle, style: theme.textTheme.bodyLarge?.copyWith(color: theme.colorScheme.onSurfaceVariant)),
+        const SizedBox(height: 28),
       ],
     );
   }
 
-  Widget _buildCycleStep(ThemeData theme) {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
+  Widget _buildParamsStep(ThemeData theme) {
+    return ListView(
+      padding: const EdgeInsets.fromLTRB(24, 24, 24, 24),
       children: [
-        Text("Женское здоровье 🌸", style: TextStyle(color: theme.colorScheme.onSurface, fontSize: 28, fontWeight: FontWeight.w900, height: 1.2)),
+        _stepHeader(theme, 'Давай знакомиться ✨', 'Это нужно, чтобы точно рассчитать твою норму'),
+        TextField(
+          controller: _nameController,
+          textCapitalization: TextCapitalization.words,
+          textInputAction: TextInputAction.next,
+          decoration: const InputDecoration(labelText: 'Имя', prefixIcon: Icon(Icons.person_outline_rounded)),
+        ),
         const SizedBox(height: 12),
-        Text("Ева будет адаптировать питание под фазы твоего цикла.", style: TextStyle(color: theme.colorScheme.onSurfaceVariant, fontSize: 16)),
-        const SizedBox(height: 32),
-        GestureDetector(
-          onTap: () async {
-            final picked = await showDatePicker(
-              context: context,
-              initialDate: DateTime.now(),
-              firstDate: DateTime.now().subtract(const Duration(days: 60)),
-              lastDate: DateTime.now(),
-              builder: (context, child) {
-                return Theme(
-                  data: Theme.of(context).copyWith(colorScheme: ColorScheme.light(primary: theme.colorScheme.primary, onPrimary: theme.colorScheme.onPrimary, onSurface: theme.colorScheme.onSurface, surface: theme.colorScheme.surface)),
-                  child: child!,
-                );
-              },
-            );
-            if (picked != null) setState(() => _lastPeriodDate = picked);
-          },
-          child: Container(
-            padding: const EdgeInsets.all(20),
-            decoration: BoxDecoration(color: theme.colorScheme.surface, borderRadius: BorderRadius.circular(20), boxShadow: [BoxShadow(color: Colors.black.withValues(alpha: 0.04), blurRadius: 24, offset: const Offset(0, 8))]),
-            child: Row(
-              children: [
-                Icon(Icons.calendar_today, color: theme.colorScheme.primary),
-                const SizedBox(width: 16),
-                Expanded(child: Text(_lastPeriodDate == null ? "Начало последних месячных" : DateFormat('dd MMMM yyyy', 'ru').format(_lastPeriodDate!), style: TextStyle(color: _lastPeriodDate == null ? theme.colorScheme.onSurfaceVariant : theme.colorScheme.onSurface, fontSize: 16, fontWeight: FontWeight.w600))),
-              ],
+        TextField(
+          controller: _ageController,
+          keyboardType: TextInputType.number,
+          textInputAction: TextInputAction.next,
+          inputFormatters: [FilteringTextInputFormatter.digitsOnly],
+          decoration: const InputDecoration(labelText: 'Возраст', suffixText: 'лет', prefixIcon: Icon(Icons.cake_outlined)),
+        ),
+        const SizedBox(height: 12),
+        Row(
+          children: [
+            Expanded(
+              child: TextField(
+                controller: _heightController,
+                keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                textInputAction: TextInputAction.next,
+                decoration: const InputDecoration(labelText: 'Рост', suffixText: 'см'),
+              ),
             ),
-          ),
+            const SizedBox(width: 12),
+            Expanded(
+              child: TextField(
+                controller: _weightController,
+                keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                textInputAction: TextInputAction.done,
+                onSubmitted: (_) => _next(),
+                decoration: const InputDecoration(labelText: 'Вес', suffixText: 'кг'),
+              ),
+            ),
+          ],
         ),
       ],
     );
   }
 
-  Widget _buildPregnancyStep(ThemeData theme) {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
+  Widget _buildOptionsStep(
+    ThemeData theme,
+    String title,
+    String subtitle,
+    List<(String, String, IconData)> options,
+    String current,
+    ValueChanged<String> onSelect,
+  ) {
+    return ListView(
+      padding: const EdgeInsets.fromLTRB(24, 24, 24, 24),
       children: [
-        Text("Прекрасные новости! 👶", style: TextStyle(color: theme.colorScheme.onSurface, fontSize: 28, fontWeight: FontWeight.w900, height: 1.2)),
-        const SizedBox(height: 12),
-        Text("Ева будет особенно бережно следить за твоим питанием.", style: TextStyle(color: theme.colorScheme.onSurfaceVariant, fontSize: 16)),
-        const SizedBox(height: 32),
-        HeavyInput(controller: _pregWeekController, hint: "Текущая неделя беременности (от 1 до 42)", onChanged: (v) {}, keyboardType: TextInputType.number),
+        _stepHeader(theme, title, subtitle),
+        ...options.map((o) => EvaOptionTile(
+              title: o.$1,
+              subtitle: o.$2,
+              icon: o.$3,
+              selected: current == o.$1,
+              onTap: () => onSelect(o.$1),
+            )),
+      ],
+    );
+  }
+
+  Widget _buildCycleStep(ThemeData theme, EvaPalette palette) {
+    return ListView(
+      padding: const EdgeInsets.fromLTRB(24, 24, 24, 24),
+      children: [
+        _stepHeader(theme, 'Женское здоровье 🌸', 'Ева будет адаптировать питание под фазы твоего цикла'),
+        EvaCard(
+          onTap: () async {
+            final picked = await showDatePicker(
+              context: context,
+              helpText: 'Начало последних месячных',
+              initialDate: _lastPeriodDate ?? DateTime.now(),
+              firstDate: DateTime.now().subtract(const Duration(days: 90)),
+              lastDate: DateTime.now(),
+            );
+            if (picked != null) setState(() => _lastPeriodDate = picked);
+          },
+          padding: const EdgeInsets.all(18),
+          child: Row(
+            children: [
+              const EvaIconBubble(icon: Icons.calendar_month_rounded, color: EvaColors.menstruation),
+              const SizedBox(width: 14),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text('Начало последних месячных', style: theme.textTheme.bodySmall),
+                    const SizedBox(height: 2),
+                    Text(
+                      _lastPeriodDate == null ? 'Выбрать дату' : DateFormat('d MMMM yyyy', 'ru').format(_lastPeriodDate!),
+                      style: theme.textTheme.titleMedium?.copyWith(color: _lastPeriodDate == null ? theme.colorScheme.primary : theme.colorScheme.onSurface),
+                    ),
+                  ],
+                ),
+              ),
+              Icon(Icons.chevron_right_rounded, color: theme.colorScheme.onSurfaceVariant),
+            ],
+          ),
+        ),
+        const SizedBox(height: 16),
+        Text('Не помнишь точно? Укажи примерную дату — её всегда можно изменить в «Гармонии».', style: theme.textTheme.bodySmall),
+      ],
+    );
+  }
+
+  Widget _buildPregnancyStep(ThemeData theme) {
+    return ListView(
+      padding: const EdgeInsets.fromLTRB(24, 24, 24, 24),
+      children: [
+        _stepHeader(theme, 'Прекрасные новости! 👶', 'Ева будет особенно бережно следить за твоим питанием'),
+        TextField(
+          controller: _pregWeekController,
+          keyboardType: TextInputType.number,
+          inputFormatters: [FilteringTextInputFormatter.digitsOnly],
+          decoration: const InputDecoration(labelText: 'Текущая неделя беременности', hintText: 'от 1 до 42', prefixIcon: Icon(Icons.child_friendly_rounded)),
+        ),
       ],
     );
   }

@@ -1,0 +1,35 @@
+rules_version = '2';
+
+// Моя Ева — правила Firebase Storage.
+// Ссылки getDownloadURL() (аватарки, фото еды, фото в чатах) продолжают работать
+// для всех, у кого есть ссылка, — правила ограничивают только загрузку и листинг.
+
+service firebase.storage {
+  match /b/{bucket}/o {
+
+    function signedIn() { return request.auth != null; }
+    function smallImageOrPdf(maxMb) {
+      return request.resource.size < maxMb * 1024 * 1024
+        && (request.resource.contentType.matches('image/.*') || request.resource.contentType == 'application/pdf'
+            || request.resource.contentType == 'application/octet-stream');
+    }
+
+    // Личные файлы: аватар, фото еды, вложения для Евы (users/{uid}/ai_chat/...)
+    match /users/{uid}/{allPaths=**} {
+      allow read: if signedIn() && request.auth.uid == uid;
+      allow create, update: if signedIn() && request.auth.uid == uid && smallImageOrPdf(15);
+      allow delete: if signedIn() && request.auth.uid == uid;
+    }
+
+    // Фото в чатах между пользователями
+    match /chats_media/{chatId}/{file} {
+      allow read, delete: if signedIn() && chatId.split('_').hasAny([request.auth.uid]);
+      allow create: if signedIn() && chatId.split('_').hasAny([request.auth.uid]) && smallImageOrPdf(10);
+    }
+
+    // Старый путь вложений чата с Евой (используется версиями приложения до обновления)
+    match /chats/{rest=**} {
+      allow read, write: if signedIn();
+    }
+  }
+}

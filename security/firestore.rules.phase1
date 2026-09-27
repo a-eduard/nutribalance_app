@@ -1,0 +1,65 @@
+rules_version = '2';
+
+// ============================================================================
+// Моя Ева — правила Firestore. ЭТАП 1 (совместимый со старыми версиями приложения)
+//
+// Можно выкладывать сразу вместе с новой версией. Что даёт:
+//  • никто не может писать в чужие документы users и их подколлекции;
+//  • чаты доступны только участникам; сообщения может создавать только отправитель;
+//  • УДАЛЕНИЕ документов чатов запрещено — это блокирует старый баг, из-за
+//    которого приложение стирало диалоги при плохой связи/VPN;
+//  • служебные коллекции (purchases, promocodes, public_profiles) пишет только сервер.
+// Чтение users пока разрешено всем авторизованным — этого требуют старые версии
+// приложения (поиск по всей коллекции). После обновления большинства
+// пользователей переходите на security/firestore.rules.strict.
+// ============================================================================
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    function signedIn() { return request.auth != null; }
+    function isOwner(uid) { return signedIn() && request.auth.uid == uid; }
+    function inChatId(chatId) { return signedIn() && chatId.split('_').hasAny([request.auth.uid]); }
+
+    match /users/{uid} {
+      allow read: if signedIn();
+      allow create, update, delete: if isOwner(uid);
+
+      match /{sub=**} {
+        allow read, write: if isOwner(uid);
+      }
+    }
+
+    match /public_profiles/{uid} {
+      allow read: if signedIn();
+      allow write: if false; // поддерживается Cloud Function syncPublicProfile
+    }
+
+    match /chats/{chatId} {
+      allow read: if signedIn() && (resource == null || request.auth.uid in resource.data.users || inChatId(chatId));
+      allow create, update: if inChatId(chatId);
+      allow delete: if false;
+
+      match /messages/{messageId} {
+        allow read: if inChatId(chatId);
+        allow create: if inChatId(chatId) && request.resource.data.senderId == request.auth.uid;
+        allow update: if inChatId(chatId) && resource.data.senderId == request.auth.uid
+                      && request.resource.data.senderId == resource.data.senderId;
+        allow delete: if inChatId(chatId) && resource.data.senderId == request.auth.uid;
+      }
+    }
+
+    match /app_settings/{doc} {
+      allow read: if signedIn();
+      allow write: if false;
+    }
+
+    match /app_config/{doc} {
+      allow read: if true;
+      allow write: if false;
+    }
+
+    match /purchases/{id} { allow read, write: if false; }
+    match /promocodes/{id} { allow read, write: if false; }
+  }
+}

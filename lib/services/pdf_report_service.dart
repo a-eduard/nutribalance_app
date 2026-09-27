@@ -1,3 +1,4 @@
+import 'package:flutter/services.dart' show rootBundle;
 import 'package:pdf/pdf.dart';
 import 'package:pdf/widgets.dart' as pw;
 import 'package:printing/printing.dart';
@@ -19,9 +20,10 @@ class PdfReportService {
     final stats = await dbService.getHarmonyStatistics();
     final logs = await _getRecentCycleLogs(90); 
     
-    // Получаем шрифты с поддержкой кириллицы
-    final fontRegular = await PdfGoogleFonts.robotoRegular();
-    final fontBold = await PdfGoogleFonts.robotoBold();
+    // ФИКС: раньше шрифты скачивались из Google Fonts при каждом отчёте
+    // (не работало офлайн и при блокировках). Теперь — встроенные шрифты с кириллицей.
+    final fontRegular = pw.Font.ttf(await rootBundle.load('assets/fonts/Inter-Regular.ttf'));
+    final fontBold = pw.Font.ttf(await rootBundle.load('assets/fonts/Inter-Bold.ttf'));
 
     final pdf = pw.Document();
     final now = DateTime.now();

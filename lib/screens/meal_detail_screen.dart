@@ -1,5 +1,6 @@
 import 'dart:convert';
 import 'package:flutter/material.dart';
+import '../theme/eva_colors.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cached_network_image/cached_network_image.dart'; 
@@ -36,7 +37,7 @@ class _MealDetailScreenState extends State<MealDetailScreen> {
             TextField(
               controller: weightController,
               keyboardType: TextInputType.number,
-              style: TextStyle(color: theme.colorScheme.onSurface, fontSize: 24, fontWeight: FontWeight.w900),
+              style: TextStyle(color: theme.colorScheme.onSurface, fontSize: 24, fontFamily: EvaFonts.serif, fontWeight: FontWeight.w500),
               decoration: InputDecoration(
                 labelText: 'Граммы',
                 labelStyle: TextStyle(color: theme.colorScheme.onSurfaceVariant),
@@ -59,7 +60,7 @@ class _MealDetailScreenState extends State<MealDetailScreen> {
             onPressed: () {
               final doubleWeight = double.tryParse(weightController.text.replaceAll(',', '.').trim());
               if (doubleWeight != null && doubleWeight > 0) {
-                DatabaseService().updateIngredientWeight(mealId, ingredient, doubleWeight.round()); 
+                DatabaseService().updateIngredientWeight(mealId, ingredient, doubleWeight.round(), dateDocId: widget.dateDocId);
                 Navigator.pop(ctx);
               }
             },
@@ -207,7 +208,7 @@ class _MealDetailScreenState extends State<MealDetailScreen> {
                     children: [
                       Center(child: Container(width: 40, height: 4, decoration: BoxDecoration(color: theme.colorScheme.onSurfaceVariant.withValues(alpha: 0.2), borderRadius: BorderRadius.circular(10)))),
                       const SizedBox(height: 24),
-                      Text(currentMeal['name'] ?? 'Блюдо', style: TextStyle(color: theme.colorScheme.onSurface, fontSize: 24, fontWeight: FontWeight.w900)),
+                      Text(currentMeal['name'] ?? 'Блюдо', style: TextStyle(color: theme.colorScheme.onSurface, fontSize: 24, fontFamily: EvaFonts.serif, fontWeight: FontWeight.w500)),
                       const SizedBox(height: 32),
 
                       Row(
@@ -250,7 +251,7 @@ class _MealDetailScreenState extends State<MealDetailScreen> {
                               children: [
                                 Icon(Icons.favorite, color: theme.colorScheme.primary, size: 20), 
                                 const SizedBox(width: 6), 
-                                Text('$avgScore/10', style: TextStyle(color: theme.colorScheme.primary, fontSize: 20, fontWeight: FontWeight.w900))
+                                Text('$avgScore/10', style: TextStyle(color: theme.colorScheme.primary, fontSize: 20, fontFamily: EvaFonts.serif, fontWeight: FontWeight.w500))
                               ]
                             ),
                           ],
@@ -268,7 +269,7 @@ class _MealDetailScreenState extends State<MealDetailScreen> {
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      Text("Ингредиенты", style: TextStyle(color: theme.colorScheme.onSurface, fontSize: 20, fontWeight: FontWeight.w900)),
+                      Text("Ингредиенты", style: TextStyle(color: theme.colorScheme.onSurface, fontSize: 20, fontFamily: EvaFonts.serif, fontWeight: FontWeight.w500)),
                       const SizedBox(height: 16),
                       ...ingredients.map((ing) => _buildIngredientRow(ing, currentMeal['id'], theme)),
                       const SizedBox(height: 40),

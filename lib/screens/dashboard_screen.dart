@@ -1,15 +1,18 @@
-import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
+import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 
-import 'profile_screen.dart';
-import 'harmony_screen.dart';
-import 'home_tab.dart'; 
-import 'community_screen.dart'; 
+import '../theme/eva_colors.dart';
 import '../widgets/dashboard/fast_food_scanner_sheet.dart';
+import '../widgets/eva_ui.dart';
+import 'community_screen.dart';
+import 'harmony_screen.dart';
+import 'home_tab.dart';
+import 'profile_screen.dart';
 
 class DashboardScreen extends StatefulWidget {
-  final int initialTab; 
+  final int initialTab;
 
   const DashboardScreen({super.key, this.initialTab = 0});
 
@@ -19,24 +22,27 @@ class DashboardScreen extends StatefulWidget {
 
 class _DashboardScreenState extends State<DashboardScreen> {
   late int _currentIndex;
+  final Set<int> _visited = {};
+  Stream<QuerySnapshot<Map<String, dynamic>>>? _unreadStream;
 
-  final List<Widget> _screens = [
-    const HomeTab(),
-    const HarmonyScreen(),
-    const SizedBox.shrink(), 
-    const CommunityScreen(), 
-    const ProfileScreen(),
+  static const _tabs = <_NavItem>[
+    _NavItem(Icons.home_outlined, Icons.home_rounded, 'Главная'),
+    _NavItem(Icons.spa_outlined, Icons.spa_rounded, 'Гармония'),
+    _NavItem(Icons.chat_bubble_outline_rounded, Icons.chat_bubble_rounded, 'Чаты'),
+    _NavItem(Icons.person_outline_rounded, Icons.person_rounded, 'Профиль'),
   ];
 
   @override
   void initState() {
     super.initState();
-    _currentIndex = widget.initialTab;
-    
-    Future.delayed(const Duration(milliseconds: 500), () {
-      if (mounted) {
-        _checkAndMigrateOldUsers();
-      }
+    _currentIndex = widget.initialTab.clamp(0, _tabs.length - 1).toInt();
+    _visited.add(_currentIndex);
+    final uid = FirebaseAuth.instance.currentUser?.uid;
+    if (uid != null) {
+      _unreadStream = FirebaseFirestore.instance.collection('chats').where('users', arrayContains: uid).snapshots();
+    }
+    Future.delayed(const Duration(milliseconds: 800), () {
+      if (mounted) _checkAndMigrateOldUsers();
     });
   }
 
@@ -44,10 +50,17 @@ class _DashboardScreenState extends State<DashboardScreen> {
   void didUpdateWidget(covariant DashboardScreen oldWidget) {
     super.didUpdateWidget(oldWidget);
     if (widget.initialTab != oldWidget.initialTab) {
-      setState(() {
-        _currentIndex = widget.initialTab;
-      });
+      _select(widget.initialTab);
     }
+  }
+
+  void _select(int index) {
+    if (index == _currentIndex) return;
+    HapticFeedback.selectionClick();
+    setState(() {
+      _currentIndex = index;
+      _visited.add(index);
+    });
   }
 
   Future<void> _checkAndMigrateOldUsers() async {
@@ -56,151 +69,251 @@ class _DashboardScreenState extends State<DashboardScreen> {
     try {
       final doc = await FirebaseFirestore.instance.collection('users').doc(uid).get();
       if (!doc.exists) return;
-      final data = doc.data() as Map<String, dynamic>;
+      final data = doc.data() ?? {};
       if (data['goal'] == null || data['activityLevel'] == null || data['goal'].toString().isEmpty) {
-        if (mounted) _showMigrationBottomSheet(context, uid);
+        if (mounted) _showMigrationBottomSheet(uid);
       }
     } catch (e) {
       debugPrint("Ошибка миграции: $e");
     }
   }
 
-  void _showMigrationBottomSheet(BuildContext context, String uid) {
+  void _showMigrationBottomSheet(String uid) {
     String selectedGoal = 'Похудеть';
     String selectedActivity = 'Умеренная (1-2 тренировки)';
-    final theme = Theme.of(context);
+    const goals = ['Похудеть', 'Поддержание веса', 'Набрать вес'];
+    const activities = ['Низкая (сидячий образ)', 'Умеренная (1-2 тренировки)', 'Высокая (3-5 тренировок)', 'Очень высокая (каждый день)'];
 
-    showModalBottomSheet(
-      context: context, isScrollControlled: true, isDismissible: false, enableDrag: false,
-      backgroundColor: theme.colorScheme.surface,
-      shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(32))),
-      builder: (ctx) => Padding(
-        padding: EdgeInsets.only(left: 24, right: 24, top: 32, bottom: MediaQuery.of(ctx).viewInsets.bottom + 40),
-        child: StatefulBuilder(
-          builder: (context, setModalState) {
-            return Column(
-              mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start,
+    EvaSheet.show<void>(
+      context,
+      isDismissible: false,
+      enableDrag: false,
+      builder: (ctx) => StatefulBuilder(
+        builder: (context, setModalState) {
+          final theme = Theme.of(context);
+          return SingleChildScrollView(
+            padding: EdgeInsets.fromLTRB(20, 0, 20, MediaQuery.of(ctx).viewInsets.bottom + 24),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Text("Важное обновление ✨", style: TextStyle(color: theme.colorScheme.onSurface, fontSize: 24, fontWeight: FontWeight.w900)),
+                const EvaSheetHeader(title: 'Ева стала умнее ✨', subtitle: 'Уточни пару деталей — рассчитаю норму точнее'),
+                Text('Главная цель', style: theme.textTheme.titleSmall),
+                const SizedBox(height: 10),
+                ...goals.map((g) => EvaOptionTile(title: g, selected: selectedGoal == g, onTap: () => setModalState(() => selectedGoal = g))),
                 const SizedBox(height: 8),
-                Text("MyEva стала умнее! Уточни пару деталей для точного расчета нормы калорий:", style: TextStyle(color: theme.colorScheme.onSurfaceVariant, fontSize: 14)),
-                const SizedBox(height: 24),
-                Text("Ваша главная цель", style: TextStyle(fontWeight: FontWeight.bold, color: theme.colorScheme.onSurface)),
-                const SizedBox(height: 8),
-                DropdownButtonFormField<String>(
-                  // ИСПРАВЛЕНО: value -> initialValue
-                  initialValue: selectedGoal,
-                  dropdownColor: theme.colorScheme.surface,
-                  style: TextStyle(color: theme.colorScheme.onSurface),
-                  decoration: InputDecoration(border: OutlineInputBorder(borderRadius: BorderRadius.circular(16))),
-                  items: ['Похудеть', 'Поддержать вес', 'Набрать массу'].map((e) => DropdownMenuItem(value: e, child: Text(e))).toList(),
-                  onChanged: (v) => setModalState(() => selectedGoal = v!),
-                ),
+                Text('Уровень активности', style: theme.textTheme.titleSmall),
+                const SizedBox(height: 10),
+                ...activities.map((a) => EvaOptionTile(title: a, selected: selectedActivity == a, onTap: () => setModalState(() => selectedActivity = a))),
                 const SizedBox(height: 16),
-                Text("Уровень активности", style: TextStyle(fontWeight: FontWeight.bold, color: theme.colorScheme.onSurface)),
-                const SizedBox(height: 8),
-                DropdownButtonFormField<String>(
-                  // ИСПРАВЛЕНО: value -> initialValue
-                  initialValue: selectedActivity,
-                  dropdownColor: theme.colorScheme.surface,
-                  style: TextStyle(color: theme.colorScheme.onSurface, fontSize: 14),
-                  decoration: InputDecoration(border: OutlineInputBorder(borderRadius: BorderRadius.circular(16))),
-                  items: ['Низкая (сидячий образ)', 'Умеренная (1-2 тренировки)', 'Высокая (3-5 тренировок)', 'Очень высокая (каждый день)'].map((e) => DropdownMenuItem(value: e, child: Text(e))).toList(),
-                  onChanged: (v) => setModalState(() => selectedActivity = v!),
+                EvaPrimaryButton(
+                  label: 'Сохранить',
+                  onPressed: () {
+                    FirebaseFirestore.instance
+                        .collection('users')
+                        .doc(uid)
+                        .set({'goal': selectedGoal, 'activityLevel': selectedActivity}, SetOptions(merge: true))
+                        .catchError((e) => debugPrint('migration: $e'));
+                    Navigator.pop(ctx);
+                  },
                 ),
-                const SizedBox(height: 32),
-                SizedBox(
-                  width: double.infinity, height: 50,
-                  child: ElevatedButton(
-                    style: ElevatedButton.styleFrom(backgroundColor: theme.colorScheme.primary, shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16))),
-                    onPressed: () async {
-                      await FirebaseFirestore.instance.collection('users').doc(uid).update({'goal': selectedGoal, 'activityLevel': selectedActivity});
-                      if (context.mounted) Navigator.pop(ctx);
-                    },
-                    child: Text("СОХРАНИТЬ", style: TextStyle(color: theme.colorScheme.onPrimary, fontWeight: FontWeight.w800)),
+              ],
+            ),
+          );
+        },
+      ),
+    );
+  }
+
+  Widget _tabBody(int index) {
+    if (!_visited.contains(index)) return const SizedBox.shrink();
+    switch (index) {
+      case 0:
+        return const HomeTab();
+      case 1:
+        return const HarmonyScreen();
+      case 2:
+        return const CommunityScreen();
+      default:
+        return const ProfileScreen();
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final uid = FirebaseAuth.instance.currentUser?.uid;
+    return Scaffold(
+      extendBody: true,
+      body: IndexedStack(
+        index: _currentIndex,
+        children: List.generate(_tabs.length, _tabBody),
+      ),
+      bottomNavigationBar: _EvaNavBar(
+        items: _tabs,
+        currentIndex: _currentIndex,
+        onSelect: _select,
+        onCenterTap: () => FastFoodScannerSheet.show(context),
+        badgeFor: (index) {
+          if (index != 2 || uid == null || _unreadStream == null) return null;
+          return StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
+            stream: _unreadStream,
+            builder: (context, snapshot) {
+              int total = 0;
+              for (final doc in snapshot.data?.docs ?? const <QueryDocumentSnapshot<Map<String, dynamic>>>[]) {
+                total += evaInt(doc.data()['unread_$uid']);
+              }
+              if (total <= 0) return const SizedBox.shrink();
+              return Container(
+                padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1.5),
+                constraints: const BoxConstraints(minWidth: 17),
+                decoration: BoxDecoration(
+                  color: Theme.of(context).colorScheme.primary,
+                  borderRadius: BorderRadius.circular(100),
+                  border: Border.all(color: Theme.of(context).colorScheme.surface, width: 1.5),
+                ),
+                child: Text(
+                  total > 99 ? '99+' : '$total',
+                  textAlign: TextAlign.center,
+                  style: const TextStyle(fontFamily: EvaFonts.sans, color: Colors.white, fontSize: 10, fontWeight: FontWeight.w700),
+                ),
+              );
+            },
+          );
+        },
+      ),
+    );
+  }
+}
+
+class _NavItem {
+  final IconData icon;
+  final IconData activeIcon;
+  final String label;
+  const _NavItem(this.icon, this.activeIcon, this.label);
+}
+
+class _EvaNavBar extends StatelessWidget {
+  final List<_NavItem> items;
+  final int currentIndex;
+  final ValueChanged<int> onSelect;
+  final VoidCallback onCenterTap;
+  final Widget? Function(int index) badgeFor;
+
+  const _EvaNavBar({
+    required this.items,
+    required this.currentIndex,
+    required this.onSelect,
+    required this.onCenterTap,
+    required this.badgeFor,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final palette = context.eva;
+
+    Widget item(int i) {
+      final bool active = i == currentIndex;
+      final Color color = active ? theme.colorScheme.primary : theme.colorScheme.onSurfaceVariant;
+      final Widget? badge = badgeFor(i);
+      return Expanded(
+        child: Semantics(
+          selected: active,
+          button: true,
+          label: items[i].label,
+          child: GestureDetector(
+            behavior: HitTestBehavior.opaque,
+            onTap: () => onSelect(i),
+            child: Column(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                Stack(
+                  clipBehavior: Clip.none,
+                  children: [
+                    AnimatedContainer(
+                      duration: const Duration(milliseconds: 220),
+                      curve: Curves.easeOut,
+                      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 4),
+                      decoration: BoxDecoration(
+                        color: active ? theme.colorScheme.primary.withValues(alpha: context.isDark ? 0.22 : 0.12) : Colors.transparent,
+                        borderRadius: BorderRadius.circular(100),
+                      ),
+                      child: Icon(active ? items[i].activeIcon : items[i].icon, color: color, size: 23),
+                    ),
+                    if (badge != null) Positioned(right: 4, top: -4, child: badge),
+                  ],
+                ),
+                const SizedBox(height: 3),
+                Text(
+                  items[i].label,
+                  maxLines: 1,
+                  style: theme.textTheme.labelSmall?.copyWith(
+                    color: color,
+                    fontWeight: active ? FontWeight.w700 : FontWeight.w500,
+                    letterSpacing: 0.1,
                   ),
                 ),
               ],
-            );
-          },
-        ),
-      ),
-    );
-  }
-
- @override
-  Widget build(BuildContext context) {
-    final uid = FirebaseAuth.instance.currentUser?.uid;
-    final theme = Theme.of(context);
-
-    return Scaffold(
-      backgroundColor: theme.scaffoldBackgroundColor,
-      body: IndexedStack(index: _currentIndex, children: _screens),
-      floatingActionButton: (_currentIndex != 2)
-          ? SizedBox(
-              height: 64, width: 64,
-              child: FloatingActionButton(
-                heroTag: 'main_add_photo', onPressed: () => FastFoodScannerSheet.show(context), 
-                backgroundColor: theme.colorScheme.primary, elevation: 6, shape: const CircleBorder(),
-                child: Icon(Icons.add_a_photo, size: 28, color: theme.colorScheme.onPrimary), 
-              ),
-            )
-          : null,
-      floatingActionButtonLocation: FloatingActionButtonLocation.centerDocked,
-      bottomNavigationBar: BottomAppBar(
-        color: theme.bottomNavigationBarTheme.backgroundColor, 
-        shape: const CircularNotchedRectangle(), notchMargin: 8, elevation: 16,
-        child: SizedBox(
-          height: 60,
-          child: Row(
-            mainAxisAlignment: MainAxisAlignment.spaceAround,
-            children: [
-              _buildNavItem(0, 'assets/icons/home.png', 'Главная', iconSize: 27),
-              _buildNavItem(1, 'assets/icons/harmony.png', 'Гармония', iconSize: 34),
-              const SizedBox(width: 48), 
-              _buildNavItem(3, 'assets/icons/chats.png', 'Комьюнити', uid: uid, iconSize: 34),
-              _buildNavItem(4, 'assets/icons/profile.png', 'Профиль', iconSize: 26),
-            ],
+            ),
           ),
         ),
-      ),
-    );
-  }
-
-  Widget _buildNavItem(int index, String iconPath, String label, {String? uid, double iconSize = 26}) {
-    final isSelected = _currentIndex == index;
-    final theme = Theme.of(context);
-    final color = isSelected ? theme.bottomNavigationBarTheme.selectedItemColor! : theme.bottomNavigationBarTheme.unselectedItemColor!;
-
-    final Widget baseIcon = SizedBox(width: 36, height: 36, child: Center(child: Image.asset(iconPath, width: iconSize, height: iconSize, color: color)));
-    Widget finalIcon = baseIcon;
-
-    if (index == 3 && uid != null) {
-      finalIcon = StreamBuilder<QuerySnapshot>(
-        stream: FirebaseFirestore.instance.collection('chats').where('users', arrayContains: uid).snapshots(),
-        builder: (context, snapshot) {
-          int totalUnread = 0;
-          if (snapshot.hasData) {
-            for (var doc in snapshot.data!.docs) {
-              totalUnread += ((doc.data() as Map<String, dynamic>)['unread_$uid'] as num?)?.toInt() ?? 0;
-            }
-          }
-          return Badge(isLabelVisible: totalUnread > 0, label: Text(totalUnread.toString()), backgroundColor: theme.colorScheme.primary, child: baseIcon);
-        },
       );
     }
 
-    return GestureDetector(
-      onTap: () => setState(() => _currentIndex = index),
-      behavior: HitTestBehavior.opaque,
-      child: SizedBox(
-        width: 65,
-        child: Column(
-          mainAxisSize: MainAxisSize.min, mainAxisAlignment: MainAxisAlignment.end,
-          children: [
-            finalIcon, const SizedBox(height: 2),
-            Text(label, textAlign: TextAlign.center, style: TextStyle(color: color, fontSize: 10, fontWeight: isSelected ? FontWeight.w700 : FontWeight.w500, height: 1.0)),
-          ],
+    return SafeArea(
+      top: false,
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(14, 0, 14, 10),
+        child: SizedBox(
+          height: 82,
+          child: Stack(
+            clipBehavior: Clip.none,
+            alignment: Alignment.bottomCenter,
+            children: [
+              Container(
+                height: 70,
+                decoration: BoxDecoration(
+                  color: theme.colorScheme.surface.withValues(alpha: context.isDark ? 0.97 : 0.98),
+                  borderRadius: BorderRadius.circular(28),
+                  border: Border.all(color: palette.hairline),
+                  boxShadow: palette.floatingShadow,
+                ),
+                child: Row(
+                  children: [
+                    item(0),
+                    item(1),
+                    const SizedBox(width: 72),
+                    item(2),
+                    item(3),
+                  ],
+                ),
+              ),
+              Positioned(
+                top: 0,
+                child: Semantics(
+                  button: true,
+                  label: 'Добавить еду по фото',
+                  child: EvaPressable(
+                    onTap: onCenterTap,
+                    pressedScale: 0.92,
+                    child: Container(
+                      width: 62,
+                      height: 62,
+                      decoration: BoxDecoration(
+                        gradient: palette.hero,
+                        shape: BoxShape.circle,
+                        border: Border.all(color: theme.colorScheme.surface, width: 4),
+                        boxShadow: [
+                          BoxShadow(color: theme.colorScheme.primary.withValues(alpha: 0.35), blurRadius: 18, offset: const Offset(0, 8)),
+                        ],
+                      ),
+                      child: const Icon(Icons.photo_camera_rounded, color: Colors.white, size: 26),
+                    ),
+                  ),
+                ),
+              ),
+            ],
+          ),
         ),
       ),
     );

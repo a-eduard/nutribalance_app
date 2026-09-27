@@ -1,7 +1,7 @@
 name: flutter_application_1
 description: "Fitness MVP App with Clean Architecture"
 publish_to: 'none'
-version: 1.0.0+13
+version: 1.1.0+14
 
 environment:
   sdk: '>=3.10.0 <4.0.0'
@@ -72,4 +72,33 @@ flutter:
   assets:
     - assets/translations/
     - assets/images/
-    - assets/icons/
+    - assets/fonts/
+
+  # Премиальная типографика (встроена в приложение — работает офлайн и без VPN).
+  # Лицензия SIL Open Font License: assets/fonts/OFL-*.txt
+  fonts:
+    - family: Inter
+      fonts:
+        - asset: assets/fonts/Inter-Regular.ttf
+        - asset: assets/fonts/Inter-Medium.ttf
+          weight: 500
+        - asset: assets/fonts/Inter-SemiBold.ttf
+          weight: 600
+        - asset: assets/fonts/Inter-Bold.ttf
+          weight: 700
+        - asset: assets/fonts/Inter-ExtraBold.ttf
+          weight: 800
+    - family: NotoSerifDisplay
+      fonts:
+        - asset: assets/fonts/NotoSerifDisplay-Light.ttf
+          weight: 300
+        - asset: assets/fonts/NotoSerifDisplay-Regular.ttf
+        - asset: assets/fonts/NotoSerifDisplay-Italic.ttf
+          style: italic
+        - asset: assets/fonts/NotoSerifDisplay-Medium.ttf
+          weight: 500
+        - asset: assets/fonts/NotoSerifDisplay-MediumItalic.ttf
+          weight: 500
+          style: italic
+        - asset: assets/fonts/NotoSerifDisplay-SemiBold.ttf
+          weight: 600

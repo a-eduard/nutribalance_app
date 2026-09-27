@@ -1,20 +1,26 @@
-import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
-import '../../services/database_service.dart';
+import 'package:flutter/material.dart';
+
 import '../../screens/ai_chat_screen.dart';
+import '../../services/database_service.dart';
+import '../../theme/eva_colors.dart';
+import '../eva_ui.dart';
 
 class NutritionSummaryCard extends StatefulWidget {
   final String uid;
   final String docId;
   final Set<String> optimisticDeletedIds;
 
+  /// Данные документа дня (если родитель уже подписан на него — не дублируем подписку).
+  final Map<String, dynamic>? mealsData;
+
   const NutritionSummaryCard({
     super.key,
     required this.uid,
     required this.docId,
     required this.optimisticDeletedIds,
+    this.mealsData,
   });
 
   @override
@@ -22,367 +28,364 @@ class NutritionSummaryCard extends StatefulWidget {
 }
 
 class _NutritionSummaryCardState extends State<NutritionSummaryCard> {
+  late final Stream<DocumentSnapshot<Map<String, dynamic>>> _goalStream;
+  Stream<DocumentSnapshot<Map<String, dynamic>>>? _mealsStream;
+  String? _mealsStreamDocId;
 
-  Future<void> _askEvaForMealPlan(BuildContext context, int consumed, int norm, int curP, int targetP, int curF, int targetF, int curC, int targetC, int curFiber, int targetFiber) async {
-    int remaining = norm - consumed;
-    int remP = targetP - curP;
-    int remF = targetF - curF;
-    int remC = targetC - curC;
-    int remFiber = targetFiber - curFiber;
-    final theme = Theme.of(context);
+  static const int _targetFiber = 25;
 
+  @override
+  void initState() {
+    super.initState();
+    _goalStream = FirebaseFirestore.instance.collection('users').doc(widget.uid).collection('nutrition_goal').doc('current').snapshots();
+  }
+
+  Stream<DocumentSnapshot<Map<String, dynamic>>> _meals() {
+    if (_mealsStream == null || _mealsStreamDocId != widget.docId) {
+      _mealsStreamDocId = widget.docId;
+      _mealsStream = FirebaseFirestore.instance.collection('users').doc(widget.uid).collection('meals').doc(widget.docId).snapshots();
+    }
+    return _mealsStream!;
+  }
+
+  // ---------------------------------------------------------------------------
+  // «Что съесть?»
+  // ---------------------------------------------------------------------------
+
+  void _askEvaForMealPlan(int consumed, int norm, int curP, int targetP, int curF, int targetF, int curC, int targetC, int curFiber) {
+    final int remaining = norm - consumed;
+    if (norm <= 0) {
+      _openEva('Рассчитай мою норму КБЖУ', 'Помоги рассчитать мою дневную норму калорий и БЖУ.');
+      return;
+    }
     if (remaining <= 0) {
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: const Text("Твоя норма уже выполнена! ✨"), backgroundColor: theme.colorScheme.primary));
+      EvaSnack.show(context, 'Норма на сегодня уже выполнена ✨', type: EvaSnackType.success);
+      return;
+    }
+    final int remP = targetP - curP, remF = targetF - curF, remC = targetC - curC, remFiber = _targetFiber - curFiber;
+
+    if (remaining < 500) {
+      _sendDietitianRequest(remaining, remP, remF, remC, remFiber, "1 лёгкий приём пищи или перекус", "Что мне съесть на $remaining ккал?");
       return;
     }
 
-    if (remaining < 500) {
-      _sendDietitianRequest(context, remaining, remP, remF, remC, remFiber, "1 легкий прием пищи или перекус", "Что мне съесть на $remaining ккал?");
-    } else {
-      showModalBottomSheet(
-        context: context,
-        backgroundColor: theme.colorScheme.surface,
-        shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(24))),
-        builder: (ctx) => SafeArea(
-          child: Padding(
-            padding: const EdgeInsets.all(24.0),
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Text("Как распределим $remaining ккал? 🥗", style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold, color: theme.colorScheme.onSurface)),
-                const SizedBox(height: 20),
-                _buildMealOption(ctx, "1 плотный прием", "1 основной прием пищи", remaining, remP, remF, remC, remFiber),
-                const SizedBox(height: 12),
-                _buildMealOption(ctx, "2-3 приема", "2 основных блюда и 1 перекус", remaining, remP, remF, remC, remFiber),
-                const SizedBox(height: 12),
-                _buildMealOption(ctx, "4-5 приемов", "3 основных блюда и 2 перекуса", remaining, remP, remF, remC, remFiber),
-              ],
-            ),
-          ),
+    EvaSheet.show<void>(
+      context,
+      builder: (ctx) => Padding(
+        padding: const EdgeInsets.fromLTRB(20, 0, 20, 20),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            EvaSheetHeader(title: 'Как распределим $remaining ккал?', subtitle: 'Ева составит меню и список покупок'),
+            EvaOptionTile(title: '1 плотный приём', icon: Icons.restaurant_rounded, selected: false, onTap: () {
+              Navigator.pop(ctx);
+              _sendDietitianRequest(remaining, remP, remF, remC, remFiber, "1 основной приём пищи", "Составь меню на $remaining ккал (1 приём)");
+            }),
+            EvaOptionTile(title: '2–3 приёма', icon: Icons.dinner_dining_rounded, selected: false, onTap: () {
+              Navigator.pop(ctx);
+              _sendDietitianRequest(remaining, remP, remF, remC, remFiber, "2 основных блюда и 1 перекус", "Составь меню на $remaining ккал (2–3 приёма)");
+            }),
+            EvaOptionTile(title: '4–5 приёмов', icon: Icons.bento_rounded, selected: false, onTap: () {
+              Navigator.pop(ctx);
+              _sendDietitianRequest(remaining, remP, remF, remC, remFiber, "3 основных блюда и 2 перекуса", "Составь меню на $remaining ккал (4–5 приёмов)");
+            }),
+          ],
         ),
-      );
-    }
-  }
-
-  Widget _buildMealOption(BuildContext context, String title, String promptRule, int remaining, int remP, int remF, int remC, int remFiber) {
-    final theme = Theme.of(context);
-    return SizedBox(
-      width: double.infinity, height: 54,
-      child: ElevatedButton(
-        style: ElevatedButton.styleFrom(backgroundColor: theme.scaffoldBackgroundColor, foregroundColor: theme.colorScheme.onSurface, elevation: 0, shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16), side: BorderSide(color: theme.colorScheme.onSurfaceVariant.withValues(alpha: 0.2)))),
-        onPressed: () {
-          Navigator.pop(context);
-          _sendDietitianRequest(context, remaining, remP, remF, remC, remFiber, promptRule, "Составь меню на $remaining ккал ($title)");
-        },
-        child: Text(title, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
       ),
     );
   }
 
-  Future<void> _sendDietitianRequest(BuildContext context, int remaining, int remP, int remF, int remC, int remFiber, String planRule, String displayMessage) async {
+  Future<void> _sendDietitianRequest(int remaining, int remP, int remF, int remC, int remFiber, String planRule, String displayMessage) async {
     final user = FirebaseAuth.instance.currentUser;
     if (user == null) return;
-    final userDoc = await FirebaseFirestore.instance.collection('users').doc(user.uid).get();
-    final userName = userDoc.data()?['name'] ?? 'пользователь';
+    String userName = 'пользователь';
+    try {
+      final userDoc = await FirebaseFirestore.instance.collection('users').doc(user.uid).get(const GetOptions(source: Source.cache));
+      userName = (userDoc.data()?['name'] ?? userName).toString();
+    } catch (_) {}
 
-    String technicalPrompt = """Привет! Меня зовут $userName. Обращайся ко мне по этому имени. 
-Мне осталось съесть $remaining ккал. Моя цель сейчас: $planRule.
+    final String technicalPrompt = """Меня зовут $userName. Мне осталось съесть $remaining ккал. Моя цель сейчас: $planRule.
 
-Анализ моего рациона на сегодня (ОСТАТКИ):
-- Белки: осталось добрать $remP г
-- Жиры: осталось добрать $remF г
-- Углеводы: осталось добрать $remC г
-- Клетчатка: осталось добрать $remFiber г
+Остатки на сегодня:
+- Белки: $remP г
+- Жиры: $remF г
+- Углеводы: $remC г
+- Клетчатка: $remFiber г
 
-ИНСТРУКЦИЯ ДЛЯ ТЕБЯ:
-1. Изучи остатки. Если значение отрицательное (я перебрала норму), минимизируй этот нутриент.
-2. Если я прошу несколько приемов пищи (например, 4-5), ОБЯЗАТЕЛЬНО распиши меню на все эти приемы, разбив $remaining ккал между ними.
+Инструкция:
+1. Если значение отрицательное (я перебрала норму), минимизируй этот нутриент.
+2. Если прошу несколько приёмов пищи, распиши меню на все приёмы, разделив $remaining ккал между ними.
 3. Закрой дефицит клетчатки (овощи, зелень).
-4. Дай краткий, но понятный рецепт для КАЖДОГО блюда из предложенного меню.
-5. ПРОДУКТЫ: Используй ТОЛЬКО простые, доступные ингредиенты из обычных супермаркетов. Заменяй экзотику на гречку, картофель, морковь, капусту, обычную зелень, курицу, яйца и т.д.
-6. В самом конце выведи общий список ВСЕХ ингредиентов для всех блюд в едином формате JSON внутри тегов [SHOPPING_LIST].""";
+4. Дай краткий понятный рецепт для каждого блюда.
+5. Используй только простые продукты из обычного супермаркета.
+6. В конце выведи общий список всех ингредиентов в формате JSON внутри тегов [SHOPPING_LIST].""";
 
-    if (mounted) {
-      Navigator.push(context, MaterialPageRoute(builder: (_) => AIChatScreen(botType: 'dietitian', initialDisplayMessage: displayMessage, initialTechnicalPrompt: technicalPrompt)));
-    }
+    _openEva(displayMessage, technicalPrompt);
   }
 
+  void _openEva(String display, String prompt) {
+    if (!mounted) return;
+    Navigator.push(
+      context,
+      MaterialPageRoute(builder: (_) => AIChatScreen(botType: 'dietitian', initialDisplayMessage: display, initialTechnicalPrompt: prompt)),
+    );
+  }
+
+  // ---------------------------------------------------------------------------
+  // Редактирование нормы
+  // ---------------------------------------------------------------------------
+
   void _showEditGoalDialog(int currentCals, int currentP, int currentF, int currentC) {
-    final TextEditingController calsCtrl = TextEditingController(text: currentCals.toString());
+    final TextEditingController calsCtrl = TextEditingController(text: currentCals > 0 ? currentCals.toString() : '');
     final TextEditingController protCtrl = TextEditingController(text: currentP.toString());
     final TextEditingController fatCtrl = TextEditingController(text: currentF.toString());
     final TextEditingController carbsCtrl = TextEditingController(text: currentC.toString());
     bool isAutoUpdating = false;
-    bool isSaving = false;
-    final theme = Theme.of(context);
 
     double pRatio = currentCals > 0 ? (currentP * 4) / currentCals : 0.3;
     double fRatio = currentCals > 0 ? (currentF * 9) / currentCals : 0.3;
     double cRatio = currentCals > 0 ? (currentC * 4) / currentCals : 0.4;
 
-    showDialog(
-      context: context, barrierDismissible: false,
-      builder: (ctx) => StatefulBuilder(
-        builder: (context, setStateDialog) {
-          void updateFromCals(String val) {
-            if (isAutoUpdating) return;
-            int? newCals = int.tryParse(val);
-            if (newCals != null && newCals > 0) {
-              isAutoUpdating = true;
-              protCtrl.text = ((newCals * pRatio) / 4).round().toString();
-              fatCtrl.text = ((newCals * fRatio) / 9).round().toString();
-              carbsCtrl.text = ((newCals * cRatio) / 4).round().toString();
-              isAutoUpdating = false;
-            }
-          }
+    void updateFromCals(String val) {
+      if (isAutoUpdating) return;
+      final int? newCals = int.tryParse(val);
+      if (newCals != null && newCals > 0) {
+        isAutoUpdating = true;
+        protCtrl.text = ((newCals * pRatio) / 4).round().toString();
+        fatCtrl.text = ((newCals * fRatio) / 9).round().toString();
+        carbsCtrl.text = ((newCals * cRatio) / 4).round().toString();
+        isAutoUpdating = false;
+      }
+    }
 
-          void updateFromMacros(String _) {
-            if (isAutoUpdating) return;
-            int p = int.tryParse(protCtrl.text) ?? 0;
-            int f = int.tryParse(fatCtrl.text) ?? 0;
-            int c = int.tryParse(carbsCtrl.text) ?? 0;
-            isAutoUpdating = true;
-            calsCtrl.text = ((p * 4) + (f * 9) + (c * 4)).toString();
-            int newCals = int.tryParse(calsCtrl.text) ?? 1;
-            pRatio = (p * 4) / newCals;
-            fRatio = (f * 9) / newCals;
-            cRatio = (c * 4) / newCals;
-            isAutoUpdating = false;
-          }
+    void updateFromMacros(String _) {
+      if (isAutoUpdating) return;
+      final int p = int.tryParse(protCtrl.text) ?? 0;
+      final int f = int.tryParse(fatCtrl.text) ?? 0;
+      final int c = int.tryParse(carbsCtrl.text) ?? 0;
+      final int total = (p * 4) + (f * 9) + (c * 4);
+      isAutoUpdating = true;
+      calsCtrl.text = total.toString();
+      if (total > 0) {
+        pRatio = (p * 4) / total;
+        fRatio = (f * 9) / total;
+        cRatio = (c * 4) / total;
+      }
+      isAutoUpdating = false;
+    }
 
-          Widget buildField(String label, TextEditingController ctrl, Function(String) onChanged, Color color) {
-            return Expanded(
-              child: Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 4.0),
-                child: TextField(
-                  controller: ctrl, keyboardType: TextInputType.number, onChanged: onChanged,
-                  style: TextStyle(color: theme.colorScheme.onSurface, fontSize: 18, fontWeight: FontWeight.w900),
-                  decoration: InputDecoration(labelText: label, labelStyle: TextStyle(color: color, fontWeight: FontWeight.bold, fontSize: 12), enabledBorder: const UnderlineInputBorder(borderSide: BorderSide(color: Color(0xFFE5E5EA))), focusedBorder: UnderlineInputBorder(borderSide: BorderSide(color: color, width: 2))),
-                  cursorColor: color,
-                ),
+    Widget field(String label, TextEditingController ctrl, ValueChanged<String> onChanged, Color color) {
+      return Expanded(
+        child: TextField(
+          controller: ctrl,
+          keyboardType: TextInputType.number,
+          onChanged: onChanged,
+          textAlign: TextAlign.center,
+          style: Theme.of(context).textTheme.titleMedium,
+          decoration: InputDecoration(
+            labelText: label,
+            labelStyle: TextStyle(color: color, fontWeight: FontWeight.w700, fontSize: 12),
+            contentPadding: const EdgeInsets.symmetric(horizontal: 8, vertical: 14),
+          ),
+        ),
+      );
+    }
+
+    showDialog<void>(
+      context: context,
+      builder: (ctx) {
+        final theme = Theme.of(ctx);
+        return AlertDialog(
+          title: const Text('Моя норма'),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Text('Измени калории — БЖУ пересчитаются сами. Или настрой макросы вручную.', style: theme.textTheme.bodySmall),
+              const SizedBox(height: 16),
+              TextField(
+                controller: calsCtrl,
+                keyboardType: TextInputType.number,
+                onChanged: updateFromCals,
+                style: theme.textTheme.headlineMedium?.copyWith(color: theme.colorScheme.primary),
+                decoration: const InputDecoration(labelText: 'Калории', suffixText: 'ккал'),
               ),
-            );
-          }
-
-          return AlertDialog(
-            backgroundColor: theme.colorScheme.surface, shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(24)),
-            title: Text('Ваша норма', style: TextStyle(color: theme.colorScheme.onSurface, fontWeight: FontWeight.w900)),
-            content: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Text("Измените калории, и БЖУ пересчитаются сами. Или настройте макросы вручную.", style: TextStyle(color: theme.colorScheme.onSurfaceVariant, fontSize: 12, height: 1.4)),
-                const SizedBox(height: 16),
-                TextField(
-                  controller: calsCtrl, keyboardType: TextInputType.number, onChanged: updateFromCals,
-                  style: TextStyle(color: theme.colorScheme.primary, fontSize: 32, fontWeight: FontWeight.w900),
-                  decoration: InputDecoration(labelText: 'Калории', labelStyle: TextStyle(color: theme.colorScheme.onSurfaceVariant), enabledBorder: const UnderlineInputBorder(borderSide: BorderSide(color: Color(0xFFE5E5EA))), focusedBorder: UnderlineInputBorder(borderSide: BorderSide(color: theme.colorScheme.primary, width: 2)), suffixText: 'ккал', suffixStyle: TextStyle(color: theme.colorScheme.onSurface, fontSize: 16)),
-                ),
-                const SizedBox(height: 16),
-                Row(
-                  children: [
-                    buildField('Белки (г)', protCtrl, updateFromMacros, theme.colorScheme.secondary),
-                    buildField('Жиры (г)', fatCtrl, updateFromMacros, const Color(0xFFE5C158)),
-                    buildField('Углеводы (г)', carbsCtrl, updateFromMacros, const Color(0xFF89CFF0)),
-                  ],
-                ),
-              ],
-            ),
-            actions: [
-              TextButton(onPressed: isSaving ? null : () => Navigator.pop(ctx), child: Text('Отмена', style: TextStyle(color: theme.colorScheme.onSurfaceVariant, fontWeight: FontWeight.bold))),
-              ElevatedButton(
-                style: ElevatedButton.styleFrom(backgroundColor: theme.colorScheme.primary, foregroundColor: Colors.white, shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12))),
-                onPressed: isSaving ? null : () async {
-                  final c = int.tryParse(calsCtrl.text) ?? 0;
-                  final p = int.tryParse(protCtrl.text) ?? 0;
-                  final f = int.tryParse(fatCtrl.text) ?? 0;
-                  final cb = int.tryParse(carbsCtrl.text) ?? 0;
-                  if (c > 0) {
-                    setStateDialog(() => isSaving = true);
-                    try {
-                      await DatabaseService().saveNutritionGoal({'calories': c, 'protein': p, 'fat': f, 'carbs': cb});
-                      if (context.mounted) Navigator.pop(ctx);
-                    } catch (e) {
-                      setStateDialog(() => isSaving = false);
-                      if (context.mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Ошибка: $e'), backgroundColor: Colors.redAccent));
-                    }
-                  }
-                },
-                child: isSaving ? const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2)) : const Text('Сохранить', style: TextStyle(fontWeight: FontWeight.bold)),
+              const SizedBox(height: 12),
+              Row(
+                children: [
+                  field('Белки', protCtrl, updateFromMacros, EvaColors.protein),
+                  const SizedBox(width: 8),
+                  field('Жиры', fatCtrl, updateFromMacros, EvaColors.fat),
+                  const SizedBox(width: 8),
+                  field('Углеводы', carbsCtrl, updateFromMacros, EvaColors.carbs),
+                ],
               ),
             ],
-          );
-        },
-      ),
+          ),
+          actions: [
+            TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Отмена')),
+            FilledButton(
+              onPressed: () {
+                final c = int.tryParse(calsCtrl.text) ?? 0;
+                if (c <= 0) return;
+                DatabaseService().saveNutritionGoal({
+                  'calories': c,
+                  'protein': int.tryParse(protCtrl.text) ?? 0,
+                  'fat': int.tryParse(fatCtrl.text) ?? 0,
+                  'carbs': int.tryParse(carbsCtrl.text) ?? 0,
+                });
+                Navigator.pop(ctx);
+                EvaSnack.show(context, 'Норма обновлена ✨', type: EvaSnackType.success);
+              },
+              child: const Text('Сохранить'),
+            ),
+          ],
+        );
+      },
     );
   }
 
-  Widget _buildMacroBar(String label, int current, int target, Color activeColor, ThemeData theme) {
-    double progress = target > 0 ? (current / target).clamp(0.0, 1.0) : 0;
-    return Expanded(
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          FittedBox(fit: BoxFit.scaleDown, alignment: Alignment.centerLeft, child: Text(label, style: TextStyle(color: theme.colorScheme.onSurface, fontSize: 12, fontWeight: FontWeight.w700))),
-          const SizedBox(height: 6),
-          TweenAnimationBuilder<Color?>(
-            tween: ColorTween(end: activeColor),
-            duration: const Duration(milliseconds: 500),
-            builder: (context, color, child) {
-              return ClipRRect(
-                borderRadius: BorderRadius.circular(10),
-                child: LinearProgressIndicator(value: progress, backgroundColor: theme.colorScheme.onSurface.withValues(alpha: 0.1), valueColor: AlwaysStoppedAnimation<Color>(color ?? theme.colorScheme.primary), minHeight: 8),
-              );
-            },
-          ),
-          const SizedBox(height: 6),
-          RichText(
-            text: TextSpan(
-              children: [
-                TextSpan(text: '$current', style: TextStyle(color: theme.colorScheme.onSurface, fontSize: 11, fontWeight: FontWeight.w800)),
-                TextSpan(text: '/$target г', style: TextStyle(color: theme.colorScheme.onSurfaceVariant, fontSize: 10, fontWeight: FontWeight.w500)),
-              ],
-            ),
-          ),
-        ],
-      ),
-    );
-  }
+  // ---------------------------------------------------------------------------
+  // UI
+  // ---------------------------------------------------------------------------
 
   @override
   Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    
-    return StreamBuilder<DocumentSnapshot>(
-      stream: FirebaseFirestore.instance.collection('users').doc(widget.uid).collection('nutrition_goal').doc('current').snapshots(includeMetadataChanges: true),
+    return StreamBuilder<DocumentSnapshot<Map<String, dynamic>>>(
+      stream: _goalStream,
       builder: (context, goalSnapshot) {
-        if (goalSnapshot.hasError) return const SizedBox.shrink();
-        final goalData = goalSnapshot.data?.data() as Map<String, dynamic>?;
-        int targetCals = goalData?['calories'] ?? 0;
-        final int targetP = goalData?['protein'] ?? 0;
-        final int targetF = goalData?['fat'] ?? 0;
-        final int targetC = goalData?['carbs'] ?? 0;
-        final int targetFiber = 25;
+        final goalData = goalSnapshot.data?.data();
+        if (widget.mealsData != null) return _buildCard(goalData, widget.mealsData);
+        return StreamBuilder<DocumentSnapshot<Map<String, dynamic>>>(
+          stream: _meals(),
+          builder: (context, mealSnapshot) => _buildCard(goalData, mealSnapshot.data?.data()),
+        );
+      },
+    );
+  }
 
-        return StreamBuilder<DocumentSnapshot>(
-          key: ValueKey('dash_${widget.docId}'),
-          stream: FirebaseFirestore.instance.collection('users').doc(widget.uid).collection('meals').doc(widget.docId).snapshots(includeMetadataChanges: true),
-          builder: (context, mealSnapshot) {
-            if (mealSnapshot.hasError) return const Center(child: Text("Ошибка загрузки данных"));
+  Widget _buildCard(Map<String, dynamic>? goalData, Map<String, dynamic>? mealsData) {
+    final theme = Theme.of(context);
+    final palette = context.eva;
 
-            int curC = 0, curP = 0, curF = 0, curCarb = 0, bonusCals = 0, curFiber = 0;
-            double totalHealthScore = 0;
-            int mealsCount = 0;
+    final int baseTarget = evaInt(goalData?['calories']);
+    final int targetP = evaInt(goalData?['protein']);
+    final int targetF = evaInt(goalData?['fat']);
+    final int targetC = evaInt(goalData?['carbs']);
 
-            if (mealSnapshot.hasData && mealSnapshot.data!.exists) {
-              final data = mealSnapshot.data!.data() as Map<String, dynamic>? ?? {};
-              bonusCals = (data['bonus_calories'] as num?)?.toInt() ?? 0;
-              curC = bonusCals;
-              final List<dynamic> rawItems = data['items'] ?? [];
-              final List<dynamic> activeItems = rawItems.where((item) => !widget.optimisticDeletedIds.contains(item['id'].toString())).toList();
+    int curCal = 0, curP = 0, curF = 0, curCarb = 0, curFiber = 0, bonus = 0;
+    double healthSum = 0;
+    int healthCount = 0;
+    if (mealsData != null) {
+      bonus = evaInt(mealsData['bonus_calories']);
+      final List<dynamic> raw = mealsData['items'] is List ? mealsData['items'] : const [];
+      for (final item in raw) {
+        if (item is! Map) continue;
+        if (widget.optimisticDeletedIds.contains(item['id'].toString())) continue;
+        curCal += evaInt(item['calories']);
+        curP += evaInt(item['protein']);
+        curF += evaInt(item['fat']);
+        curCarb += evaInt(item['carbs']);
+        curFiber += evaInt(item['fiber']);
+        if (item['health_score'] != null) {
+          healthSum += evaDouble(item['health_score']);
+          healthCount++;
+        }
+      }
+    }
+    final int target = baseTarget + bonus;
+    final int remaining = target - curCal;
+    final bool exceeded = target > 0 && curCal > target;
+    final int health = healthCount > 0 ? (healthSum / healthCount).round() : 0;
 
-              for (var item in activeItems) {
-                if (item is Map<String, dynamic>) {
-                  curC += (item['calories'] as num?)?.toInt() ?? 0;
-                  curP += (item['protein'] as num?)?.toInt() ?? 0;
-                  curF += (item['fat'] as num?)?.toInt() ?? 0;
-                  curCarb += (item['carbs'] as num?)?.toInt() ?? 0;
-                  curFiber += (item['fiber'] as num?)?.toInt() ?? 0;
-                  if (item.containsKey('health_score') && item['health_score'] != null) {
-                    totalHealthScore += (item['health_score'] as num).toDouble();
-                    mealsCount++;
-                  }
-                }
-              }
-            }
-
-            final int avgHealthScore = mealsCount > 0 ? (totalHealthScore / mealsCount).round() : 0;
-            targetCals += bonusCals;
-            bool isExceeded = targetCals > 0 && curC > targetCals;
-            final Color activeColor = isExceeded ? const Color(0xFFB6A6CA) : theme.colorScheme.primary;
-
-            return GestureDetector(
-              onTap: () {
-                HapticFeedback.selectionClick();
-                final int baseTargetCals = goalData?['calories'] ?? 0;
-                _showEditGoalDialog(baseTargetCals, targetP, targetF, targetC);
-              },
-              child: Container(
-                padding: const EdgeInsets.all(20),
-                decoration: BoxDecoration(color: theme.colorScheme.surface, borderRadius: BorderRadius.circular(24), boxShadow: [BoxShadow(color: Colors.black.withValues(alpha: 0.04), blurRadius: 24, offset: const Offset(0, 8))]),
+    return EvaCard(
+      onTap: () => _showEditGoalDialog(baseTarget, targetP, targetF, targetC),
+      padding: const EdgeInsets.all(20),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              const Expanded(child: EvaOverline('Питание сегодня')),
+              EvaPressable(
+                onTap: () => _askEvaForMealPlan(curCal, target, curP, targetP, curF, targetF, curCarb, targetC, curFiber),
+                child: Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 7),
+                  decoration: BoxDecoration(gradient: palette.hero, borderRadius: BorderRadius.circular(100)),
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Text('Что съесть?', style: theme.textTheme.labelMedium?.copyWith(color: Colors.white)),
+                      const SizedBox(width: 5),
+                      const Icon(Icons.auto_awesome_rounded, color: Colors.white, size: 14),
+                    ],
+                  ),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 16),
+          Row(
+            children: [
+              EvaProgressRing(
+                progress: target > 0 ? curCal / target : 0,
+                size: 118,
+                stroke: 10,
+                colors: exceeded ? [palette.lavender, palette.lavender] : null,
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Text(EvaFormat.number(curCal), style: theme.textTheme.headlineMedium?.copyWith(height: 1)),
+                    const SizedBox(height: 2),
+                    Text(target > 0 ? 'из ${EvaFormat.number(target)}' : 'ккал', style: theme.textTheme.labelSmall?.copyWith(color: theme.colorScheme.onSurfaceVariant)),
+                  ],
+                ),
+              ),
+              const SizedBox(width: 18),
+              Expanded(
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Padding(
-                      padding: const EdgeInsets.only(bottom: 8),
-                      child: Row(
-                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                        children: [
-                          Expanded(child: FittedBox(fit: BoxFit.scaleDown, alignment: Alignment.centerLeft, child: Text('КАЛОРИИ ЗА СЕГОДНЯ', style: TextStyle(color: activeColor, fontWeight: FontWeight.w800, fontSize: 11, letterSpacing: 1.2)))),
-                          const SizedBox(width: 8),
-                          Row(
-                            mainAxisSize: MainAxisSize.min,
-                            children: [
-                              if (bonusCals > 0) Container(margin: const EdgeInsets.only(right: 8), padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 4), decoration: BoxDecoration(color: Colors.teal.withValues(alpha: 0.1), borderRadius: BorderRadius.circular(6)), child: Text("+$bonusCals бонус", style: const TextStyle(color: Colors.teal, fontSize: 10, fontWeight: FontWeight.bold))),
-                              GestureDetector(
-                                onTap: () {
-                                  HapticFeedback.selectionClick();
-                                  _askEvaForMealPlan(context, curC, targetCals, curP, targetP, curF, targetF, curCarb, targetC, curFiber, targetFiber);
-                                },
-                                child: Container(
-                                  padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
-                                  decoration: BoxDecoration(color: theme.colorScheme.primary, borderRadius: BorderRadius.circular(12), boxShadow: [BoxShadow(color: theme.colorScheme.primary.withValues(alpha: 0.3), blurRadius: 8, offset: const Offset(0, 2))]),
-                                  child: const Row(children: [Text("Что съесть?", style: TextStyle(color: Colors.white, fontSize: 13, fontWeight: FontWeight.bold)), SizedBox(width: 6), Icon(Icons.auto_awesome, color: Colors.white, size: 16)]),
-                                ),
-                              ),
-                            ],
-                          ),
-                        ],
-                      ),
+                    Text(
+                      target <= 0
+                          ? 'Норма не задана'
+                          : exceeded
+                              ? 'Сверх нормы на ${EvaFormat.number(-remaining)}'
+                              : 'Осталось ${EvaFormat.number(remaining)}',
+                      style: theme.textTheme.titleMedium,
                     ),
-                    Row(
-                      mainAxisAlignment: MainAxisAlignment.spaceBetween, crossAxisAlignment: CrossAxisAlignment.end,
-                      children: [
-                        Expanded(
-                          child: FittedBox(
-                            fit: BoxFit.scaleDown, alignment: Alignment.centerLeft,
-                            child: Row(
-                              crossAxisAlignment: CrossAxisAlignment.baseline, textBaseline: TextBaseline.alphabetic,
-                              children: [
-                                Text('$curC', style: TextStyle(color: isExceeded ? const Color(0xFFB6A6CA) : theme.colorScheme.onSurface, fontSize: 40, fontWeight: FontWeight.w900, letterSpacing: -1.0)),
-                                GestureDetector(
-                                  onTap: () {
-                                    HapticFeedback.selectionClick();
-                                    final int baseTargetCals = goalData?['calories'] ?? 0;
-                                    _showEditGoalDialog(baseTargetCals, targetP, targetF, targetC);
-                                  },
-                                  child: Row(children: [Text(' / $targetCals ккал', style: TextStyle(color: theme.colorScheme.onSurfaceVariant, fontSize: 18, fontWeight: FontWeight.w600)), const SizedBox(width: 4), Icon(Icons.edit_rounded, color: theme.colorScheme.onSurfaceVariant, size: 16)]),
-                                ),
-                              ],
-                            ),
-                          ),
-                        ),
-                        const SizedBox(width: 12),
-                        if (mealsCount > 0) Container(padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6), decoration: BoxDecoration(color: theme.colorScheme.primary.withValues(alpha: 0.1), borderRadius: BorderRadius.circular(8)), child: Row(mainAxisSize: MainAxisSize.min, children: [Icon(Icons.favorite, color: theme.colorScheme.primary, size: 12), const SizedBox(width: 4), Text("Польза $avgHealthScore/10", style: TextStyle(color: theme.colorScheme.primary, fontSize: 11, fontWeight: FontWeight.bold))])) else const Padding(padding: EdgeInsets.only(bottom: 6.0), child: Icon(Icons.bar_chart, color: Color(0xFFE5E5EA), size: 24)),
-                      ],
+                    const SizedBox(height: 2),
+                    Text(
+                      target <= 0 ? 'Нажми, чтобы задать' : (exceeded ? 'Ничего страшного — завтра новый день ✨' : 'ккал до дневной нормы'),
+                      style: theme.textTheme.bodySmall,
                     ),
-                    const SizedBox(height: 4),
-                    Text(isExceeded ? 'Сверх нормы ✨' : 'Калорий употреблено', style: TextStyle(color: isExceeded ? const Color(0xFFB6A6CA) : theme.colorScheme.onSurfaceVariant, fontSize: 13, fontWeight: FontWeight.w600)),
-                    const SizedBox(height: 16),
-                    Row(
+                    const SizedBox(height: 10),
+                    Wrap(
+                      spacing: 6,
+                      runSpacing: 6,
                       children: [
-                        _buildMacroBar("Белки", curP, targetP, theme.colorScheme.secondary, theme), const SizedBox(width: 8),
-                        _buildMacroBar("Жиры", curF, targetF, const Color(0xFFE5C158), theme), const SizedBox(width: 8),
-                        _buildMacroBar("Углеводы", curCarb, targetC, const Color(0xFF89CFF0), theme), const SizedBox(width: 8),
-                        _buildMacroBar("Клетчатка", curFiber, targetFiber, Colors.green[300] ?? Colors.green, theme),
+                        if (health > 0) EvaPill(text: 'Польза $health/10', icon: Icons.favorite_rounded, color: palette.sage),
+                        if (bonus > 0) EvaPill(text: '+$bonus бонус', icon: Icons.celebration_rounded, color: palette.gold),
                       ],
                     ),
                   ],
                 ),
               ),
-            );
-          },
-        );
-      },
+            ],
+          ),
+          const SizedBox(height: 18),
+          Row(
+            children: [
+              Expanded(child: EvaMacroBar(label: 'Белки', current: curP, target: targetP, color: EvaColors.protein)),
+              const SizedBox(width: 10),
+              Expanded(child: EvaMacroBar(label: 'Жиры', current: curF, target: targetF, color: EvaColors.fat)),
+              const SizedBox(width: 10),
+              Expanded(child: EvaMacroBar(label: 'Углеводы', current: curCarb, target: targetC, color: EvaColors.carbs)),
+              const SizedBox(width: 10),
+              Expanded(child: EvaMacroBar(label: 'Клетчатка', current: curFiber, target: _targetFiber, color: EvaColors.fiber)),
+            ],
+          ),
+        ],
+      ),
     );
   }
 }

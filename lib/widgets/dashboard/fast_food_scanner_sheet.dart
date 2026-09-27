@@ -1,159 +1,92 @@
 import 'dart:convert';
-import 'dart:io';
-import 'dart:ui';
 import 'dart:typed_data';
+
 import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
-import 'package:firebase_auth/firebase_auth.dart';
+
 import '../../paywall_screen.dart';
+import '../../screens/ai_chat_screen.dart';
 import '../../services/ai_service.dart';
 import '../../services/database_service.dart';
-import '../../screens/ai_chat_screen.dart';
+import '../../theme/eva_colors.dart';
+import '../eva_ui.dart';
 
+/// Быстрый сканер еды по фото.
 class FastFoodScannerSheet extends StatefulWidget {
   const FastFoodScannerSheet({super.key});
 
   static void show(BuildContext context) {
-    showModalBottomSheet(
-      context: context,
-      isScrollControlled: true,
-      backgroundColor: Colors.transparent,
-      elevation: 0,
-      barrierColor: Colors.black.withValues(alpha: 0.1),
-      builder: (context) => const FastFoodScannerSheet(),
-    );
+    EvaSheet.show<void>(context, builder: (_) => const FastFoodScannerSheet());
   }
 
   @override
   State<FastFoodScannerSheet> createState() => _FastFoodScannerSheetState();
 }
 
+enum _ScanState { selecting, analyzing, result }
+
 class _FastFoodScannerSheetState extends State<FastFoodScannerSheet> {
   final ImagePicker _picker = ImagePicker();
-  File? _image;
   Uint8List? _imageBytes;
-  
-  bool _isProcessing = false;
-  
+  _ScanState _state = _ScanState.selecting;
   Map<String, dynamic>? _resultData;
   String? _errorMessage;
 
-  void _showTopSnackBar(String message, ScaffoldMessengerState messenger, ThemeData theme, {bool isError = false}) {
-    messenger.clearSnackBars();
-    messenger.showSnackBar(
-      SnackBar(
-        content: Text(
-          message, 
-          style: const TextStyle(fontWeight: FontWeight.bold, color: Colors.white, fontSize: 16),
-          textAlign: TextAlign.center,
-        ),
-        backgroundColor: isError ? Colors.redAccent : theme.colorScheme.primary,
-        behavior: SnackBarBehavior.floating,
-        elevation: 10,
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(24)),
-        margin: const EdgeInsets.only(bottom: 24, left: 24, right: 24),
-        duration: const Duration(seconds: 2),
-      )
-    );
-  }
-
   Future<void> _pickImage(ImageSource source) async {
-    final uid = FirebaseAuth.instance.currentUser?.uid;
-    final theme = Theme.of(context);
-    
-    if (uid != null) {
-      try {
-        final hasQuota = await DatabaseService().checkAndDecrementFreeScan();
-        
-        if (!hasQuota) {
-          if (mounted) {
-            Navigator.pop(context); 
-            Navigator.push(context, MaterialPageRoute(builder: (_) => const PaywallScreen()));
-          }
-          return; 
-        }
-      } catch (e) {
-        debugPrint('Ошибка проверки квот: $e');
-        if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Ошибка подключения. Проверьте интернет.')));
-        }
-        return;
-      }
-    }
-
     try {
-      final XFile? pickedFile = await _picker.pickImage(source: source, imageQuality: 30, maxWidth: 512, maxHeight: 512);
-      if (pickedFile != null) {
-        setState(() { _image = File(pickedFile.path); _errorMessage = null; });
-        _analyzeImage();
-      }
+      // 1024px/60% — хороший баланс точности распознавания и размера (~100–200 КБ).
+      final XFile? pickedFile = await _picker.pickImage(source: source, imageQuality: 60, maxWidth: 1024, maxHeight: 1024);
+      if (pickedFile == null) return;
+      final bytes = await pickedFile.readAsBytes();
+      if (!mounted) return;
+      setState(() {
+        _imageBytes = bytes;
+        _errorMessage = null;
+        _state = _ScanState.analyzing;
+      });
+      await _analyzeImage();
     } catch (e) {
       if (!mounted) return;
-      setState(() => _errorMessage = "Ошибка доступа к камере/галерее");
-      final messenger = ScaffoldMessenger.of(context);
-      _showTopSnackBar("Ошибка доступа к камере", messenger, theme, isError: true);
+      setState(() {
+        _state = _ScanState.selecting;
+        _errorMessage = 'Нет доступа к камере или галерее';
+      });
     }
   }
 
   Future<void> _analyzeImage() async {
-    _imageBytes = await _image!.readAsBytes();
-    final base64Image = base64Encode(_imageBytes!);
-
-    if (!mounted) return;
-    final theme = Theme.of(context);
-    final overlayNavigator = Navigator.of(context, rootNavigator: true);
-
-    showDialog(
-      context: context,
-      barrierDismissible: false,
-      barrierColor: Colors.black.withValues(alpha: 0.2),
-      builder: (dialogContext) {
-        return PopScope(
-          canPop: false,
-          child: BackdropFilter(
-            filter: ImageFilter.blur(sigmaX: 5, sigmaY: 5),
-            child: Center(
-              child: Container(
-                padding: const EdgeInsets.all(24),
-                decoration: BoxDecoration(color: theme.colorScheme.surface, borderRadius: BorderRadius.circular(24)),
-                child: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    CircularProgressIndicator(color: theme.colorScheme.primary),
-                    const SizedBox(height: 16),
-                    Text("Ева анализирует блюдо ✨", style: TextStyle(color: theme.colorScheme.onSurface, fontSize: 16, fontWeight: FontWeight.bold, decoration: TextDecoration.none)),
-                  ],
-                ),
-              ),
-            ),
-          ),
-        );
-      },
-    );
-
+    final bytes = _imageBytes;
+    if (bytes == null) return;
     try {
       final response = await AIService().sendMultimodalMessage(
         userMessage: "Проанализируй это блюдо. Верни СТРОГО JSON формат (action_type: log_food), разбив на ингредиенты.",
-        base64Image: base64Image,
-        userContext: "", 
+        base64Image: base64Encode(bytes),
+        userContext: "",
       );
       final parsedJson = _extractJson(response);
-      
       if (!mounted) return;
-      if (parsedJson != null && parsedJson['items'] != null) {
-        setState(() => _resultData = parsedJson);
+      if (parsedJson != null && parsedJson['items'] is List && (parsedJson['items'] as List).isNotEmpty) {
+        setState(() {
+          _resultData = parsedJson;
+          _state = _ScanState.result;
+        });
       } else {
-        setState(() => _errorMessage = "Ева не смогла распознать еду. Попробуй сделать фото четче.");
-        final messenger = ScaffoldMessenger.of(context);
-        _showTopSnackBar("Не удалось распознать еду", messenger, theme, isError: true);
+        setState(() {
+          _state = _ScanState.selecting;
+          _errorMessage = 'Ева не смогла распознать еду. Попробуй сфотографировать ближе и при хорошем свете.';
+        });
       }
+    } on EvaQuotaException {
+      if (!mounted) return;
+      final nav = Navigator.of(context);
+      nav.pop();
+      nav.push(MaterialPageRoute(builder: (_) => const PaywallScreen()));
     } catch (e) {
       if (!mounted) return;
-      setState(() => _errorMessage = "Ошибка связи с сервером. Проверь интернет.");
-      final messenger = ScaffoldMessenger.of(context);
-      _showTopSnackBar("Ошибка связи с сервером", messenger, theme, isError: true);
-    } finally {
-      overlayNavigator.pop(); 
+      setState(() {
+        _state = _ScanState.selecting;
+        _errorMessage = e is EvaUnavailableException ? e.message : 'Ошибка связи с сервером. Проверь интернет.';
+      });
     }
   }
 
@@ -163,96 +96,91 @@ class _FastFoodScannerSheetState extends State<FastFoodScannerSheet> {
       final String tripleTick = tick + tick + tick;
       final RegExp jsonRegExp = RegExp(tripleTick + r'(?:json)?\s*(\{.*?\})\s*' + tripleTick, dotAll: true);
       final match = jsonRegExp.firstMatch(text);
-      if (match != null) return jsonDecode(match.group(1)!);
+      if (match != null) {
+        final d = jsonDecode(match.group(1)!);
+        if (d is Map<String, dynamic>) return d;
+      }
       final start = text.indexOf('{');
       final end = text.lastIndexOf('}');
-      if (start != -1 && end != -1 && end > start) return jsonDecode(text.substring(start, end + 1));
-    } catch (e) { debugPrint("JSON Parse error: $e"); }
+      if (start != -1 && end > start) {
+        final d = jsonDecode(text.substring(start, end + 1));
+        if (d is Map<String, dynamic>) return d;
+      }
+    } catch (e) {
+      debugPrint("JSON Parse error: $e");
+    }
     return null;
   }
 
   void _saveToDiary() {
-    if (_resultData == null || _isProcessing) return;
-    
-    setState(() => _isProcessing = true);
+    final data = _resultData;
+    if (data == null) return;
+    final messenger = ScaffoldMessenger.of(context);
+    final theme = Theme.of(context);
     Navigator.pop(context);
-    
-    ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(
-        content: Text('Блюдо добавлено! ✨', style: TextStyle(fontWeight: FontWeight.bold, color: Colors.white)),
-        backgroundColor: Colors.teal,
-      ),
-    );
-
-    Future.microtask(() async {
-      try {
-        await DatabaseService().logMeal(_resultData!, imageBytes: _imageBytes);
-      } catch (e) {
-        debugPrint('Ошибка фонового сохранения из сканера: $e');
-      }
-    });
+    DatabaseService().logMeal(data, imageBytes: _imageBytes).catchError((e) => debugPrint('scanner save: $e'));
+    EvaSnack.showOn(messenger, theme, 'Блюдо добавлено в дневник ✨', type: EvaSnackType.success);
   }
 
   void _editMacro(String macroType, int newValue, int oldCals, int oldP, int oldF, int oldC) {
-    if (_resultData == null) return;
-    List<dynamic> items = _resultData!['items'] ?? [];
+    final List<dynamic> items = _resultData?['items'] is List ? _resultData!['items'] : const [];
     if (items.isEmpty) return;
-
     setState(() {
       if (macroType == 'calories') {
         if (oldCals == 0) return;
-        double ratio = newValue / oldCals;
-        for (var item in items) {
-          item['calories'] = (((item['calories'] as num?)?.toDouble() ?? 0) * ratio).round();
-          item['protein'] = (((item['protein'] as num?)?.toDouble() ?? 0) * ratio).round();
-          item['fat'] = (((item['fat'] as num?)?.toDouble() ?? 0) * ratio).round();
-          item['carbs'] = (((item['carbs'] as num?)?.toDouble() ?? 0) * ratio).round();
-          item['fiber'] = (((item['fiber'] as num?)?.toDouble() ?? 0) * ratio).round();
+        final double ratio = newValue / oldCals;
+        for (final item in items) {
+          if (item is! Map) continue;
+          item['calories'] = (evaDouble(item['calories']) * ratio).round();
+          item['protein'] = (evaDouble(item['protein']) * ratio).round();
+          item['fat'] = (evaDouble(item['fat']) * ratio).round();
+          item['carbs'] = (evaDouble(item['carbs']) * ratio).round();
+          item['fiber'] = (evaDouble(item['fiber']) * ratio).round();
         }
       } else {
         int diff = 0, calDiff = 0;
-        if (macroType == 'protein') { diff = newValue - oldP; calDiff = diff * 4; } 
-        else if (macroType == 'fat') { diff = newValue - oldF; calDiff = diff * 9; } 
-        else if (macroType == 'carbs') { diff = newValue - oldC; calDiff = diff * 4; }
-        else if (macroType == 'fiber') { diff = newValue - (items.first['fiber'] as num?)!.toInt(); calDiff = 0; }
-
-        var first = items.first;
-        int currentMacro = (first[macroType] as num?)?.toInt() ?? 0;
-        int currentCals = (first['calories'] as num?)?.toInt() ?? 0;
-
-        int newMacroValue = currentMacro + diff;
-        int newCalsValue = currentCals + calDiff;
-
-        first[macroType] = newMacroValue < 0 ? 0 : newMacroValue;
-        first['calories'] = newCalsValue < 0 ? 0 : newCalsValue;
+        final first = items.first;
+        if (first is! Map) return;
+        if (macroType == 'protein') {
+          diff = newValue - oldP;
+          calDiff = diff * 4;
+        } else if (macroType == 'fat') {
+          diff = newValue - oldF;
+          calDiff = diff * 9;
+        } else if (macroType == 'carbs') {
+          diff = newValue - oldC;
+          calDiff = diff * 4;
+        } else if (macroType == 'fiber') {
+          int totalFiber = 0;
+          for (final i in items) {
+            if (i is Map) totalFiber += evaInt(i['fiber']);
+          }
+          diff = newValue - totalFiber;
+        }
+        final int newMacro = evaInt(first[macroType]) + diff;
+        final int newCals = evaInt(first['calories']) + calDiff;
+        first[macroType] = newMacro < 0 ? 0 : newMacro;
+        first['calories'] = newCals < 0 ? 0 : newCals;
       }
     });
   }
 
   void _showEditDialog(String label, int currentValue, String macroType, int oldC, int oldP, int oldF, int oldCarb) {
-    final theme = Theme.of(context);
     final TextEditingController ctrl = TextEditingController(text: currentValue.toString());
-    
-    showDialog(
+    showDialog<void>(
       context: context,
       builder: (ctx) => AlertDialog(
-        backgroundColor: theme.colorScheme.surface,
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(24)),
-        title: Text('Изменить $label', style: TextStyle(color: theme.colorScheme.onSurface, fontWeight: FontWeight.w800)),
+        title: Text('Изменить: ${label.toLowerCase()}'),
         content: TextField(
-          controller: ctrl, keyboardType: TextInputType.number,
-          style: TextStyle(color: theme.colorScheme.onSurface, fontSize: 24, fontWeight: FontWeight.w900),
-          decoration: InputDecoration(
-            focusedBorder: UnderlineInputBorder(borderSide: BorderSide(color: theme.colorScheme.primary, width: 2)), 
-            suffixText: macroType == 'calories' ? 'ккал' : 'г',
-            suffixStyle: TextStyle(color: theme.colorScheme.onSurfaceVariant)
-          ),
-          cursorColor: theme.colorScheme.primary,
+          controller: ctrl,
+          autofocus: true,
+          keyboardType: TextInputType.number,
+          style: Theme.of(ctx).textTheme.headlineMedium,
+          decoration: InputDecoration(suffixText: macroType == 'calories' ? 'ккал' : 'г'),
         ),
         actions: [
-          TextButton(onPressed: () => Navigator.pop(ctx), child: Text('Отмена', style: TextStyle(color: theme.colorScheme.onSurfaceVariant, fontWeight: FontWeight.bold))),
-          ElevatedButton(
-            style: ElevatedButton.styleFrom(backgroundColor: theme.colorScheme.primary, shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12))),
+          TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Отмена')),
+          FilledButton(
             onPressed: () {
               final val = int.tryParse(ctrl.text.trim());
               if (val != null && val >= 0) {
@@ -260,167 +188,192 @@ class _FastFoodScannerSheetState extends State<FastFoodScannerSheet> {
                 Navigator.pop(ctx);
               }
             },
-            child: Text('Сохранить', style: TextStyle(color: theme.colorScheme.onPrimary, fontWeight: FontWeight.bold)),
-          )
+            child: const Text('Сохранить'),
+          ),
         ],
-      )
+      ),
     );
   }
 
   @override
   Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    
-    return Container(
-      margin: const EdgeInsets.all(16),
-      padding: EdgeInsets.only(left: 24, right: 24, top: 24, bottom: MediaQuery.of(context).viewInsets.bottom + 24),
-      decoration: BoxDecoration(color: theme.colorScheme.surface, borderRadius: BorderRadius.circular(32), boxShadow: [BoxShadow(color: Colors.black.withValues(alpha: 0.04), blurRadius: 24, offset: const Offset(0, 8))]),
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Container(width: 48, height: 5, margin: const EdgeInsets.only(bottom: 24), decoration: BoxDecoration(color: theme.colorScheme.onSurfaceVariant.withValues(alpha: 0.2), borderRadius: BorderRadius.circular(10))),
-          if (_resultData != null) _buildResultState(theme)
-          else _buildSelectionState(theme),
-        ],
+    return Padding(
+      padding: EdgeInsets.fromLTRB(20, 0, 20, MediaQuery.of(context).viewInsets.bottom + 20),
+      child: AnimatedSize(
+        duration: const Duration(milliseconds: 250),
+        curve: Curves.easeOut,
+        child: switch (_state) {
+          _ScanState.selecting => _buildSelectionState(Theme.of(context)),
+          _ScanState.analyzing => _buildAnalyzingState(Theme.of(context)),
+          _ScanState.result => _buildResultState(Theme.of(context)),
+        },
       ),
     );
   }
 
   Widget _buildSelectionState(ThemeData theme) {
     return Column(
+      mainAxisSize: MainAxisSize.min,
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        if (_errorMessage != null) Padding(padding: const EdgeInsets.only(bottom: 16.0), child: Text(_errorMessage!, style: TextStyle(color: theme.colorScheme.primary, fontWeight: FontWeight.bold))),
-        _buildMenuButton(Icons.camera_alt_outlined, "Камера", () => _pickImage(ImageSource.camera), theme),
-        Divider(height: 1, color: theme.colorScheme.onSurfaceVariant.withValues(alpha: 0.1)),
-        _buildMenuButton(Icons.image_outlined, "Фотогалерея", () => _pickImage(ImageSource.gallery), theme),
-        Divider(height: 1, color: theme.colorScheme.onSurfaceVariant.withValues(alpha: 0.1)),
-        _buildMenuButton(Icons.edit_note_outlined, "Записать вручную", () {
-          Navigator.pop(context); 
-          Navigator.push(context, MaterialPageRoute(builder: (_) => const AIChatScreen(botType: 'dietitian')));
-        }, theme),
+        const EvaSheetHeader(title: 'Что на тарелке?', subtitle: 'Сфотографируй блюдо — Ева посчитает калории и БЖУ'),
+        if (_errorMessage != null)
+          Padding(
+            padding: const EdgeInsets.only(bottom: 12),
+            child: EvaStatusBanner(visible: true, text: _errorMessage!, icon: Icons.info_outline_rounded),
+          ),
+        EvaOptionTile(title: 'Сфотографировать', subtitle: 'Лучше сверху и при дневном свете', icon: Icons.photo_camera_outlined, selected: false, onTap: () => _pickImage(ImageSource.camera)),
+        EvaOptionTile(title: 'Выбрать из галереи', icon: Icons.photo_library_outlined, selected: false, onTap: () => _pickImage(ImageSource.gallery)),
+        EvaOptionTile(
+          title: 'Описать словами',
+          subtitle: 'Например: «гречка 150 г и котлета»',
+          icon: Icons.edit_note_rounded,
+          selected: false,
+          onTap: () {
+            final nav = Navigator.of(context);
+            nav.pop();
+            nav.push(MaterialPageRoute(builder: (_) => const AIChatScreen(botType: 'dietitian')));
+          },
+        ),
       ],
     );
   }
 
-  Widget _buildMenuButton(IconData icon, String text, VoidCallback onTap, ThemeData theme) {
-    return InkWell(
-      onTap: onTap, borderRadius: BorderRadius.circular(16),
+  Widget _buildAnalyzingState(ThemeData theme) {
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        const EvaSheetHandle(),
+        if (_imageBytes != null)
+          ClipRRect(
+            borderRadius: BorderRadius.circular(24),
+            child: Image.memory(_imageBytes!, height: 220, width: double.infinity, fit: BoxFit.cover),
+          ),
+        const SizedBox(height: 20),
+        const EvaTypingDots(),
+        const SizedBox(height: 12),
+        Text('Ева анализирует блюдо…', style: theme.textTheme.titleMedium),
+        const SizedBox(height: 4),
+        Text('Обычно это занимает 5–15 секунд', style: theme.textTheme.bodySmall),
+        const SizedBox(height: 12),
+      ],
+    );
+  }
+
+  Widget _macroTile(String label, int value, String type, int tc, int tp, int tf, int tcarb, Color color, ThemeData theme) {
+    return EvaPressable(
+      onTap: () => _showEditDialog(label, value, type, tc, tp, tf, tcarb),
       child: Container(
-        padding: const EdgeInsets.symmetric(vertical: 16, horizontal: 20),
-        decoration: BoxDecoration(color: theme.colorScheme.surface, borderRadius: BorderRadius.circular(16)),
-        child: Row(
+        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+        decoration: BoxDecoration(color: color.withValues(alpha: context.isDark ? 0.18 : 0.1), borderRadius: BorderRadius.circular(16)),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Icon(icon, color: theme.colorScheme.primary, size: 28), const SizedBox(width: 16),
-            Text(text, style: TextStyle(color: theme.colorScheme.onSurface, fontSize: 18, fontWeight: FontWeight.w600)),
+            Row(children: [
+              Container(width: 7, height: 7, decoration: BoxDecoration(color: color, shape: BoxShape.circle)),
+              const SizedBox(width: 6),
+              Expanded(child: Text(label, style: theme.textTheme.labelMedium?.copyWith(color: theme.colorScheme.onSurfaceVariant))),
+              Icon(Icons.edit_outlined, size: 14, color: theme.colorScheme.onSurfaceVariant),
+            ]),
+            const SizedBox(height: 4),
+            Text('$value г', style: theme.textTheme.titleLarge),
           ],
         ),
       ),
     );
   }
 
-  Widget _buildMacroEditBtn(String label, int value, String type, int tc, int tp, int tf, int tcarb, Color color, ThemeData theme) {
-    return GestureDetector(
-      onTap: () => _showEditDialog(label, value, type, tc, tp, tf, tcarb),
-      child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-        decoration: BoxDecoration(
-          color: color.withValues(alpha: 0.1), 
-          borderRadius: BorderRadius.circular(16), 
-          border: Border.all(color: color.withValues(alpha: 0.3))
-        ),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Row(
-              mainAxisAlignment: MainAxisAlignment.spaceBetween,
-              children: [
-                Expanded(child: Text(label, style: TextStyle(color: theme.colorScheme.onSurface, fontSize: 13, fontWeight: FontWeight.bold), maxLines: 1, overflow: TextOverflow.ellipsis)), 
-                Icon(Icons.edit_outlined, size: 16, color: color)
-              ]
-            ),
-            const SizedBox(height: 6),
-            Text("$value г", style: TextStyle(color: theme.colorScheme.onSurface, fontSize: 18, fontWeight: FontWeight.w900)),
-          ]
-        )
-      )
-    );
-  }
-
   Widget _buildResultState(ThemeData theme) {
-    final List<dynamic> items = _resultData!['items'] ?? [];
-    int totalCals = 0, totalP = 0, totalF = 0, totalC = 0, totalFiber = 0; 
-    
-    for (var item in items) {
-      totalCals += (item['calories'] as num?)?.toInt() ?? 0;
-      totalP += (item['protein'] as num?)?.toInt() ?? 0;
-      totalF += (item['fat'] as num?)?.toInt() ?? 0;
-      totalC += (item['carbs'] as num?)?.toInt() ?? 0;
-      totalFiber += (item['fiber'] as num?)?.toInt() ?? 0; 
+    final List<dynamic> items = _resultData?['items'] is List ? _resultData!['items'] : const [];
+    int totalCals = 0, totalP = 0, totalF = 0, totalC = 0, totalFiber = 0;
+    for (final item in items) {
+      if (item is! Map) continue;
+      totalCals += evaInt(item['calories']);
+      totalP += evaInt(item['protein']);
+      totalF += evaInt(item['fat']);
+      totalC += evaInt(item['carbs']);
+      totalFiber += evaInt(item['fiber']);
     }
+    final String mealName = (_resultData?['meal_name'] ?? (items.isNotEmpty && items.first is Map ? items.first['meal_name'] : null) ?? 'Блюдо').toString();
 
-    return Container(
-      padding: const EdgeInsets.all(20),
-      decoration: BoxDecoration(color: theme.colorScheme.surface, borderRadius: BorderRadius.circular(24), boxShadow: [BoxShadow(color: Colors.black.withValues(alpha: 0.04), blurRadius: 24, offset: const Offset(0, 8))]),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            children: [
-              if (_imageBytes != null) ClipRRect(borderRadius: BorderRadius.circular(16), child: Image.memory(_imageBytes!, width: 80, height: 80, fit: BoxFit.cover)),
-              const SizedBox(width: 16),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start, 
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        const EvaSheetHandle(),
+        Row(
+          children: [
+            if (_imageBytes != null)
+              ClipRRect(borderRadius: BorderRadius.circular(18), child: Image.memory(_imageBytes!, width: 84, height: 84, fit: BoxFit.cover)),
+            const SizedBox(width: 16),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(mealName, maxLines: 2, overflow: TextOverflow.ellipsis, style: theme.textTheme.titleLarge),
+                  const SizedBox(height: 4),
+                  EvaPressable(
+                    onTap: () => _showEditDialog('Калории', totalCals, 'calories', totalCals, totalP, totalF, totalC),
+                    child: Row(
+                      crossAxisAlignment: CrossAxisAlignment.end,
+                      children: [
+                        Text('$totalCals', style: theme.textTheme.displaySmall?.copyWith(color: theme.colorScheme.primary, height: 1)),
+                        const SizedBox(width: 6),
+                        Text('ккал', style: theme.textTheme.titleSmall?.copyWith(color: theme.colorScheme.onSurfaceVariant)),
+                        const SizedBox(width: 6),
+                        Icon(Icons.edit_outlined, size: 16, color: theme.colorScheme.onSurfaceVariant),
+                      ],
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
+        const SizedBox(height: 18),
+        Row(children: [
+          Expanded(child: _macroTile('Белки', totalP, 'protein', totalCals, totalP, totalF, totalC, EvaColors.protein, theme)),
+          const SizedBox(width: 10),
+          Expanded(child: _macroTile('Жиры', totalF, 'fat', totalCals, totalP, totalF, totalC, EvaColors.fat, theme)),
+        ]),
+        const SizedBox(height: 10),
+        Row(children: [
+          Expanded(child: _macroTile('Углеводы', totalC, 'carbs', totalCals, totalP, totalF, totalC, EvaColors.carbs, theme)),
+          const SizedBox(width: 10),
+          Expanded(child: _macroTile('Клетчатка', totalFiber, 'fiber', totalCals, totalP, totalF, totalC, EvaColors.fiber, theme)),
+        ]),
+        const SizedBox(height: 16),
+        Container(
+          padding: const EdgeInsets.all(14),
+          decoration: BoxDecoration(color: context.eva.fieldFill, borderRadius: BorderRadius.circular(18)),
+          child: Column(
+            children: items.whereType<Map>().map((item) {
+              return Padding(
+                padding: const EdgeInsets.symmetric(vertical: 4),
+                child: Row(
                   children: [
-                    Text("Распознано:", style: TextStyle(color: theme.colorScheme.onSurfaceVariant, fontSize: 12, fontWeight: FontWeight.bold)), 
-                    GestureDetector(
-                      onTap: () => _showEditDialog('Калории', totalCals, 'calories', totalCals, totalP, totalF, totalC),
-                      child: Row(children: [Text("$totalCals ккал", style: TextStyle(color: theme.colorScheme.primary, fontSize: 28, fontWeight: FontWeight.w900, letterSpacing: -1.0)), const SizedBox(width: 8), Icon(Icons.edit_outlined, size: 20, color: theme.colorScheme.onSurfaceVariant)]),
-                    )
-                  ]
-                )
-              ),
-            ],
+                    Expanded(child: Text((item['meal_name'] ?? item['name'] ?? 'Продукт').toString(), style: theme.textTheme.bodyMedium?.copyWith(fontWeight: FontWeight.w600))),
+                    Text('${evaInt(item['weight_g'])} г · ${evaInt(item['calories'])} ккал', style: theme.textTheme.bodySmall),
+                  ],
+                ),
+              );
+            }).toList(),
           ),
-          const SizedBox(height: 20),
-          Column(
-            children: [
-              Row(
-                children: [
-                  Expanded(child: _buildMacroEditBtn("Белки", totalP, "protein", totalCals, totalP, totalF, totalC, const Color(0xFFD49A89), theme)),
-                  const SizedBox(width: 12),
-                  Expanded(child: _buildMacroEditBtn("Жиры", totalF, "fat", totalCals, totalP, totalF, totalC, const Color(0xFFE5C158), theme)),
-                ],
-              ),
-              const SizedBox(height: 12),
-              Row(
-                children: [
-                  Expanded(child: _buildMacroEditBtn("Углеводы", totalC, "carbs", totalCals, totalP, totalF, totalC, const Color(0xFF89CFF0), theme)),
-                  const SizedBox(width: 12),
-                  Expanded(child: _buildMacroEditBtn("Клетчатка", totalFiber, "fiber", totalCals, totalP, totalF, totalC, Colors.green[300] ?? Colors.green, theme)),
-                ],
-              ),
-            ],
+        ),
+        const SizedBox(height: 20),
+        EvaPrimaryButton(label: 'Добавить в дневник', icon: Icons.check_rounded, onPressed: _saveToDiary),
+        const SizedBox(height: 6),
+        Center(
+          child: TextButton(
+            onPressed: () => setState(() {
+              _resultData = null;
+              _imageBytes = null;
+              _state = _ScanState.selecting;
+            }),
+            child: const Text('Переснять фото'),
           ),
-          const SizedBox(height: 24),
-          Container(
-            padding: const EdgeInsets.all(16), decoration: BoxDecoration(color: theme.colorScheme.onSurface.withValues(alpha: 0.05), borderRadius: BorderRadius.circular(16)),
-            child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: items.map((item) => Padding(padding: const EdgeInsets.only(bottom: 8.0), child: Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [Expanded(child: Text(item['meal_name'] ?? 'Продукт', style: TextStyle(color: theme.colorScheme.onSurface, fontWeight: FontWeight.w700))), Text("${item['weight_g']}г / ${item['calories']} ккал", style: TextStyle(color: theme.colorScheme.onSurfaceVariant, fontWeight: FontWeight.w600))]))).toList()),
-          ),
-          const SizedBox(height: 32),
-          SizedBox(
-            width: double.infinity, height: 56, 
-            child: ElevatedButton(
-              style: ElevatedButton.styleFrom(backgroundColor: theme.colorScheme.primary, shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)), elevation: 0), 
-              onPressed: _isProcessing ? null : _saveToDiary, 
-              child: _isProcessing ? SizedBox(width: 24, height: 24, child: CircularProgressIndicator(color: theme.colorScheme.onPrimary, strokeWidth: 2)) : Text("ДОБАВИТЬ", style: TextStyle(color: theme.colorScheme.onPrimary, fontWeight: FontWeight.w800, fontSize: 15))
-            )
-          ),
-          const SizedBox(height: 12),
-          Center(child: TextButton(onPressed: () => setState(() { _resultData = null; _image = null; _imageBytes = null; }), child: Text("Переснять фото", style: TextStyle(color: theme.colorScheme.onSurfaceVariant, fontWeight: FontWeight.w600))))
-        ],
-      ),
+        ),
+      ],
     );
   }
 }

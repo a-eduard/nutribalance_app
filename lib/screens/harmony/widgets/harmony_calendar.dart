@@ -44,7 +44,7 @@ class _HarmonyCalendarState extends State<HarmonyCalendar> {
     final Timestamp? lastStartTs = widget.userData['lastPeriodStartDate'] as Timestamp?;
     final Timestamp? lastEndTs = widget.userData['lastPeriodEndDate'] as Timestamp?;
     final Timestamp? pregStartTs = widget.userData['pregnancyStartDate'] as Timestamp?;
-    final int? manualOvulationDay = widget.userData['manualOvulationDay'] as int?;
+    final int? manualOvulationDay = (widget.userData['manualOvulationDay'] as num?)?.toInt();
 
     Color bgColor = Colors.transparent;
     Color txtColor = isOutside ? theme.colorScheme.onSurfaceVariant.withValues(alpha: 0.4) : theme.colorScheme.onSurface;

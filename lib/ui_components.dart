@@ -63,7 +63,7 @@ class NeonButton extends StatelessWidget {
       height: 56,
       decoration: BoxDecoration(
         gradient: const LinearGradient(
-          colors: [Color(0xFFB76E79), Color(0xFFB2E600)], 
+          colors: [Color(0xFFB76E79), Color(0xFFC6A27C)], 
           begin: Alignment.topLeft,
           end: Alignment.bottomRight,
         ),

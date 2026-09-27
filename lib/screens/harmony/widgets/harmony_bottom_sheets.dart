@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import '../../../theme/eva_colors.dart';
 import 'package:flutter/cupertino.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
@@ -50,7 +51,7 @@ class HarmonyBottomSheets {
     final String appMode = userData['appMode'] ?? 'standard';
     final int cycleLength = (userData['cycleLength'] as num?)?.toInt() ?? 28;
     final int periodDuration = (userData['periodDuration'] as num?)?.toInt() ?? 5;
-    final int? manualOvulationDay = userData['manualOvulationDay'] as int?;
+    final int? manualOvulationDay = (userData['manualOvulationDay'] as num?)?.toInt();
     final Timestamp? pregStartTs = userData['pregnancyStartDate'] as Timestamp?;
 
     bool isStartDay = lastStartTs != null && _isSameDay(lastStartTs.toDate(), day);
@@ -80,7 +81,7 @@ class HarmonyBottomSheets {
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            Text(DateFormat('dd MMMM yyyy', 'ru_RU').format(day), style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold, color: theme.colorScheme.onSurface)),
+            Text(DateFormat('dd MMMM yyyy', 'ru_RU').format(day), style: TextStyle(fontSize: 20, fontFamily: EvaFonts.serif, fontWeight: FontWeight.w500, color: theme.colorScheme.onSurface)),
             
             // ИНФОРМАЦИЯ О ФАЗЕ ЦИКЛА
             const SizedBox(height: 16),
@@ -193,7 +194,7 @@ class HarmonyBottomSheets {
               child: Column(
                 mainAxisSize: MainAxisSize.min,
                 children: [
-                  Text("Базальная температура", style: TextStyle(color: theme.colorScheme.onSurface, fontSize: 20, fontWeight: FontWeight.w900)),
+                  Text("Базальная температура", style: TextStyle(color: theme.colorScheme.onSurface, fontSize: 20, fontFamily: EvaFonts.serif, fontWeight: FontWeight.w500)),
                   const SizedBox(height: 32),
                   SizedBox(
                     height: 160,
@@ -209,7 +210,7 @@ class HarmonyBottomSheets {
                             children: List.generate(8, (index) => Center(child: Text("${35 + index}", style: TextStyle(fontSize: 24, fontWeight: FontWeight.w600, color: theme.colorScheme.onSurface)))),
                           ),
                         ),
-                        Padding(padding: const EdgeInsets.symmetric(horizontal: 8.0), child: Text(",", style: TextStyle(fontSize: 28, fontWeight: FontWeight.bold, color: theme.colorScheme.onSurface))),
+                        Padding(padding: const EdgeInsets.symmetric(horizontal: 8.0), child: Text(",", style: TextStyle(fontSize: 28, fontFamily: EvaFonts.serif, fontWeight: FontWeight.w500, color: theme.colorScheme.onSurface))),
                         SizedBox(
                           width: 80,
                           child: CupertinoPicker(
@@ -220,7 +221,7 @@ class HarmonyBottomSheets {
                           ),
                         ),
                         const SizedBox(width: 8),
-                        Text("°C", style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold, color: theme.colorScheme.onSurfaceVariant)),
+                        Text("°C", style: TextStyle(fontSize: 20, fontFamily: EvaFonts.serif, fontWeight: FontWeight.w500, color: theme.colorScheme.onSurfaceVariant)),
                       ],
                     ),
                   ),
@@ -270,7 +271,7 @@ class HarmonyBottomSheets {
               child: Column(
                 mainAxisSize: MainAxisSize.min,
                 children: [
-                  Text("Вес", style: TextStyle(color: theme.colorScheme.onSurface, fontSize: 20, fontWeight: FontWeight.w900)),
+                  Text("Вес", style: TextStyle(color: theme.colorScheme.onSurface, fontSize: 20, fontFamily: EvaFonts.serif, fontWeight: FontWeight.w500)),
                   const SizedBox(height: 32),
                   SizedBox(
                     height: 160,
@@ -286,7 +287,7 @@ class HarmonyBottomSheets {
                             children: List.generate(171, (index) => Center(child: Text("${30 + index}", style: TextStyle(fontSize: 24, fontWeight: FontWeight.w600, color: theme.colorScheme.onSurface)))),
                           ),
                         ),
-                        Padding(padding: const EdgeInsets.symmetric(horizontal: 8.0), child: Text(",", style: TextStyle(fontSize: 28, fontWeight: FontWeight.bold, color: theme.colorScheme.onSurface))),
+                        Padding(padding: const EdgeInsets.symmetric(horizontal: 8.0), child: Text(",", style: TextStyle(fontSize: 28, fontFamily: EvaFonts.serif, fontWeight: FontWeight.w500, color: theme.colorScheme.onSurface))),
                         SizedBox(
                           width: 80,
                           child: CupertinoPicker(
@@ -297,7 +298,7 @@ class HarmonyBottomSheets {
                           ),
                         ),
                         const SizedBox(width: 8),
-                        Text("кг", style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold, color: theme.colorScheme.onSurfaceVariant)),
+                        Text("кг", style: TextStyle(fontSize: 20, fontFamily: EvaFonts.serif, fontWeight: FontWeight.w500, color: theme.colorScheme.onSurfaceVariant)),
                       ],
                     ),
                   ),
@@ -348,7 +349,7 @@ class HarmonyBottomSheets {
               child: Column(
                 mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Text("Секс и интимность", style: TextStyle(color: theme.colorScheme.onSurface, fontSize: 24, fontWeight: FontWeight.w900)),
+                  Text("Секс и интимность", style: TextStyle(color: theme.colorScheme.onSurface, fontSize: 24, fontFamily: EvaFonts.serif, fontWeight: FontWeight.w500)),
                   const SizedBox(height: 24),
                   
                   Text("Тип контакта", style: TextStyle(color: theme.colorScheme.onSurfaceVariant, fontSize: 14, fontWeight: FontWeight.bold)),
@@ -418,7 +419,7 @@ class HarmonyBottomSheets {
                                       onPressed: tempOrgasmCount > 1 ? () => setModalState(() => tempOrgasmCount--) : null,
                                       icon: Icon(Icons.remove_circle_outline, color: tempOrgasmCount > 1 ? theme.colorScheme.primary : Colors.grey.withValues(alpha: 0.3), size: 28),
                                     ),
-                                    Text('$tempOrgasmCount', style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold, color: theme.colorScheme.onSurface)),
+                                    Text('$tempOrgasmCount', style: TextStyle(fontSize: 20, fontFamily: EvaFonts.serif, fontWeight: FontWeight.w500, color: theme.colorScheme.onSurface)),
                                     IconButton(
                                       onPressed: () => setModalState(() => tempOrgasmCount++),
                                       icon: Icon(Icons.add_circle_outline, color: theme.colorScheme.primary, size: 28),
@@ -469,7 +470,7 @@ class HarmonyBottomSheets {
               child: Column(
                 mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Text(title, style: TextStyle(color: theme.colorScheme.onSurface, fontSize: 24, fontWeight: FontWeight.w900)),
+                  Text(title, style: TextStyle(color: theme.colorScheme.onSurface, fontSize: 24, fontFamily: EvaFonts.serif, fontWeight: FontWeight.w500)),
                   const SizedBox(height: 8), 
                   Text(subtitle, style: TextStyle(color: theme.colorScheme.onSurfaceVariant, fontSize: 14)),
                   const SizedBox(height: 24),
@@ -514,7 +515,7 @@ class HarmonyBottomSheets {
       builder: (ctx) => AlertDialog(
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(24)), 
         backgroundColor: theme.colorScheme.surface,
-        title: Text(title, style: TextStyle(fontWeight: FontWeight.w900, fontSize: 20, color: theme.colorScheme.onSurface)),
+        title: Text(title, style: TextStyle(fontFamily: EvaFonts.serif, fontWeight: FontWeight.w500, fontSize: 20, color: theme.colorScheme.onSurface)),
         content: TextField(
           controller: controller, 
           keyboardType: TextInputType.number, 
@@ -559,7 +560,7 @@ class HarmonyBottomSheets {
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
-              Text(title, style: TextStyle(color: theme.colorScheme.onSurface, fontSize: 22, fontWeight: FontWeight.bold), textAlign: TextAlign.center),
+              Text(title, style: TextStyle(color: theme.colorScheme.onSurface, fontSize: 22, fontFamily: EvaFonts.serif, fontWeight: FontWeight.w500), textAlign: TextAlign.center),
               const SizedBox(height: 16), 
               Text(description, textAlign: TextAlign.center, style: TextStyle(color: theme.colorScheme.onSurfaceVariant, fontSize: 15, height: 1.4)),
               const SizedBox(height: 32),

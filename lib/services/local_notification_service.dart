@@ -17,12 +17,13 @@ class LocalNotificationService {
   final FlutterLocalNotificationsPlugin flutterLocalNotificationsPlugin =
       FlutterLocalNotificationsPlugin();
 
-  Future<void> init() async {
-    tz.initializeTimeZones();
+  bool _initialized = false;
 
-    // Узнаем часовой пояс телефона
-    final String timeZoneName = await FlutterTimezone.getLocalTimezone();
-    tz.setLocalLocation(tz.getLocation(timeZoneName));
+  Future<void> init() async {
+    // ФИКС ЗАПУСКА ЗА РУБЕЖОМ: если часовой пояс устройства отсутствует в базе
+    // (старые/нестандартные идентификаторы), tz.getLocation бросал исключение
+    // прямо в main() и приложение зависало на заставке. Теперь — безопасный фолбэк.
+    await _initTimeZone();
 
     const AndroidInitializationSettings initializationSettingsAndroid =
         AndroidInitializationSettings('@mipmap/launcher_icon');
@@ -43,6 +44,38 @@ class LocalNotificationService {
     await flutterLocalNotificationsPlugin.initialize(
       settings: initializationSettings,
     );
+    _initialized = true;
+  }
+
+  bool get isInitialized => _initialized;
+
+  Future<void> _initTimeZone() async {
+    try {
+      tz.initializeTimeZones();
+    } catch (e) {
+      debugPrint('tz init: $e');
+      return;
+    }
+    try {
+      final String timeZoneName = await FlutterTimezone.getLocalTimezone().timeout(const Duration(seconds: 3));
+      tz.setLocalLocation(tz.getLocation(timeZoneName));
+      return;
+    } catch (e) {
+      debugPrint('Часовой пояс устройства не распознан: $e');
+    }
+    // Фолбэк: ищем любую зону с таким же текущим смещением от UTC.
+    try {
+      final Duration offset = DateTime.now().timeZoneOffset;
+      for (final loc in tz.timeZoneDatabase.locations.values) {
+        if (tz.TZDateTime.now(loc).timeZoneOffset == offset) {
+          tz.setLocalLocation(loc);
+          return;
+        }
+      }
+      tz.setLocalLocation(tz.getLocation('UTC'));
+    } catch (e) {
+      debugPrint('tz fallback: $e');
+    }
   }
 
   Future<bool> requestPermissions() async {
@@ -55,12 +88,10 @@ class LocalNotificationService {
 
       final bool? grantedNotification = await androidImplementation
           ?.requestNotificationsPermission();
-      // Для inexact таймеров нам больше не нужно жестко требовать Exact Alarms, 
-      // но оставим запрос на всякий случай для совместимости
-      final bool? grantedAlarm = await androidImplementation
-          ?.requestExactAlarmsPermission();
-
-      return (grantedNotification ?? false) || (grantedAlarm ?? false);
+      // ФИКС: запрос точных будильников (requestExactAlarmsPermission) открывал
+      // системные настройки при каждом запуске. Напоминания используют
+      // inexact-режим, поэтому это разрешение не нужно.
+      return grantedNotification ?? true;
     } else if (Platform.isIOS) {
       final bool? granted = await flutterLocalNotificationsPlugin
           .resolvePlatformSpecificImplementation<

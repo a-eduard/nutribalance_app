@@ -11,6 +11,29 @@ class DatabaseService {
 
   User? get currentUser => _auth.currentUser;
 
+  /// Премиум активен, только если флаг стоит И срок не истёк.
+  /// Раньше `isPro` проверялся без `proUntil` — подписка/промокод не заканчивались никогда.
+  static bool isProActive(Map<String, dynamic>? data) {
+    if (data == null || data['isPro'] != true) return false;
+    final dynamic until = data['proUntil'];
+    if (until is Timestamp) return until.toDate().isAfter(DateTime.now());
+    return true; // старые аккаунты без даты окончания
+  }
+
+  static DateTime? proUntil(Map<String, dynamic>? data) {
+    final dynamic until = data?['proUntil'];
+    return until is Timestamp ? until.toDate() : null;
+  }
+
+  static int _toInt(dynamic v) {
+    if (v is num) return v.round();
+    if (v is String) return double.tryParse(v.replaceAll(',', '.').replaceAll(RegExp(r'[^0-9.\-]'), ''))?.round() ?? 0;
+    return 0;
+  }
+
+  String docIdForDate(DateTime d) =>
+      "${d.year}-${d.month.toString().padLeft(2, '0')}-${d.day.toString().padLeft(2, '0')}";
+
   DateTime _getLogicalNow() {
     return DateTime.now().toLocal();
   }
@@ -42,7 +65,9 @@ class DatabaseService {
       }, SetOptions(merge: true));
     }
 
-    await batch.commit();
+    // Не блокируем UI ожиданием сервера (важно при VPN/слабой сети):
+    // Firestore применит запись локально сразу и досинхронизирует позже.
+    batch.commit().catchError((e) => debugPrint("updateUserData: $e"));
   }
 
   Future<Map<String, String>> getSpecialistInfo() async {
@@ -86,24 +111,41 @@ class DatabaseService {
     if (user == null) {
       return false;
     }
+    final String nick = nickname.trim().toLowerCase();
+    // Ищем в публичных профилях (без доступа к чужим приватным данным).
     try {
       final snapshot = await _db
-          .collection('users')
-          .where('nickname', isEqualTo: nickname)
-          .get();
-      if (snapshot.docs.isEmpty) {
-        return true;
-      }
+          .collection('public_profiles')
+          .where('nickname', isEqualTo: nick)
+          .limit(3)
+          .get()
+          .timeout(const Duration(seconds: 8));
       for (var doc in snapshot.docs) {
         if (doc.id != user.uid) {
           return false;
         }
       }
-      return true;
     } catch (e) {
-      debugPrint("Ошибка проверки уникальности ника: $e");
-      return false;
+      debugPrint("Проверка ника в public_profiles: $e");
     }
+    // Совместимость: пока публичные профили не заполнены у всех, проверяем и users
+    // (при строгих правилах безопасности этот запрос будет отклонён — это нормально).
+    try {
+      final snapshot = await _db
+          .collection('users')
+          .where('nickname', isEqualTo: nick)
+          .limit(3)
+          .get()
+          .timeout(const Duration(seconds: 8));
+      for (var doc in snapshot.docs) {
+        if (doc.id != user.uid) {
+          return false;
+        }
+      }
+    } catch (e) {
+      debugPrint("Проверка ника в users: $e");
+    }
+    return true;
   }
   
   Future<void> savePeriodData({required DateTime start, int cycleLength = 28, int periodDuration = 5}) async {
@@ -125,7 +167,7 @@ class DatabaseService {
       return;
     }
     final String docId = getTodayDocId();
-    await _db
+    _db
         .collection('users')
         .doc(user.uid)
         .collection('meals')
@@ -133,7 +175,7 @@ class DatabaseService {
         .set({
           'water_glasses': count,
           'date': Timestamp.fromDate(_getLogicalNow()),
-        }, SetOptions(merge: true));
+        }, SetOptions(merge: true)).catchError((e) => debugPrint("updateWaterGlasses: $e"));
   }
 
   Future<void> updatePeriodStartDate(DateTime date) async {
@@ -192,7 +234,7 @@ class DatabaseService {
   }) async {
     final user = _auth.currentUser;
     if (user != null) {
-      await _db
+      _db
           .collection('users')
           .doc(user.uid)
           .collection('ai_chats_$botType')
@@ -202,23 +244,21 @@ class DatabaseService {
             'imageUrl': imageUrl,
             'timestamp': FieldValue.serverTimestamp(),
             'isActionCompleted': false,
-          });
+          })
+          .then((_) {}, onError: (e) => debugPrint("saveBotChatMessage: $e"));
     }
   }
 
   Future<void> markBotMessageAsActionCompleted(String botType, String docId) async {
     final user = _auth.currentUser;
     if (user != null) {
-      try {
-        await _db
-            .collection('users')
-            .doc(user.uid)
-            .collection('ai_chats_$botType')
-            .doc(docId)
-            .update({'isActionCompleted': true});
-      } catch (e) {
-        debugPrint("Ошибка обновления статуса сообщения: $e");
-      }
+      _db
+          .collection('users')
+          .doc(user.uid)
+          .collection('ai_chats_$botType')
+          .doc(docId)
+          .update({'isActionCompleted': true})
+          .catchError((e) => debugPrint("Ошибка обновления статуса сообщения: $e"));
     }
   }
 
@@ -258,31 +298,36 @@ class DatabaseService {
       return;
     }
 
-    await _db
+    // ФИКС: ИИ иногда присылает дробные числа (1850.5) — раньше это ломало
+    // главный экран (type 'double' is not a subtype of 'int'). Всегда сохраняем int.
+    // ФИКС VPN: не ждём подтверждения сервера — запись уходит в офлайн-очередь
+    // Firestore и применяется мгновенно локально, UI больше не «висит».
+    _db
         .collection('users')
         .doc(user.uid)
         .collection('nutrition_goal')
         .doc('current')
         .set({
-          'calories': data['calories'] ?? 0,
-          'protein': data['protein'] ?? 0,
-          'fat': data['fat'] ?? 0,
-          'carbs': data['carbs'] ?? 0,
+          'calories': _toInt(data['calories']),
+          'protein': _toInt(data['protein']),
+          'fat': _toInt(data['fat']),
+          'carbs': _toInt(data['carbs']),
           'updatedAt': Timestamp.now(),
-        }, SetOptions(merge: true));
+        }, SetOptions(merge: true)).catchError((e) => debugPrint("saveNutritionGoal: $e"));
 
     Map<String, dynamic> profileUpdates = {};
     if (data['bmr'] != null) {
-      profileUpdates['bmr'] = data['bmr'];
+      profileUpdates['bmr'] = _toInt(data['bmr']);
     }
     if (data['maintenanceCalories'] != null) {
-      profileUpdates['maintenanceCalories'] = data['maintenanceCalories'];
+      profileUpdates['maintenanceCalories'] = _toInt(data['maintenanceCalories']);
     }
     if (profileUpdates.isNotEmpty) {
-      await _db
+      _db
           .collection('users')
           .doc(user.uid)
-          .set(profileUpdates, SetOptions(merge: true));
+          .set(profileUpdates, SetOptions(merge: true))
+          .catchError((e) => debugPrint("saveNutritionGoal profile: $e"));
     }
   }
 
@@ -375,26 +420,11 @@ class DatabaseService {
     };
 
     final docRef = _db.collection('users').doc(user.uid).collection('meals').doc(docId);
-    
-    try {
-      final docSnap = await docRef.get(const GetOptions(source: Source.serverAndCache));
-      if (!docSnap.exists) {
-        await docRef.set({
-          'items': [],
-          'calories': 0,
-          'protein': 0,
-          'fat': 0,
-          'carbs': 0,
-          'fiber': 0,
-          'bonus_calories': 0,
-          'water_glasses': 0,
-          'date': Timestamp.fromDate(_getLogicalNow()),
-        });
-      }
-    } catch (e) {
-      debugPrint("Ошибка проверки документа дня: $e");
-    }
 
+    // ФИКС ПОТЕРИ ДАННЫХ: раньше здесь был get() + set() БЕЗ merge. Если кэш был
+    // пуст/устарел (офлайн, VPN, новый телефон), документ дня перезаписывался
+    // пустым массивом и все приёмы пищи за день пропадали. Теперь — одна
+    // атомарная merge-запись: increment/arrayUnion корректно создают поля с нуля.
     docRef.set({
       'items': FieldValue.arrayUnion([mealEntry]),
       'calories': FieldValue.increment(totalCals),
@@ -471,12 +501,13 @@ class DatabaseService {
     }, SetOptions(merge: true)).catchError((e) => debugPrint("Фоновая ошибка: $e"));
   }
   
-  Future<void> updateMealItemWeight(Map<String, dynamic> oldItem, int newWeightG) async {
+  Future<void> updateMealItemWeight(Map<String, dynamic> oldItem, int newWeightG, {String? dateDocId}) async {
     final user = _auth.currentUser;
     if (user == null) {
       return;
     }
-    final String docId = getTodayDocId();
+    // ФИКС: раньше всегда правился документ «сегодня», даже если блюдо из другого дня.
+    final String docId = dateDocId ?? getTodayDocId();
     final docRef = _db.collection('users').doc(user.uid).collection('meals').doc(docId);
 
     try {
@@ -507,36 +538,38 @@ class DatabaseService {
       final newItem = {
         ...oldItem,
         'weight_g': newWeightG,
-        'calories': ((oldItem['calories'] as num) * ratio).round(),
-        'protein': ((oldItem['protein'] as num) * ratio).round(),
-        'fat': ((oldItem['fat'] as num) * ratio).round(),
-        'carbs': ((oldItem['carbs'] as num) * ratio).round(),
+        'calories': (_toInt(oldItem['calories']) * ratio).round(),
+        'protein': (_toInt(oldItem['protein']) * ratio).round(),
+        'fat': (_toInt(oldItem['fat']) * ratio).round(),
+        'carbs': (_toInt(oldItem['carbs']) * ratio).round(),
+        'fiber': (_toInt(oldItem['fiber']) * ratio).round(),
       };
 
       items[itemIndex] = newItem;
 
-      int totalCals = 0, totalProt = 0, totalFat = 0, totalCarbs = 0;
+      int totalCals = 0, totalProt = 0, totalFat = 0, totalCarbs = 0, totalFiber = 0;
       for (var i in items) {
-        totalCals += (i['calories'] as num).toInt();
-        totalProt += (i['protein'] as num).toInt();
-        totalFat += (i['fat'] as num).toInt();
-        totalCarbs += (i['carbs'] as num).toInt();
+        totalCals += _toInt(i['calories']);
+        totalProt += _toInt(i['protein']);
+        totalFat += _toInt(i['fat']);
+        totalCarbs += _toInt(i['carbs']);
+        totalFiber += _toInt(i['fiber']);
       }
 
-      await docRef.update({
-        'items': items, 'calories': totalCals, 'protein': totalProt, 'fat': totalFat, 'carbs': totalCarbs,
-      });
+      docRef.update({
+        'items': items, 'calories': totalCals, 'protein': totalProt, 'fat': totalFat, 'carbs': totalCarbs, 'fiber': totalFiber,
+      }).catchError((e) => debugPrint("updateMealItemWeight: $e"));
     } catch (e) {
       debugPrint("Ошибка обновления веса: $e");
     }
   }
 
-  Future<void> updateIngredientWeight(String mealId, Map<String, dynamic> oldIngredient, int newWeightG) async {
+  Future<void> updateIngredientWeight(String mealId, Map<String, dynamic> oldIngredient, int newWeightG, {String? dateDocId}) async {
     final user = _auth.currentUser;
     if (user == null) {
       return;
     }
-    final String docId = getTodayDocId();
+    final String docId = dateDocId ?? getTodayDocId();
     final docRef = _db.collection('users').doc(user.uid).collection('meals').doc(docId);
 
     try {
@@ -577,13 +610,15 @@ class DatabaseService {
       }
       final double ratio = newWeightG / oldWeight;
 
-      final int newC = ((oldIngredient['calories'] as num?)?.toInt() ?? 0 * ratio).round();
-      final int newP = ((oldIngredient['protein'] as num?)?.toInt() ?? 0 * ratio).round();
-      final int newF = ((oldIngredient['fat'] as num?)?.toInt() ?? 0 * ratio).round();
-      final int newCarb = ((oldIngredient['carbs'] as num?)?.toInt() ?? 0 * ratio).round();
-      final int newFib = ((oldIngredient['fiber'] as num?)?.toInt() ?? 0 * ratio).round(); 
-      
-      final int hScore = oldIngredient['health_score'] ?? 5;
+      // ФИКС: из-за приоритета операторов (x ?? 0 * ratio) калории НЕ пересчитывались
+      // при изменении граммовки — менялся только вес.
+      final int newC = (_toInt(oldIngredient['calories']) * ratio).round();
+      final int newP = (_toInt(oldIngredient['protein']) * ratio).round();
+      final int newF = (_toInt(oldIngredient['fat']) * ratio).round();
+      final int newCarb = (_toInt(oldIngredient['carbs']) * ratio).round();
+      final int newFib = (_toInt(oldIngredient['fiber']) * ratio).round();
+
+      final int hScore = oldIngredient['health_score'] == null ? 5 : _toInt(oldIngredient['health_score']);
 
       final int diffC = newC - ((oldIngredient['calories'] as num?)?.toInt() ?? 0);
       final int diffP = newP - ((oldIngredient['protein'] as num?)?.toInt() ?? 0);
@@ -621,14 +656,14 @@ class DatabaseService {
         totalFiber += (i['fiber'] as num?)?.toInt() ?? 0;
       }
 
-      await docRef.update({
-        'items': items, 
-        'calories': totalCals, 
-        'protein': totalProt, 
-        'fat': totalFat, 
+      docRef.update({
+        'items': items,
+        'calories': totalCals,
+        'protein': totalProt,
+        'fat': totalFat,
         'carbs': totalCarbs,
-        'fiber': totalFiber, 
-      });
+        'fiber': totalFiber,
+      }).catchError((e) => debugPrint("updateIngredientWeight: $e"));
     } catch (e) {
       debugPrint("Ошибка обновления веса ингредиента: $e");
     }
@@ -639,14 +674,14 @@ class DatabaseService {
     if (user == null) {
       return;
     }
-    await _db.collection('users').doc(user.uid).collection('meal_drafts').add({
+    _db.collection('users').doc(user.uid).collection('meal_drafts').add({
       'meal_name': data['meal_name'] ?? 'Блюдо',
-      'calories': (data['calories'] as num?)?.toInt() ?? 0,
-      'protein': (data['protein'] as num?)?.toInt() ?? 0,
-      'fat': (data['fat'] as num?)?.toInt() ?? 0,
-      'carbs': (data['carbs'] as num?)?.toInt() ?? 0,
+      'calories': _toInt(data['calories']),
+      'protein': _toInt(data['protein']),
+      'fat': _toInt(data['fat']),
+      'carbs': _toInt(data['carbs']),
       'createdAt': FieldValue.serverTimestamp(),
-    });
+    }).then((_) {}, onError: (e) => debugPrint("saveMealDraft: $e"));
   }
 
   Stream<DocumentSnapshot> getTodayMealsDoc() {
@@ -896,124 +931,131 @@ $harmonyContextText
       }).toList();
       parsedCategories.add({'name': cat['name'] ?? 'Категория', 'items': parsedItems});
     }
-    await _db.collection('users').doc(user.uid).collection('shopping_list').doc('current').set({'categories': parsedCategories, 'updatedAt': FieldValue.serverTimestamp()});
+    _db.collection('users').doc(user.uid).collection('shopping_list').doc('current').set({'categories': parsedCategories, 'updatedAt': FieldValue.serverTimestamp()}).catchError((e) => debugPrint("saveShoppingList: $e"));
+  }
+
+  /// Читает список покупок сначала из локального кэша (мгновенно и офлайн),
+  /// затем с сервера. Раньше здесь были транзакции Firestore — они требуют
+  /// живого соединения и падали/висели при VPN или слабой сети.
+  Future<List<dynamic>> _readShoppingCategories(DocumentReference<Map<String, dynamic>> docRef) async {
+    DocumentSnapshot<Map<String, dynamic>>? snap;
+    try {
+      snap = await docRef.get(const GetOptions(source: Source.cache));
+    } catch (_) {
+      snap = null;
+    }
+    if (snap == null || !snap.exists) {
+      try {
+        snap = await docRef.get().timeout(const Duration(seconds: 6));
+      } catch (_) {}
+    }
+    final List<dynamic> raw = (snap != null && snap.exists) ? List<dynamic>.from(snap.data()?['categories'] ?? []) : <dynamic>[];
+    // Глубокая копия, чтобы безопасно мутировать.
+    return raw.map((c) {
+      final Map<String, dynamic> cat = Map<String, dynamic>.from(c as Map);
+      cat['items'] = List<dynamic>.from(cat['items'] ?? []).map((i) => Map<String, dynamic>.from(i as Map)).toList();
+      return cat;
+    }).toList();
+  }
+
+  DocumentReference<Map<String, dynamic>>? _shoppingDoc() {
+    final user = _auth.currentUser;
+    if (user == null) return null;
+    return _db.collection('users').doc(user.uid).collection('shopping_list').doc('current');
+  }
+
+  void _writeShoppingCategories(DocumentReference<Map<String, dynamic>> docRef, List<dynamic> categories) {
+    docRef
+        .set({'categories': categories, 'updatedAt': FieldValue.serverTimestamp()}, SetOptions(merge: true))
+        .catchError((e) => debugPrint("shopping_list write: $e"));
   }
 
   Future<void> clearCheckedShoppingItems() async {
-    final user = _auth.currentUser;
-    if (user == null) {
-      return;
+    final docRef = _shoppingDoc();
+    if (docRef == null) return;
+    final categories = await _readShoppingCategories(docRef);
+    final List<dynamic> updatedCategories = [];
+    for (var cat in categories) {
+      final List<dynamic> items = cat['items'] ?? [];
+      final List<dynamic> remainingItems = items.where((item) => item['isChecked'] != true).toList();
+      if (remainingItems.isNotEmpty) {
+        updatedCategories.add({'name': cat['name'], 'items': remainingItems});
+      }
     }
-    final docRef = _db.collection('users').doc(user.uid).collection('shopping_list').doc('current');
-    
-    await _db.runTransaction((transaction) async {
-      final snapshot = await transaction.get(docRef);
-      if (!snapshot.exists) {
-        return;
-      }
-      List<dynamic> categories = snapshot.data()?['categories'] ?? [];
-      List<dynamic> updatedCategories = [];
-      for (var cat in categories) {
-        List<dynamic> items = cat['items'] ?? [];
-        List<dynamic> remainingItems = items.where((item) => item['isChecked'] != true).toList();
-        if (remainingItems.isNotEmpty) {
-          updatedCategories.add({'name': cat['name'], 'items': remainingItems});
-        }
-      }
-      transaction.update(docRef, {'categories': updatedCategories});
-    });
+    _writeShoppingCategories(docRef, updatedCategories);
   }
 
   Future<void> toggleShoppingListItem(String categoryName, String itemName, bool isChecked) async {
-    final user = _auth.currentUser;
-    if (user == null) {
-      return;
-    }
-    final docRef = _db.collection('users').doc(user.uid).collection('shopping_list').doc('current');
-    
-    await _db.runTransaction((transaction) async {
-      final snapshot = await transaction.get(docRef);
-      if (!snapshot.exists) {
-        return;
-      }
-      List<dynamic> categories = snapshot.data()?['categories'] ?? [];
-      for (var cat in categories) {
-        if (cat['name'] == categoryName) {
-          List<dynamic> items = cat['items'] ?? [];
-          for (var item in items) {
-            if (item['name'] == itemName) {
-              item['isChecked'] = isChecked;
-            }
+    final docRef = _shoppingDoc();
+    if (docRef == null) return;
+    final categories = await _readShoppingCategories(docRef);
+    for (var cat in categories) {
+      if (cat['name'] == categoryName) {
+        for (var item in (cat['items'] as List<dynamic>)) {
+          if (item['name'] == itemName) {
+            item['isChecked'] = isChecked;
           }
         }
       }
-      transaction.update(docRef, {'categories': categories});
-    });
+    }
+    _writeShoppingCategories(docRef, categories);
   }
 
   Future<void> syncCatalogShoppingList(Set<String> selectedNames, Map<String, String> productCategories) async {
-    final user = _auth.currentUser;
-    if (user == null) {
-      return;
+    final docRef = _shoppingDoc();
+    if (docRef == null) return;
+    final existingCategories = await _readShoppingCategories(docRef);
+
+    final Map<String, Map<String, dynamic>> oldItemData = {};
+    for (var cat in existingCategories) {
+      for (var item in (cat['items'] as List<dynamic>)) {
+        oldItemData[item['name'].toString()] = {'isChecked': item['isChecked'] ?? false, 'amount': item['amount'] ?? ''};
+      }
     }
-    final docRef = _db.collection('users').doc(user.uid).collection('shopping_list').doc('current');
 
-    await _db.runTransaction((transaction) async {
-      final snapshot = await transaction.get(docRef);
-      List<dynamic> existingCategories = snapshot.exists ? (snapshot.data()?['categories'] ?? []) : [];
+    final Map<String, List<Map<String, dynamic>>> newCategoriesMap = {};
+    for (String name in selectedNames) {
+      final String catName = productCategories[name] ?? 'Разное';
+      newCategoriesMap.putIfAbsent(catName, () => []);
+      newCategoriesMap[catName]!.add({
+        'name': name,
+        'amount': oldItemData[name]?['amount'] ?? '',
+        'isChecked': oldItemData[name]?['isChecked'] ?? false,
+      });
+    }
 
-      Map<String, Map<String, dynamic>> oldItemData = {};
-      for (var cat in existingCategories) {
-        for (var item in (cat['items'] ?? [])) {
-          oldItemData[item['name']] = {'isChecked': item['isChecked'] ?? false, 'amount': item['amount'] ?? ''};
-        }
-      }
-
-      Map<String, List<Map<String, dynamic>>> newCategoriesMap = {};
-      for (String name in selectedNames) {
-        String catName = productCategories[name] ?? 'Разное';
-        if (!newCategoriesMap.containsKey(catName)) {
-          newCategoriesMap[catName] = [];
-        }
-        newCategoriesMap[catName]!.add({'name': name, 'amount': oldItemData[name]?['amount'] ?? '', 'isChecked': oldItemData[name]?['isChecked'] ?? false});
-      }
-
-      List<Map<String, dynamic>> finalCategories = [];
-      newCategoriesMap.forEach((key, value) { finalCategories.add({'name': key, 'items': value}); });
-
-      transaction.set(docRef, {'categories': finalCategories, 'updatedAt': FieldValue.serverTimestamp()}, SetOptions(merge: true));
-    });
+    final List<Map<String, dynamic>> finalCategories = [];
+    newCategoriesMap.forEach((key, value) => finalCategories.add({'name': key, 'items': value}));
+    _writeShoppingCategories(docRef, finalCategories);
   }
 
   Future<void> addIngredientsToShoppingList(List<dynamic> newItems) async {
-    final user = _auth.currentUser;
-    if (user == null) {
-      return;
-    }
-    final docRef = _db.collection('users').doc(user.uid).collection('shopping_list').doc('current');
+    final docRef = _shoppingDoc();
+    if (docRef == null) return;
+    final categories = await _readShoppingCategories(docRef);
 
-    await _db.runTransaction((transaction) async {
-      final snapshot = await transaction.get(docRef);
-      List<dynamic> categories = snapshot.exists ? (snapshot.data()?['categories'] ?? []) : [];
+    for (var newItem in newItems) {
+      if (newItem is! Map) continue;
+      final String catName = (newItem['category'] ?? 'Из рецептов').toString();
+      final String itemName = (newItem['name'] ?? 'Продукт').toString();
+      final String amount = (newItem['amount'] ?? '').toString();
 
-      for (var newItem in newItems) {
-        String catName = newItem['category'] ?? 'Из рецептов';
-        String itemName = newItem['name'] ?? 'Продукт';
-        String amount = newItem['amount'] ?? '';
-
-        int catIndex = categories.indexWhere((c) => c['name'] == catName);
-        if (catIndex == -1) {
-          categories.add({'name': catName, 'items': [{'name': itemName, 'amount': amount, 'isChecked': false}]});
-        } else {
-          List<dynamic> items = categories[catIndex]['items'];
-          if (!items.any((i) => i['name'].toString().toLowerCase() == itemName.toLowerCase())) {
-            items.add({'name': itemName, 'amount': amount, 'isChecked': false});
-          }
+      final int catIndex = categories.indexWhere((c) => c['name'] == catName);
+      if (catIndex == -1) {
+        categories.add({
+          'name': catName,
+          'items': [
+            {'name': itemName, 'amount': amount, 'isChecked': false}
+          ]
+        });
+      } else {
+        final List<dynamic> items = categories[catIndex]['items'];
+        if (!items.any((i) => i['name'].toString().toLowerCase() == itemName.toLowerCase())) {
+          items.add({'name': itemName, 'amount': amount, 'isChecked': false});
         }
       }
-
-      transaction.set(docRef, {'categories': categories, 'updatedAt': FieldValue.serverTimestamp()}, SetOptions(merge: true));
-    });
+    }
+    _writeShoppingCategories(docRef, categories);
   }
 
   Future<void> saveDailySymptoms(DateTime date, Map<String, int> symptoms) async {
@@ -1022,7 +1064,15 @@ $harmonyContextText
       return;
     }
     final String docId = "${date.year}-${date.month.toString().padLeft(2, '0')}-${date.day.toString().padLeft(2, '0')}";
-    await _db.collection('users').doc(user.uid).collection('cycle_logs').doc(docId).set({'symptoms': symptoms, 'updatedAt': FieldValue.serverTimestamp()}, SetOptions(merge: true));
+    // ФИКС: SetOptions(merge: true) сливал вложенную карту — снятые симптомы
+    // не удалялись. mergeFields полностью заменяет поле symptoms.
+    _db
+        .collection('users')
+        .doc(user.uid)
+        .collection('cycle_logs')
+        .doc(docId)
+        .set({'symptoms': symptoms, 'updatedAt': FieldValue.serverTimestamp()}, SetOptions(mergeFields: ['symptoms', 'updatedAt']))
+        .catchError((e) => debugPrint("saveDailySymptoms: $e"));
   }
   
   Future<void> deleteBotChatMessage(String botType, String docId, String? imageUrl) async {
@@ -1100,11 +1150,11 @@ $harmonyContextText
       int fat = (weight * 1.0).round();
       int carbs = ((targetCals - (protein * 4) - (fat * 9)) / 4).round();
 
-      await _db.collection('users').doc(user.uid).update({
+      _db.collection('users').doc(user.uid).update({
         'activityLevel': activityLevel,
         'bmr': bmr.round(),
         'maintenanceCalories': maintenance,
-      });
+      }).catchError((e) => debugPrint("updateActivity: $e"));
 
       await saveNutritionGoal({
         'calories': targetCals,
@@ -1125,10 +1175,10 @@ $harmonyContextText
     }
     final String docId = getTodayDocId();
     
-    await _db.collection('users').doc(user.uid).collection('meals').doc(docId).set({
+    _db.collection('users').doc(user.uid).collection('meals').doc(docId).set({
       'bonus_calories': FieldValue.increment(bonusCalories),
       'date': Timestamp.fromDate(_getLogicalNow()),
-    }, SetOptions(merge: true));
+    }, SetOptions(merge: true)).catchError((e) => debugPrint("addCheatMealBonus: $e"));
   }
   
   Future<void> updateBotChatMessage(String botType, String docId, String newText) async {

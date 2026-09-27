@@ -1,6 +1,8 @@
 import 'dart:convert';
 import 'package:flutter/material.dart';
 import '../services/database_service.dart';
+import '../theme/eva_colors.dart';
+import 'eva_ui.dart';
 
 class AIChatSaveCardWidget extends StatefulWidget {
   final Map<String, dynamic> jsonData;
@@ -105,24 +107,17 @@ class _AIChatSaveCardWidgetState extends State<AIChatSaveCardWidget> {
     showDialog(
       context: context,
       builder: (ctx) => AlertDialog(
-        backgroundColor: theme.colorScheme.surface,
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(24)),
-        title: Text('Изменить $label', style: TextStyle(color: theme.colorScheme.onSurface, fontWeight: FontWeight.w800)),
+        title: Text('Изменить: ${label.toLowerCase()}'),
         content: TextField(
           controller: ctrl,
+          autofocus: true,
           keyboardType: TextInputType.number,
-          style: TextStyle(color: theme.colorScheme.onSurface, fontSize: 24, fontWeight: FontWeight.w900),
-          decoration: InputDecoration(
-            focusedBorder: UnderlineInputBorder(borderSide: BorderSide(color: widget.themeColor, width: 2)),
-            suffixText: macroType == 'calories' ? 'ккал' : 'г',
-            suffixStyle: TextStyle(color: theme.colorScheme.onSurfaceVariant)
-          ),
-          cursorColor: widget.themeColor,
+          style: theme.textTheme.headlineMedium,
+          decoration: InputDecoration(suffixText: macroType == 'calories' ? 'ккал' : 'г'),
         ),
         actions: [
-          TextButton(onPressed: () => Navigator.pop(ctx), child: Text('Отмена', style: TextStyle(color: theme.colorScheme.onSurfaceVariant, fontWeight: FontWeight.bold))),
-          ElevatedButton(
-            style: ElevatedButton.styleFrom(backgroundColor: widget.themeColor, shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12))),
+          TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Отмена')),
+          FilledButton(
             onPressed: () {
               final val = int.tryParse(ctrl.text.trim());
               if (val != null && val >= 0) {
@@ -130,241 +125,257 @@ class _AIChatSaveCardWidgetState extends State<AIChatSaveCardWidget> {
                 Navigator.pop(ctx);
               }
             },
-            child: const Text('Сохранить', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
-          )
+            child: const Text('Сохранить'),
+          ),
         ],
-      )
+      ),
     );
   }
 
   Widget _buildMacroEditBtn(String label, int value, String type, int tc, int tp, int tf, int tcarb, Color color, ThemeData theme) {
-    return GestureDetector(
-      onTap: () => _showEditDialog(label, value, type, tc, tp, tf, tcarb, theme),
+    return EvaPressable(
+      onTap: _isSaved ? null : () => _showEditDialog(label, value, type, tc, tp, tf, tcarb, theme),
       child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 10),
-        decoration: BoxDecoration(color: color.withValues(alpha: 0.1), borderRadius: BorderRadius.circular(12), border: Border.all(color: color.withValues(alpha: 0.3))),
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+        decoration: BoxDecoration(
+          color: color.withValues(alpha: context.isDark ? 0.18 : 0.1),
+          borderRadius: BorderRadius.circular(14),
+        ),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Row(
               children: [
-                Expanded(child: Text(label, style: TextStyle(color: theme.colorScheme.onSurface, fontSize: 11, fontWeight: FontWeight.bold), maxLines: 1, overflow: TextOverflow.ellipsis)),
-                if (!_isSaved) Icon(Icons.edit_outlined, size: 16, color: theme.colorScheme.onSurfaceVariant),
+                Container(width: 7, height: 7, decoration: BoxDecoration(color: color, shape: BoxShape.circle)),
+                const SizedBox(width: 6),
+                Expanded(child: Text(label, style: theme.textTheme.labelMedium?.copyWith(color: theme.colorScheme.onSurfaceVariant), maxLines: 1, overflow: TextOverflow.ellipsis)),
+                if (!_isSaved) Icon(Icons.edit_outlined, size: 14, color: theme.colorScheme.onSurfaceVariant),
               ],
             ),
             const SizedBox(height: 4),
-            Text("$valueг", style: TextStyle(color: theme.colorScheme.onSurface, fontSize: 16, fontWeight: FontWeight.w900)),
-          ]
-        )
-      )
+            Text("$value г", style: theme.textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w700)),
+          ],
+        ),
+      ),
     );
+  }
+
+  Future<void> _save(String actionType, bool isLogFood) async {
+    setState(() => _isSavingNow = true);
+    try {
+      if (widget.imageUrl != null) {
+        _editableData['imageUrl'] = widget.imageUrl;
+      }
+      // Записи в Firestore не блокируют интерфейс: при слабой сети/VPN они
+      // сохраняются локально и досинхронизируются автоматически.
+      if (actionType == 'update_goal' || actionType == 'set_goal') {
+        await DatabaseService().saveNutritionGoal(_editableData);
+      } else if (isLogFood) {
+        await DatabaseService().logMeal(_editableData);
+      } else if (actionType == 'shopping_list') {
+        await DatabaseService().saveShoppingList(_editableData);
+      }
+      await DatabaseService().markBotMessageAsActionCompleted(widget.botType, widget.msgId);
+
+      if (!mounted) return;
+      setState(() {
+        _isSaved = true;
+        _isSavingNow = false;
+      });
+      widget.onSaveSuccess(widget.msgId);
+      EvaSnack.show(context, isLogFood ? 'Записала в дневник ✨' : 'Сохранено ✨', type: EvaSnackType.success);
+    } catch (e) {
+      debugPrint('Ошибка БД: $e');
+      if (!mounted) return;
+      setState(() => _isSavingNow = false);
+      EvaSnack.show(context, 'Не получилось сохранить. Попробуйте ещё раз.', type: EvaSnackType.error);
+    }
   }
 
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    final String actionType = _editableData['action_type'] ?? _editableData['type'] ?? '';
-    
-    if (actionType == 'advice') return const SizedBox.shrink();
+    final palette = context.eva;
+    final String actionType = (_editableData['action_type'] ?? _editableData['type'] ?? '').toString();
+
+    if (actionType == 'advice' || actionType.isEmpty) return const SizedBox.shrink();
 
     if (actionType == 'needs_plan') {
-      final draft = _editableData['draft_meal'] ?? {};
-      return Container(
-        margin: const EdgeInsets.symmetric(vertical: 8), padding: const EdgeInsets.all(16),
-        decoration: BoxDecoration(color: theme.colorScheme.surface, borderRadius: BorderRadius.circular(16), boxShadow: [BoxShadow(color: Colors.black.withValues(alpha: 0.04), blurRadius: 24, offset: const Offset(0, 8))]),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Center(child: Text("⚠️ Нет плана питания", style: TextStyle(color: theme.colorScheme.onSurface, fontWeight: FontWeight.bold, fontSize: 16))),
-            Padding(
-              padding: const EdgeInsets.only(top: 12.0, bottom: 16.0),
-              child: Center(child: Text("Чтобы сохранить ${draft['meal_name'] ?? 'блюдо'}, нужно рассчитать дневную норму.", style: const TextStyle(color: Colors.orangeAccent, fontSize: 13, fontWeight: FontWeight.w500), textAlign: TextAlign.center)),
-            ),
-            if (!_isSaved)
-              Row(
-                children: [
-                  Expanded(
-                    child: OutlinedButton(
-                      style: OutlinedButton.styleFrom(side: BorderSide(color: theme.colorScheme.onSurfaceVariant.withValues(alpha: 0.3)), shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12))),
-                      onPressed: (_isSaved || _isSavingNow) ? null : () async {
-                        final msg = ScaffoldMessenger.of(context);
-                        setState(() => _isSavingNow = true);
-                        try {
-                          await DatabaseService().saveMealDraft(draft).timeout(const Duration(seconds: 10));
+      final draft = _editableData['draft_meal'] is Map ? Map<String, dynamic>.from(_editableData['draft_meal']) : <String, dynamic>{};
+      return Padding(
+        padding: const EdgeInsets.only(top: 10, right: 24),
+        child: EvaCard(
+          padding: const EdgeInsets.all(18),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(children: [
+                EvaIconBubble(icon: Icons.flag_outlined, color: palette.warning, size: 38, iconSize: 19),
+                const SizedBox(width: 12),
+                Expanded(child: Text('Нужен план питания', style: theme.textTheme.titleMedium)),
+              ]),
+              const SizedBox(height: 10),
+              Text("Чтобы записать «${draft['meal_name'] ?? 'блюдо'}», давай сначала рассчитаем твою дневную норму.", style: theme.textTheme.bodyMedium?.copyWith(color: theme.colorScheme.onSurfaceVariant)),
+              const SizedBox(height: 14),
+              if (_isSaved)
+                EvaPill(text: 'Обработано', icon: Icons.check_rounded, color: palette.success)
+              else
+                Row(
+                  children: [
+                    Expanded(
+                      child: EvaSecondaryButton(
+                        label: 'Позже',
+                        height: 46,
+                        onPressed: _isSavingNow
+                            ? null
+                            : () async {
+                                setState(() => _isSavingNow = true);
+                                await DatabaseService().saveMealDraft(draft);
+                                await DatabaseService().markBotMessageAsActionCompleted(widget.botType, widget.msgId);
+                                if (!mounted) return;
+                                setState(() {
+                                  _isSaved = true;
+                                  _isSavingNow = false;
+                                });
+                                widget.onSaveSuccess(widget.msgId);
+                              },
+                      ),
+                    ),
+                    const SizedBox(width: 10),
+                    Expanded(
+                      flex: 2,
+                      child: EvaPrimaryButton(
+                        label: 'Составить план',
+                        height: 46,
+                        loading: _isSavingNow,
+                        onPressed: () async {
+                          setState(() => _isSavingNow = true);
                           await DatabaseService().markBotMessageAsActionCompleted(widget.botType, widget.msgId);
-                          
-                          if (!mounted) return;
-                          setState(() { _isSaved = true; _isSavingNow = false; });
-                          widget.onSaveSuccess(widget.msgId);
-                        } catch (e) {
-                          if (!mounted) return;
-                          setState(() => _isSavingNow = false);
-                          msg.showSnackBar(const SnackBar(content: Text('Ошибка сети'), backgroundColor: Colors.red));
-                        }
-                      },
-                      child: _isSavingNow 
-                          ? const SizedBox(width: 12, height: 12, child: CircularProgressIndicator(strokeWidth: 2))
-                          : Text("ПОЗЖЕ", style: TextStyle(color: theme.colorScheme.onSurfaceVariant, fontSize: 12)),
-                    ),
-                  ),
-                  const SizedBox(width: 8),
-                  Expanded(
-                    flex: 2,
-                    child: ElevatedButton(
-                      style: ElevatedButton.styleFrom(backgroundColor: widget.themeColor, foregroundColor: Colors.white, shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)), elevation: 0),
-                      onPressed: (_isSaved || _isSavingNow) ? null : () async {
-                        final msg = ScaffoldMessenger.of(context);
-                        setState(() => _isSavingNow = true);
-                        try {
-                          await DatabaseService().markBotMessageAsActionCompleted(widget.botType, widget.msgId).timeout(const Duration(seconds: 10));
                           widget.onSendMessage("Помоги составить план питания и рассчитать норму КБЖУ");
-                          
                           if (!mounted) return;
-                          setState(() { _isSaved = true; _isSavingNow = false; });
+                          setState(() {
+                            _isSaved = true;
+                            _isSavingNow = false;
+                          });
                           widget.onSaveSuccess(widget.msgId);
-                        } catch (e) {
-                          if (!mounted) return;
-                          setState(() => _isSavingNow = false);
-                          msg.showSnackBar(const SnackBar(content: Text('Ошибка сети'), backgroundColor: Colors.red));
-                        }
-                      },
-                      child: const Text("СОСТАВИТЬ ПЛАН", style: TextStyle(fontWeight: FontWeight.bold, fontSize: 12)),
+                        },
+                      ),
                     ),
-                  ),
-                ],
-              )
-            else
-              Center(child: Text("ОБРАБОТАНО", style: TextStyle(color: theme.colorScheme.onSurfaceVariant, fontWeight: FontWeight.bold)))
-          ],
+                  ],
+                ),
+            ],
+          ),
         ),
       );
     }
 
-    String title = "Данные обработаны"; String description = ""; String buttonText = "СОХРАНИТЬ";
-    Color cardAccentColor = widget.themeColor; 
-    bool isLogFood = (actionType == 'log_food' || actionType == 'log_meal');
-    int totalCals = 0, totalP = 0, totalF = 0, totalC = 0, totalFiber = 0; String mealName = 'Прием пищи';
+    String title = "Данные обработаны";
+    String description = "";
+    String buttonText = "Сохранить";
+    IconData icon = Icons.auto_awesome_rounded;
+    Color accent = widget.themeColor;
+    final bool isLogFood = (actionType == 'log_food' || actionType == 'log_meal');
+    int totalCals = 0, totalP = 0, totalF = 0, totalC = 0, totalFiber = 0;
+    String mealName = 'Приём пищи';
 
     if (actionType == 'shopping_list') {
-      title = "🛒 Список покупок"; description = "Ева составила список продуктов. Хотите сохранить его на Главный экран?"; buttonText = "СОХРАНИТЬ СПИСОК"; cardAccentColor = Colors.teal;
+      title = "Список покупок";
+      description = "Ева составила список продуктов. Сохранить его?";
+      buttonText = "Сохранить список";
+      icon = Icons.shopping_bag_outlined;
+      accent = palette.gold;
     } else if (actionType == 'update_goal' || actionType == 'set_goal') {
-      title = "🎯 Ваша новая цель КБЖУ"; description = "${_editableData['calories'] ?? 0} ккал\nБ: ${_editableData['protein'] ?? 0}г | Ж: ${_editableData['fat'] ?? 0}г | У: ${_editableData['carbs'] ?? 0}г"; buttonText = "ОБНОВИТЬ ЦЕЛЬ";
+      title = "Новая цель КБЖУ";
+      description = "${evaInt(_editableData['calories'])} ккал · Б ${evaInt(_editableData['protein'])} · Ж ${evaInt(_editableData['fat'])} · У ${evaInt(_editableData['carbs'])} г";
+      buttonText = "Обновить цель";
+      icon = Icons.track_changes_rounded;
     } else if (isLogFood) {
-      title = "🍽 Добавление в дневник"; buttonText = "ЗАПИСАТЬ В ДНЕВНИК";
-      List<dynamic> items = _editableData['items'] ?? [];
+      title = "Добавить в дневник";
+      buttonText = "Записать в дневник";
+      icon = Icons.restaurant_rounded;
+      List<dynamic> items = _editableData['items'] is List ? _editableData['items'] : [];
       if (items.isEmpty && (_editableData['meal_name'] != null || _editableData['name'] != null)) items = [_editableData];
-      mealName = _editableData['meal_name'] ?? _editableData['name'] ?? (items.isNotEmpty ? items.first['name'] : null) ?? 'Прием пищи';
-      for (var item in items) { 
-        totalCals += (item['calories'] as num?)?.toInt() ?? 0; 
-        totalP += (item['protein'] as num?)?.toInt() ?? 0; 
-        totalF += (item['fat'] as num?)?.toInt() ?? 0; 
-        totalC += (item['carbs'] as num?)?.toInt() ?? 0; 
-        totalFiber += (item['fiber'] as num?)?.toInt() ?? 0;
+      mealName = (_editableData['meal_name'] ?? _editableData['name'] ?? (items.isNotEmpty && items.first is Map ? items.first['meal_name'] ?? items.first['name'] : null) ?? 'Приём пищи').toString();
+      for (final item in items) {
+        if (item is! Map) continue;
+        totalCals += evaInt(item['calories']);
+        totalP += evaInt(item['protein']);
+        totalF += evaInt(item['fat']);
+        totalC += evaInt(item['carbs']);
+        totalFiber += evaInt(item['fiber']);
       }
     } else if (actionType == 'save_to_rag' || actionType == 'save_food') {
-      title = "📦 Новая этикетка"; buttonText = "ЗАПИСАТЬ В БАЗУ ДАННЫХ"; cardAccentColor = Colors.deepPurpleAccent; 
+      title = "Новая этикетка";
+      buttonText = "Сохранить продукт";
+      icon = Icons.qr_code_2_rounded;
+      accent = palette.lavender;
+    } else {
+      return const SizedBox.shrink();
     }
 
-    return Container(
-      margin: const EdgeInsets.symmetric(vertical: 8), padding: const EdgeInsets.all(16),
-      decoration: BoxDecoration(color: theme.colorScheme.surface, borderRadius: BorderRadius.circular(16), boxShadow: [BoxShadow(color: Colors.black.withValues(alpha: 0.04), blurRadius: 24, offset: const Offset(0, 8))], border: Border.all(color: _isSaved ? theme.colorScheme.onSurfaceVariant.withValues(alpha: 0.2) : cardAccentColor.withValues(alpha: 0.3), width: 1.5)),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Center(child: Text(title, style: TextStyle(color: theme.colorScheme.onSurface, fontWeight: FontWeight.bold, fontSize: 16))),
-          if (description.isNotEmpty) Padding(padding: const EdgeInsets.symmetric(vertical: 12.0), child: Center(child: Text(description, style: TextStyle(color: cardAccentColor, fontSize: 14, fontWeight: FontWeight.w600), textAlign: TextAlign.center))),
-          if (isLogFood) ...[
-            const SizedBox(height: 16),
-            Center(child: Text(mealName, style: TextStyle(color: theme.colorScheme.onSurface, fontSize: 16, fontWeight: FontWeight.w700), textAlign: TextAlign.center)),
-            const SizedBox(height: 12),
-            GestureDetector(
-              onTap: () => _showEditDialog('Калории', totalCals, 'calories', totalCals, totalP, totalF, totalC, theme),
-              child: Row(mainAxisAlignment: MainAxisAlignment.center, children: [Text("$totalCals ккал", style: TextStyle(color: widget.themeColor, fontSize: 24, fontWeight: FontWeight.w900, letterSpacing: -1.0)), if (!_isSaved) ...[const SizedBox(width: 8), Icon(Icons.edit_outlined, size: 16, color: theme.colorScheme.onSurfaceVariant)]]),
-            ),
-            const SizedBox(height: 16),
-            
-            Column(
+    return Padding(
+      padding: const EdgeInsets.only(top: 10, right: 24),
+      child: EvaCard(
+        padding: const EdgeInsets.all(18),
+        borderColor: _isSaved ? palette.hairline : accent.withValues(alpha: 0.35),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
               children: [
-                Row(
-                  children: [
-                    Expanded(child: _buildMacroEditBtn("Белки", totalP, "protein", totalCals, totalP, totalF, totalC, const Color(0xFFD49A89), theme)),
-                    const SizedBox(width: 8),
-                    Expanded(child: _buildMacroEditBtn("Жиры", totalF, "fat", totalCals, totalP, totalF, totalC, const Color(0xFFE5C158), theme)),
-                  ],
-                ),
-                const SizedBox(height: 8),
-                Row(
-                  children: [
-                    Expanded(child: _buildMacroEditBtn("Углеводы", totalC, "carbs", totalCals, totalP, totalF, totalC, const Color(0xFF89CFF0), theme)),
-                    const SizedBox(width: 8),
-                    Expanded(child: _buildMacroEditBtn("Клетчатка", totalFiber, "fiber", totalCals, totalP, totalF, totalC, Colors.green[300] ?? Colors.green, theme)),
-                  ],
-                ),
+                EvaIconBubble(icon: icon, color: accent, size: 38, iconSize: 19),
+                const SizedBox(width: 12),
+                Expanded(child: Text(title, style: theme.textTheme.titleMedium)),
+                if (_isSaved) EvaPill(text: 'Сохранено', icon: Icons.check_rounded, color: palette.success),
               ],
             ),
-          ],
-          const SizedBox(height: 16),
-          
-          SizedBox(
-            width: double.infinity,
-            child: OutlinedButton(
-              style: OutlinedButton.styleFrom(
-                backgroundColor: _isSaved ? Colors.transparent : cardAccentColor.withValues(alpha: 0.1),
-                side: BorderSide(color: _isSaved ? theme.colorScheme.onSurfaceVariant.withValues(alpha: 0.2) : cardAccentColor.withValues(alpha: 0.5)),
-                padding: const EdgeInsets.symmetric(vertical: 14),
-                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+            if (description.isNotEmpty) ...[
+              const SizedBox(height: 10),
+              Text(description, style: theme.textTheme.bodyMedium?.copyWith(color: theme.colorScheme.onSurfaceVariant)),
+            ],
+            if (isLogFood) ...[
+              const SizedBox(height: 14),
+              Text(mealName, style: theme.textTheme.titleLarge),
+              const SizedBox(height: 4),
+              EvaPressable(
+                onTap: _isSaved ? null : () => _showEditDialog('Калории', totalCals, 'calories', totalCals, totalP, totalF, totalC, theme),
+                child: Row(
+                  crossAxisAlignment: CrossAxisAlignment.end,
+                  children: [
+                    Text("$totalCals", style: theme.textTheme.displaySmall?.copyWith(color: accent)),
+                    const SizedBox(width: 6),
+                    Padding(padding: const EdgeInsets.only(bottom: 6), child: Text("ккал", style: theme.textTheme.titleSmall?.copyWith(color: theme.colorScheme.onSurfaceVariant))),
+                    if (!_isSaved) ...[
+                      const SizedBox(width: 6),
+                      Padding(padding: const EdgeInsets.only(bottom: 8), child: Icon(Icons.edit_outlined, size: 16, color: theme.colorScheme.onSurfaceVariant)),
+                    ],
+                  ],
+                ),
               ),
-              onPressed: (_isSaved || _isSavingNow) ? null : () async {
-                final msg = ScaffoldMessenger.of(context);
-                setState(() => _isSavingNow = true);
-
-                try {
-                  if (widget.imageUrl != null) {
-                    _editableData['imageUrl'] = widget.imageUrl;
-                  }
-
-                  if (actionType == 'update_goal' || actionType == 'set_goal') {
-                    await DatabaseService().saveNutritionGoal(_editableData).timeout(const Duration(seconds: 10));
-                  } else if (isLogFood) {
-                    await DatabaseService().logMeal(_editableData).timeout(const Duration(seconds: 10));
-                  } else if (actionType == 'shopping_list') {
-                    await DatabaseService().saveShoppingList(_editableData).timeout(const Duration(seconds: 10));
-                  }
-                  
-                  await DatabaseService().markBotMessageAsActionCompleted(widget.botType, widget.msgId).timeout(const Duration(seconds: 5));
-                  
-                  if (!mounted) return;
-                  setState(() {
-                    _isSaved = true;
-                    _isSavingNow = false;
-                  });
-                  widget.onSaveSuccess(widget.msgId);
-                  msg.showSnackBar(const SnackBar(
-                    content: Text('Успешно сохранено! ✨', style: TextStyle(fontWeight: FontWeight.bold)), 
-                    backgroundColor: Colors.teal,
-                    duration: Duration(seconds: 2),
-                  ));
-                  
-                } catch (e) {
-                  debugPrint('Ошибка БД: $e');
-                  if (!mounted) return;
-                  setState(() => _isSavingNow = false);
-                  msg.showSnackBar(const SnackBar(
-                    content: Text('Сбой сети. Попробуйте еще раз.', style: TextStyle(fontWeight: FontWeight.bold)), 
-                    backgroundColor: Colors.redAccent,
-                    duration: Duration(seconds: 3),
-                  ));
-                }
-              },
-              child: _isSavingNow
-                  ? SizedBox(width: 20, height: 20, child: CircularProgressIndicator(color: cardAccentColor, strokeWidth: 2))
-                  : Text(
-                      _isSaved ? "✓ СОХРАНЕНО" : buttonText, 
-                      style: TextStyle(color: _isSaved ? theme.colorScheme.onSurfaceVariant : cardAccentColor, fontWeight: FontWeight.bold)
-                    ),
-            ),
-          ),
-        ],
+              const SizedBox(height: 12),
+              Row(children: [
+                Expanded(child: _buildMacroEditBtn("Белки", totalP, "protein", totalCals, totalP, totalF, totalC, EvaColors.protein, theme)),
+                const SizedBox(width: 8),
+                Expanded(child: _buildMacroEditBtn("Жиры", totalF, "fat", totalCals, totalP, totalF, totalC, EvaColors.fat, theme)),
+              ]),
+              const SizedBox(height: 8),
+              Row(children: [
+                Expanded(child: _buildMacroEditBtn("Углеводы", totalC, "carbs", totalCals, totalP, totalF, totalC, EvaColors.carbs, theme)),
+                const SizedBox(width: 8),
+                Expanded(child: _buildMacroEditBtn("Клетчатка", totalFiber, "fiber", totalCals, totalP, totalF, totalC, EvaColors.fiber, theme)),
+              ]),
+            ],
+            if (!_isSaved) ...[
+              const SizedBox(height: 16),
+              EvaPrimaryButton(
+                label: buttonText,
+                height: 50,
+                loading: _isSavingNow,
+                onPressed: () => _save(actionType, isLogFood),
+              ),
+            ],
+          ],
+        ),
       ),
     );
   }

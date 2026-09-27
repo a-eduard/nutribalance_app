@@ -30,3 +30,13 @@ class AuthService {
     }
   }
 }
+extension AuthServiceSignOut on AuthService {
+  /// Полный выход: Firebase + Google (иначе при следующем входе Google
+  /// автоматически подставлял прежний аккаунт).
+  Future<void> signOutEverywhere() async {
+    try {
+      await GoogleSignIn().signOut();
+    } catch (_) {}
+    await FirebaseAuth.instance.signOut();
+  }
+}

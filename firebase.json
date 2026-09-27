@@ -35,5 +35,11 @@
         "*.local"
       ]
     }
-  ]
+  ],
+  "firestore": {
+    "rules": "security/firestore.rules.phase1"
+  },
+  "storage": {
+    "rules": "security/storage.rules"
+  }
 }

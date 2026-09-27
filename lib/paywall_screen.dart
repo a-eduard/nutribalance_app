@@ -1,11 +1,14 @@
 // Файл: lib/paywall_screen.dart
 
-import 'package:flutter/material.dart';
-import 'package:cloud_firestore/cloud_firestore.dart';
-import 'package:firebase_auth/firebase_auth.dart';
-import 'package:flutter_rustore_billing/flutter_rustore_billing.dart';
 import 'package:cloud_functions/cloud_functions.dart';
-import 'screens/dashboard_screen.dart';
+import 'package:firebase_auth/firebase_auth.dart';
+import 'package:flutter/material.dart';
+import 'package:flutter_rustore_billing/flutter_rustore_billing.dart';
+import 'package:url_launcher/url_launcher.dart';
+
+import 'services/subscription_service.dart';
+import 'theme/eva_colors.dart';
+import 'widgets/eva_ui.dart';
 
 class PaywallScreen extends StatefulWidget {
   final bool isFromProfile;
@@ -18,13 +21,12 @@ class PaywallScreen extends StatefulWidget {
 
 class _PaywallScreenState extends State<PaywallScreen> {
   bool _isLoading = false;
-  String _selectedPlan = 'month';
+  String _selectedPlan = 'year';
   String? _appliedPromo;
 
-  final double _basePriceMonth = 299;
-  final double _basePriceYear = 1490;
+  static const double _basePriceMonth = 299;
+  static const double _basePriceYear = 1490;
 
-  // АРХИТЕКТУРНОЕ ИСПРАВЛЕНИЕ: Предотвращение утечки памяти
   late final TextEditingController _promoController;
 
   @override
@@ -39,307 +41,147 @@ class _PaywallScreenState extends State<PaywallScreen> {
     super.dispose();
   }
 
-  void _closePaywall() {
-    if (Navigator.canPop(context)) {
-      Navigator.pop(context);
-    }
+  void _close() {
+    if (Navigator.canPop(context)) Navigator.pop(context);
   }
 
-  void _applyPromoCode(String code) {
-    final cleanCode = code.trim().toUpperCase();
-    final nav = Navigator.of(context);
-    final msg = ScaffoldMessenger.of(context);
+  // ---------------------------------------------------------------------------
+  // Промокоды (проверяются на сервере)
+  // ---------------------------------------------------------------------------
 
-    if (cleanCode == 'START3') {
-      setState(() => _appliedPromo = cleanCode);
-      nav.pop();
-      _processPayment();
-    } else if (cleanCode == 'SALE50EVA' || cleanCode == 'SALE50') {
+  Future<void> _applyPromoCode(String code) async {
+    final cleanCode = code.trim().toUpperCase();
+    if (cleanCode.isEmpty) return;
+
+    // Скидочные коды применяются локально (цена фиксируется продуктом RuStore).
+    if (cleanCode == 'SALE50EVA' || cleanCode == 'SALE50') {
       setState(() => _appliedPromo = 'SALE50');
-      nav.pop();
-      msg.showSnackBar(
-        SnackBar(
-          content: const Text(
-            "Промокод активирован! Скидка 50% применена ✨",
-            style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold),
-          ),
-          backgroundColor: Theme.of(context).colorScheme.primary,
-        ),
-      );
-    } else {
-      msg.showSnackBar(
-        const SnackBar(
-          content: Text("Неверный промокод"),
-          backgroundColor: Colors.redAccent,
-        ),
-      );
+      EvaSnack.show(context, 'Промокод применён: скидка 50% ✨', type: EvaSnackType.success);
+      return;
+    }
+
+    setState(() => _isLoading = true);
+    try {
+      final res = await FirebaseFunctions.instance
+          .httpsCallable('redeemPromo', options: HttpsCallableOptions(timeout: const Duration(seconds: 25)))
+          .call({'code': cleanCode});
+      if (!mounted) return;
+      final data = res.data is Map ? res.data as Map : const {};
+      if (data['type'] == 'discount') {
+        setState(() => _appliedPromo = (data['code'] ?? 'SALE50').toString());
+        EvaSnack.show(context, 'Промокод применён: скидка ${data['percent'] ?? 50}% ✨', type: EvaSnackType.success);
+      } else {
+        EvaSnack.show(context, 'Промокод активирован! Premium на ${data['days'] ?? 3} дн. ✨', type: EvaSnackType.success);
+        _close();
+      }
+    } on FirebaseFunctionsException catch (e) {
+      if (!mounted) return;
+      final String msg = switch (e.code) {
+        'already-exists' => 'Вы уже использовали этот промокод',
+        'not-found' => 'Неверный промокод',
+        'unauthenticated' => 'Войдите в аккаунт, чтобы применить промокод',
+        _ => 'Не удалось проверить промокод. Попробуйте позже.',
+      };
+      EvaSnack.show(context, msg, type: EvaSnackType.error);
+    } catch (e) {
+      if (mounted) EvaSnack.show(context, 'Нет соединения. Попробуйте позже.', type: EvaSnackType.error);
+    } finally {
+      if (mounted) setState(() => _isLoading = false);
     }
   }
 
   void _showPromoDialog() {
-    final theme = Theme.of(context);
-    _promoController.clear(); // Очищаем поле при каждом новом открытии
-    
-    showDialog(
+    _promoController.clear();
+    showDialog<void>(
       context: context,
       builder: (ctx) => AlertDialog(
-        backgroundColor: theme.colorScheme.surface,
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(24)),
-        title: Text(
-          "Промокод",
-          style: TextStyle(color: theme.colorScheme.onSurface, fontWeight: FontWeight.w800),
-        ),
+        title: const Text('Промокод'),
         content: TextField(
           controller: _promoController,
-          style: TextStyle(
-            color: theme.colorScheme.onSurface,
-            fontWeight: FontWeight.w600,
-          ),
-          decoration: InputDecoration(
-            hintText: "Введите код (START3, SALE50)",
-            hintStyle: TextStyle(
-              color: theme.colorScheme.onSurfaceVariant.withValues(alpha: 0.5),
-              fontWeight: FontWeight.normal,
-            ),
-            focusedBorder: UnderlineInputBorder(
-              borderSide: BorderSide(color: theme.colorScheme.primary),
-            ),
-          ),
-          cursorColor: theme.colorScheme.primary,
+          autofocus: true,
+          textCapitalization: TextCapitalization.characters,
+          decoration: const InputDecoration(hintText: 'Например, START3'),
         ),
         actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(ctx),
-            child: Text("Отмена", style: TextStyle(color: theme.colorScheme.onSurfaceVariant)),
-          ),
-          ElevatedButton(
-            style: ElevatedButton.styleFrom(
-              backgroundColor: theme.colorScheme.primary,
-              shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(16),
-              ),
-            ),
-            onPressed: () => _applyPromoCode(_promoController.text),
-            child: Text(
-              "Применить",
-              style: TextStyle(
-                color: theme.colorScheme.onPrimary,
-                fontWeight: FontWeight.bold,
-              ),
-            ),
+          TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Отмена')),
+          FilledButton(
+            onPressed: () {
+              final code = _promoController.text;
+              Navigator.pop(ctx);
+              _applyPromoCode(code);
+            },
+            child: const Text('Применить'),
           ),
         ],
       ),
     );
   }
 
-  Future<void> _buySubscription(String productId, int daysToAdd) async {
+  // ---------------------------------------------------------------------------
+  // Покупка через RuStore
+  // ---------------------------------------------------------------------------
+
+  Future<void> _buySubscription(String productId) async {
     final user = FirebaseAuth.instance.currentUser;
     if (user == null) return;
 
-    final nav = Navigator.of(context);
-    final msg = ScaffoldMessenger.of(context);
-    final theme = Theme.of(context);
-
     String pToken = '';
-
-    // БЛОК 1: Нативная покупка (RuStore)
     try {
-      final purchaseResult = await RustoreBillingClient.purchase(
-        productId,
-        user.uid,
-      );
-
+      final purchaseResult = await RustoreBillingClient.purchase(productId, user.uid);
       if (purchaseResult.successPurchase == null) {
         debugPrint("Оплата отменена пользователем или не удалась на устройстве.");
-        if (mounted) setState(() => _isLoading = false);
         return;
       }
-
-      pToken = purchaseResult.successPurchase!.purchaseId ?? '';
-      
+      pToken = purchaseResult.successPurchase!.purchaseId;
     } catch (nativeError) {
       debugPrint("🔥 Ошибка SDK RuStore: $nativeError");
-      if (mounted) {
-        final errorText = nativeError.toString().toLowerCase();
-        
-        if (errorText.contains('already') || 
-            errorText.contains('purchased') || 
-            errorText.contains('owned') || 
-            errorText.contains('приобретен')) {
-          
-          msg.showSnackBar(
-            SnackBar(
-              content: const Text(
-                "Подписка уже активна! Пытаемся восстановить доступ... ✨",
-                style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold),
-              ),
-              backgroundColor: theme.colorScheme.primary,
-              duration: const Duration(seconds: 4),
-            ),
-          );
-          _restorePurchases();
-        } else {
-          msg.showSnackBar(
-            const SnackBar(
-              content: Text(
-                "Оплата отменена или магазин не найден",
-                style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold),
-              ),
-              backgroundColor: Colors.redAccent,
-            ),
-          );
-          setState(() => _isLoading = false);
-        }
+      if (!mounted) return;
+      final errorText = nativeError.toString().toLowerCase();
+      if (errorText.contains('already') || errorText.contains('purchased') || errorText.contains('owned') || errorText.contains('приобретен')) {
+        EvaSnack.show(context, 'Подписка уже активна — восстанавливаем доступ…');
+        await _restorePurchases();
+      } else {
+        EvaSnack.show(
+          context,
+          'Оплата отменена или RuStore недоступен. Для оплаты нужен установленный RuStore и российский сервер (без VPN).',
+          type: EvaSnackType.error,
+          duration: const Duration(seconds: 6),
+        );
       }
-      return; // Прерываем выполнение, если нативная оплата провалилась
+      return;
     }
 
-    // БЛОК 2: Серверная валидация (Firebase Cloud Functions)
-    // Выполняется ТОЛЬКО если RuStore успешно списал деньги (выдал токен)
+    // Деньги списаны — подтверждаем на сервере.
     try {
-      final callable = FirebaseFunctions.instance.httpsCallable('verifyRuStorePurchase');
-      await callable.call({'productId': productId, 'purchaseToken': pToken});
-
-      if (mounted) {
-        msg.showSnackBar(
-          SnackBar(
-            content: const Text(
-              "Оплата прошла успешно! Добро пожаловать в Моя Ева Премиум ✨",
-              style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold),
-            ),
-            backgroundColor: theme.colorScheme.primary,
-          ),
-        );
-
-        if (widget.isFromProfile) {
-          nav.pop();
-        } else {
-          nav.pushReplacement(
-            MaterialPageRoute(builder: (_) => const DashboardScreen()),
-          );
-        }
-      }
+      await FirebaseFunctions.instance
+          .httpsCallable('verifyRuStorePurchase', options: HttpsCallableOptions(timeout: const Duration(seconds: 30)))
+          .call({'productId': productId, 'purchaseToken': pToken});
+      if (!mounted) return;
+      EvaSnack.show(context, 'Добро пожаловать в Моя Ева Premium ✨', type: EvaSnackType.success);
+      _close();
     } catch (serverError) {
       debugPrint("🔥 Ошибка Firebase Cloud Function: $serverError");
-      if (mounted) {
-        // Мы НЕ говорим пользователю "Ошибка оплаты", потому что деньги уже списаны!
-        msg.showSnackBar(
-          const SnackBar(
-            content: Text(
-              "Оплата прошла, но серверная проверка задерживается. Пожалуйста, нажмите 'Восстановить покупки' через пару минут.",
-              style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold),
-            ),
-            backgroundColor: Colors.orange,
-            duration: Duration(seconds: 8),
-          ),
-        );
-      }
-    } finally {
-      if (mounted) setState(() => _isLoading = false);
+      if (!mounted) return;
+      EvaSnack.show(
+        context,
+        "Оплата прошла, но подтверждение задерживается. Нажмите «Восстановить покупки» через пару минут.",
+        type: EvaSnackType.info,
+        duration: const Duration(seconds: 8),
+      );
     }
   }
-  
+
   Future<void> _processPayment() async {
     setState(() => _isLoading = true);
-    
-    final nav = Navigator.of(context);
-    final msg = ScaffoldMessenger.of(context);
-    final theme = Theme.of(context);
-
     try {
-      if (_appliedPromo == 'START3') {
-        final user = FirebaseAuth.instance.currentUser;
-        if (user != null) {
-          final userDoc = await FirebaseFirestore.instance
-              .collection('users')
-              .doc(user.uid)
-              .get();
-          final userData = userDoc.data() ?? {};
-          final List<dynamic> usedPromos = userData['usedPromoCodes'] ?? [];
-
-          if (usedPromos.contains('START3')) {
-            if (mounted) {
-              msg.showSnackBar(
-                const SnackBar(
-                  content: Text(
-                    "Вы уже использовали этот промокод 😔",
-                    style: TextStyle(
-                      color: Colors.white,
-                      fontWeight: FontWeight.bold,
-                    ),
-                  ),
-                  backgroundColor: Colors.redAccent,
-                ),
-              );
-              setState(() => _isLoading = false);
-            }
-            return;
-          }
-
-          final untilDate = DateTime.now().add(const Duration(days: 3));
-          await FirebaseFirestore.instance
-              .collection('users')
-              .doc(user.uid)
-              .update({
-                'isPro': true,
-                'proUntil': Timestamp.fromDate(untilDate),
-                'usedPromoCodes': FieldValue.arrayUnion(['START3']),
-              });
-        }
-
-        if (mounted) {
-          msg.showSnackBar(
-            SnackBar(
-              content: const Text(
-                "Промокод активирован! Премиум доступен ✨",
-                style: TextStyle(
-                  color: Colors.white,
-                  fontWeight: FontWeight.bold,
-                ),
-              ),
-              backgroundColor: theme.colorScheme.primary,
-            ),
-          );
-          if (widget.isFromProfile) {
-            nav.pop();
-          } else {
-            nav.pushReplacement(
-              MaterialPageRoute(builder: (_) => const DashboardScreen()),
-            );
-          }
-        }
-        return;
-      }
-
-      bool hasDiscount = _appliedPromo == 'SALE50';
-
-      String monthProductId = hasDiscount
-          ? 'eva_sub_1_month_promo'
-          : 'eva_sub_1_month';
-      String yearProductId = hasDiscount
-          ? 'eva_sub_1_year_promo'
-          : 'eva_sub_1_year';
-
-      if (_selectedPlan == 'month') {
-        await _buySubscription(monthProductId, 30);
-      } else if (_selectedPlan == 'year') {
-        await _buySubscription(yearProductId, 365);
-      }
+      final bool discount = _appliedPromo == 'SALE50';
+      final String productId = _selectedPlan == 'month'
+          ? (discount ? 'eva_sub_1_month_promo' : 'eva_sub_1_month')
+          : (discount ? 'eva_sub_1_year_promo' : 'eva_sub_1_year');
+      await _buySubscription(productId);
     } catch (e) {
       debugPrint("🔥 ОШИБКА ИНИЦИАЛИЗАЦИИ ПЛАТЕЖА: $e");
-      if (mounted) {
-        msg.showSnackBar(
-          SnackBar(
-            content: Text(
-              'Системная ошибка: $e',
-              style: const TextStyle(fontSize: 12),
-            ),
-            backgroundColor: Colors.red,
-            duration: const Duration(seconds: 5),
-          ),
-        );
-      }
+      if (mounted) EvaSnack.show(context, 'Системная ошибка: $e', type: EvaSnackType.error);
     } finally {
       if (mounted) setState(() => _isLoading = false);
     }
@@ -347,398 +189,141 @@ class _PaywallScreenState extends State<PaywallScreen> {
 
   Future<void> _restorePurchases() async {
     setState(() => _isLoading = true);
-    
-    final nav = Navigator.of(context);
-    final msg = ScaffoldMessenger.of(context);
-    final theme = Theme.of(context);
-    
-    final user = FirebaseAuth.instance.currentUser;
-    if (user == null) {
-      setState(() => _isLoading = false);
-      return;
-    }
-
     try {
-      final response = await RustoreBillingClient.purchases();
-      final purchasesList = response.purchases; 
-
-      bool hasActiveSub = false;
-
-      for (var p in purchasesList) {
-        if (p == null) continue; 
-        final stateStr = p.purchaseState?.toString().toUpperCase() ?? '';
-        if (stateStr.contains('PAID') ||
-            stateStr.contains('CONFIRMED') ||
-            stateStr.contains('COMPLETED')) {
-          
-          String pToken = p.purchaseId ?? "";
-          String pId = p.productId ?? "";
-
-          if (pToken.isNotEmpty) {
-            try {
-              final callable = FirebaseFunctions.instance.httpsCallable('verifyRuStorePurchase');
-              await callable.call({'productId': pId, 'purchaseToken': pToken});
-              hasActiveSub = true;
-            } catch (cfError) {
-              debugPrint("🔥 Ошибка восстановления чека $pToken: $cfError");
-              // Продолжаем цикл: если серверов RuStore (502) не отвечает на один чек, 
-              // попытаемся восстановить другие, не краша весь процесс.
-            }
-          }
-        }
-      }
-
-      if (hasActiveSub) {
-        if (mounted) {
-          msg.showSnackBar(
-            SnackBar(
-              content: const Text(
-                "Покупки успешно восстановлены! ✨",
-                style: TextStyle(
-                  color: Colors.white,
-                  fontWeight: FontWeight.bold,
-                ),
-              ),
-              backgroundColor: theme.colorScheme.primary,
-            ),
-          );
-          if (widget.isFromProfile) {
-            nav.pop();
-          } else {
-            nav.pushReplacement(
-              MaterialPageRoute(builder: (_) => const DashboardScreen()),
-            );
-          }
-        }
+      final bool ok = await SubscriptionService().restorePurchases();
+      if (!mounted) return;
+      if (ok) {
+        EvaSnack.show(context, 'Покупки восстановлены ✨', type: EvaSnackType.success);
+        _close();
       } else {
-        if (mounted) {
-          msg.showSnackBar(
-            const SnackBar(
-              content: Text(
-                "Сервер временно недоступен или активных подписок нет.",
-                style: TextStyle(
-                  color: Colors.white,
-                  fontWeight: FontWeight.bold,
-                ),
-              ),
-              backgroundColor: Colors.redAccent,
-            ),
-          );
-        }
+        EvaSnack.show(context, 'Активных подписок не найдено.', type: EvaSnackType.info);
       }
     } catch (e) {
-      debugPrint("Ошибка нативного восстановления: $e");
+      debugPrint("Ошибка восстановления: $e");
       if (mounted) {
-        msg.showSnackBar(
-          const SnackBar(
-            content: Text(
-              "Ошибка при связи с магазином на устройстве",
-              style: TextStyle(
-                color: Colors.white,
-                fontWeight: FontWeight.bold,
-              ),
-            ),
-            backgroundColor: Colors.redAccent,
-          ),
-        );
+        EvaSnack.show(context, 'Не удалось связаться с RuStore. Проверьте, что он установлен и VPN выключен.', type: EvaSnackType.error);
       }
     } finally {
       if (mounted) setState(() => _isLoading = false);
     }
   }
 
+  // ---------------------------------------------------------------------------
+  // UI
+  // ---------------------------------------------------------------------------
+
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    
-    String ctaText = "НАЧАТЬ ПРЕОБРАЖЕНИЕ";
-    if (_appliedPromo == 'START3') ctaText = "Начать 3 дня бесплатно";
-    if (_appliedPromo == 'SALE50') ctaText = "ОПЛАТИТЬ СО СКИДКОЙ";
+    final bool discount = _appliedPromo == 'SALE50';
+    final int price = (_selectedPlan == 'month' ? _basePriceMonth : _basePriceYear).toInt() ~/ (discount ? 2 : 1);
 
     return PopScope(
-      canPop: widget.isFromProfile,
-      onPopInvokedWithResult: (didPop, result) {
-        if (didPop) return;
-        _closePaywall();
-      },
+      canPop: true,
       child: Scaffold(
-        backgroundColor: theme.scaffoldBackgroundColor,
-        body: SafeArea(
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Padding(
-                padding: const EdgeInsets.only(right: 16.0, top: 8.0),
-                child: Align(
+        body: EvaBackground(
+          child: SafeArea(
+            child: Column(
+              children: [
+                Align(
                   alignment: Alignment.topRight,
-                  child: IconButton(
-                    icon: Icon(
-                      Icons.close,
-                      color: theme.colorScheme.onSurfaceVariant,
-                      size: 24,
-                    ), 
-                    onPressed: _closePaywall,
+                  child: Padding(
+                    padding: const EdgeInsets.fromLTRB(0, 8, 16, 0),
+                    child: EvaCircleButton(icon: Icons.close_rounded, size: 40, onTap: _close, tooltip: 'Закрыть'),
                   ),
                 ),
-              ),
-
-              Expanded(
-                child: SingleChildScrollView(
-                  padding: const EdgeInsets.symmetric(horizontal: 28.0),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
+                Expanded(
+                  child: ListView(
+                    padding: const EdgeInsets.fromLTRB(24, 4, 24, 24),
                     children: [
+                      EvaOverline('Моя Ева Premium', color: context.eva.gold),
+                      const SizedBox(height: 10),
+                      Text('Забота о себе,\nа не строгие диеты', style: theme.textTheme.displaySmall),
+                      const SizedBox(height: 10),
                       Text(
-                        "✨ Забота о себе,\nа не строгие диеты",
-                        style: TextStyle(
-                          fontSize: 28, 
-                          fontWeight: FontWeight.w900,
-                          color: theme.colorScheme.onSurface,
-                          height: 1.1, 
-                          letterSpacing: -0.5,
-                        ),
+                        'Личный ИИ-нутрициолог и подруга: питание, женское здоровье и мотивация — без ругани за калории.',
+                        style: theme.textTheme.bodyLarge?.copyWith(color: theme.colorScheme.onSurfaceVariant),
                       ),
-                      const SizedBox(height: 8), 
-                      Text(
-                        "Твой личный ИИ-коуч и подруга. Поможет с питанием, женским здоровьем и мотивацией без ругани за калории.",
-                        style: TextStyle(
-                          fontSize: 14, 
-                          color: theme.colorScheme.onSurfaceVariant,
-                          height: 1.3,
-                          fontWeight: FontWeight.w500,
-                        ),
-                      ),
-
-                      const SizedBox(height: 16), 
-                      
-                      _buildFeatureItem(
-                        Icons.auto_awesome,
-                        "Умный план питания",
-                        "Индивидуальное меню на основе анализов.",
-                        theme,
-                      ),
-                      _buildFeatureItem(
-                        Icons.health_and_safety,
-                        "Анализ симптомов",
-                        "Мгновенная расшифровка самочувствия.",
-                        theme,
-                      ),
-                      _buildFeatureItem(
-                        Icons.support_agent,
-                        "Поддержка 24/7",
-                        "Приоритетные ответы от специалистов.",
-                        theme,
-                      ),
-
-                      const SizedBox(height: 16), 
-
+                      const SizedBox(height: 24),
+                      _feature(theme, Icons.auto_awesome_rounded, 'Ева без ограничений', 'Чат, фото тарелки и рецепты — сколько угодно'),
+                      _feature(theme, Icons.description_outlined, 'Расшифровка анализов', 'PDF с результатами — простым языком'),
+                      _feature(theme, Icons.spa_outlined, 'Питание по фазе цикла', 'Меню, которое подстраивается под тебя'),
+                      _feature(theme, Icons.insights_rounded, 'Итоги недели', 'Разбор привычек и персональные советы'),
+                      const SizedBox(height: 22),
                       IntrinsicHeight(
                         child: Row(
                           crossAxisAlignment: CrossAxisAlignment.stretch,
                           children: [
-                            _buildPlanCard(
-                              'month',
-                              '1 месяц',
-                              _basePriceMonth,
-                              theme,
-                              oldPrice: 590,
-                            ),
-                            const SizedBox(width: 16),
-                            _buildPlanCard(
-                              'year',
-                              '1 год',
-                              _basePriceYear,
-                              theme,
-                              oldPrice: 3588,
-                              label: 'ВЫГОДА 58%',
-                              subtitle: 'Всего 124 ₽ в месяц!',
-                            ),
+                            Expanded(child: _planCard(theme, 'month', '1 месяц', _basePriceMonth, 590)),
+                            const SizedBox(width: 12),
+                            Expanded(child: _planCard(theme, 'year', '1 год', _basePriceYear, 3588, badge: 'Выгода 58%', note: '≈ 124 ₽ в месяц')),
                           ],
                         ),
                       ),
-
-                      const SizedBox(height: 24),
-
-                      if (!widget.isFromProfile)
-                        Center(
-                          child: TextButton(
-                            onPressed: _closePaywall,
-                            child: Text(
-                              "Уже есть аккаунт? Войти",
-                              style: TextStyle(
-                                color: theme.colorScheme.onSurfaceVariant,
-                                fontWeight: FontWeight.w600,
-                                decoration: TextDecoration.underline,
-                              ),
-                            ),
-                          ),
-                        ),
-
-                      const SizedBox(height: 40),
                     ],
                   ),
                 ),
-              ),
-
-              Container(
-                padding: const EdgeInsets.fromLTRB(28, 20, 28, 32),
-                decoration: BoxDecoration(
-                  color: theme.colorScheme.surface,
-                  borderRadius: const BorderRadius.vertical(
-                    top: Radius.circular(32),
+                Container(
+                  padding: const EdgeInsets.fromLTRB(24, 16, 24, 12),
+                  decoration: BoxDecoration(
+                    color: theme.colorScheme.surface,
+                    borderRadius: const BorderRadius.vertical(top: Radius.circular(28)),
+                    border: Border(top: BorderSide(color: context.eva.hairline)),
                   ),
-                  boxShadow: [
-                    BoxShadow(
-                      color: Colors.black.withValues(alpha: 0.04),
-                      blurRadius: 32,
-                      offset: const Offset(0, -8),
-                    ),
-                  ],
-                ),
-                child: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    Container(
-                      width: double.infinity,
-                      height: 60,
-                      decoration: BoxDecoration(
-                        gradient: LinearGradient(
-                          colors: [theme.colorScheme.primary, theme.colorScheme.secondary],
-                          begin: Alignment.topLeft,
-                          end: Alignment.bottomRight,
-                        ),
-                        borderRadius: BorderRadius.circular(24),
-                        boxShadow: [
-                          BoxShadow(
-                            color: theme.colorScheme.primary.withValues(alpha: 0.3),
-                            blurRadius: 24,
-                            offset: const Offset(0, 8),
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      EvaPrimaryButton(
+                        label: discount ? 'Оплатить со скидкой' : 'Начать 3 дня бесплатно',
+                        loading: _isLoading,
+                        onPressed: _processPayment,
+                      ),
+                      const SizedBox(height: 8),
+                      Text(
+                        '3 дня бесплатно, затем $price ₽ / ${_selectedPlan == 'month' ? 'месяц' : 'год'}. Отмена в любой момент в RuStore.',
+                        textAlign: TextAlign.center,
+                        style: theme.textTheme.bodySmall,
+                      ),
+                      const SizedBox(height: 4),
+                      Wrap(
+                        alignment: WrapAlignment.center,
+                        children: [
+                          TextButton(onPressed: _isLoading ? null : _showPromoDialog, child: Text(_appliedPromo != null ? 'Промокод $_appliedPromo ✓' : 'Промокод')),
+                          TextButton(onPressed: _isLoading ? null : _restorePurchases, child: const Text('Восстановить покупки')),
+                          TextButton(
+                            onPressed: () => launchUrl(
+                              Uri.parse('https://docs.google.com/document/d/1GpHL1IbLlklUrKQ2jShjlNIrXd2V4V1H/edit?usp=sharing'),
+                              mode: LaunchMode.externalApplication,
+                            ),
+                            child: const Text('Условия'),
                           ),
                         ],
                       ),
-                      child: ElevatedButton(
-                        onPressed: _isLoading ? null : _processPayment,
-                        style: ElevatedButton.styleFrom(
-                          backgroundColor: Colors.transparent,
-                          shadowColor: Colors.transparent,
-                          shape: RoundedRectangleBorder(
-                            borderRadius: BorderRadius.circular(24),
-                          ),
-                        ),
-                        child: _isLoading
-                            ? SizedBox(
-                                width: 24,
-                                height: 24,
-                                child: CircularProgressIndicator(
-                                  color: theme.colorScheme.onPrimary,
-                                  strokeWidth: 2,
-                                ),
-                              )
-                            : Text(
-                                ctaText,
-                                style: TextStyle(
-                                  color: theme.colorScheme.onPrimary,
-                                  fontWeight: FontWeight.w800,
-                                  fontSize: 16,
-                                  letterSpacing: 0.5,
-                                ),
-                              ),
-                      ),
-                    ),
-                    const SizedBox(height: 12),
-                    Text(
-                      _selectedPlan == 'month'
-                          ? "3 дня бесплатно, затем ${(_appliedPromo == 'SALE50' ? _basePriceMonth / 2 : _basePriceMonth).toInt()} ₽ / месяц"
-                          : "3 дня бесплатно, затем ${(_appliedPromo == 'SALE50' ? _basePriceYear / 2 : _basePriceYear).toInt()} ₽ / год",
-                      textAlign: TextAlign.center,
-                      style: TextStyle(
-                        color: theme.colorScheme.onSurfaceVariant.withValues(alpha: 0.7), 
-                        fontSize: 12,
-                        fontWeight: FontWeight.w500,
-                      ),
-                    ),
-                    const SizedBox(height: 8),
-                    GestureDetector(
-                      onTap: _showPromoDialog,
-                      child: Text(
-                        _appliedPromo != null
-                            ? "Промокод $_appliedPromo применен"
-                            : "У меня есть промокод",
-                        style: TextStyle(
-                          color: _appliedPromo != null
-                              ? Colors.teal
-                              : theme.colorScheme.onSurfaceVariant.withValues(alpha: 0.5),
-                          fontSize: 13,
-                          fontWeight: FontWeight.w600,
-                          decoration: TextDecoration.underline,
-                          decorationColor: _appliedPromo != null
-                              ? Colors.teal
-                              : theme.colorScheme.onSurfaceVariant.withValues(alpha: 0.5),
-                        ),
-                      ),
-                    ),
-                    const SizedBox(height: 16),
-                    GestureDetector(
-                      onTap: _isLoading ? null : _restorePurchases,
-                      child: Text(
-                        "Восстановить покупки",
-                        style: TextStyle(
-                          color: theme.colorScheme.onSurfaceVariant,
-                          fontSize: 13,
-                          fontWeight: FontWeight.w600,
-                          decoration: TextDecoration.underline,
-                          decorationColor: theme.colorScheme.onSurfaceVariant,
-                        ),
-                      ),
-                    ),
-                  ],
+                    ],
+                  ),
                 ),
-              ),
-            ],
+              ],
+            ),
           ),
         ),
       ),
     );
   }
 
-  Widget _buildFeatureItem(IconData icon, String title, String subtitle, ThemeData theme) {
+  Widget _feature(ThemeData theme, IconData icon, String title, String subtitle) {
     return Padding(
-      padding: const EdgeInsets.only(bottom: 12.0), 
+      padding: const EdgeInsets.only(bottom: 14),
       child: Row(
         children: [
-          Container(
-            padding: const EdgeInsets.all(8), 
-            decoration: BoxDecoration(
-              color: theme.colorScheme.primary.withValues(alpha: 0.1),
-              borderRadius: BorderRadius.circular(10), 
-            ),
-            child: Icon(
-              icon,
-              color: theme.colorScheme.primary,
-              size: 20,
-            ), 
-          ),
-          const SizedBox(width: 12), 
+          EvaIconBubble(icon: icon, size: 42, iconSize: 21),
+          const SizedBox(width: 14),
           Expanded(
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Text(
-                  title,
-                  style: TextStyle(
-                    fontSize: 16,
-                    fontWeight: FontWeight.w700,
-                    color: theme.colorScheme.onSurface,
-                  ),
-                ),
-                Text(
-                  subtitle,
-                  style: TextStyle(
-                    fontSize: 13,
-                    color: theme.colorScheme.onSurfaceVariant,
-                    fontWeight: FontWeight.w500,
-                  ),
-                ),
+                Text(title, style: theme.textTheme.titleMedium),
+                const SizedBox(height: 1),
+                Text(subtitle, style: theme.textTheme.bodySmall),
               ],
             ),
           ),
@@ -747,118 +332,44 @@ class _PaywallScreenState extends State<PaywallScreen> {
     );
   }
 
-  Widget _buildPlanCard(
-    String planId,
-    String title,
-    double basePrice,
-    ThemeData theme, {
-    double? oldPrice,
-    String? label,
-    String? subtitle,
-  }) {
-    bool isSelected = _selectedPlan == planId;
-    bool hasDiscount = _appliedPromo == 'SALE50';
+  Widget _planCard(ThemeData theme, String planId, String title, double basePrice, double oldPrice, {String? badge, String? note}) {
+    final bool selected = _selectedPlan == planId;
+    final bool discount = _appliedPromo == 'SALE50';
+    final int finalPrice = (discount ? basePrice / 2 : basePrice).toInt();
+    final palette = context.eva;
 
-    double finalPrice = hasDiscount ? basePrice / 2 : basePrice;
-    double finalOldPrice = oldPrice ?? (basePrice * 2.5);
-
-    return Expanded(
-      child: GestureDetector(
-        onTap: () => setState(() => _selectedPlan = planId),
+    return EvaPressable(
+      onTap: () => setState(() => _selectedPlan = planId),
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 200),
+        padding: const EdgeInsets.all(2),
+        decoration: BoxDecoration(
+          gradient: selected ? palette.hero : null,
+          color: selected ? null : palette.hairline,
+          borderRadius: BorderRadius.circular(24),
+          boxShadow: selected ? [BoxShadow(color: theme.colorScheme.primary.withValues(alpha: 0.2), blurRadius: 20, offset: const Offset(0, 8))] : null,
+        ),
         child: Container(
-          padding: const EdgeInsets.all(16),
-          decoration: BoxDecoration(
-            color: isSelected ? theme.colorScheme.primary.withValues(alpha: 0.1) : theme.colorScheme.surface,
-            borderRadius: BorderRadius.circular(24),
-            border: Border.all(
-              color: isSelected ? theme.colorScheme.primary : Colors.transparent,
-              width: 2,
-            ),
-            boxShadow: [
-              BoxShadow(
-                color: isSelected
-                    ? theme.colorScheme.primary.withValues(alpha: 0.15)
-                    : Colors.black.withValues(alpha: 0.04),
-                blurRadius: 32,
-                offset: const Offset(0, 8),
-              ),
-            ],
-          ),
+          padding: const EdgeInsets.fromLTRB(16, 16, 16, 16),
+          decoration: BoxDecoration(color: theme.colorScheme.surface, borderRadius: BorderRadius.circular(22)),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
-            mainAxisAlignment: MainAxisAlignment.center,
             children: [
-              if (label != null)
-                Container(
-                  margin: const EdgeInsets.only(bottom: 12),
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: 8,
-                    vertical: 4,
-                  ),
-                  decoration: BoxDecoration(
-                    color: theme.colorScheme.primary,
-                    borderRadius: BorderRadius.circular(8),
-                  ),
-                  child: Text(
-                    label.toUpperCase(),
-                    style: TextStyle(
-                      color: theme.colorScheme.onPrimary,
-                      fontSize: 9,
-                      fontWeight: FontWeight.w900,
-                      letterSpacing: 0.5,
-                    ),
-                  ),
-                ),
+              if (badge != null) ...[
+                EvaPill(text: badge, color: palette.gold, solid: true),
+                const SizedBox(height: 10),
+              ] else
+                const SizedBox(height: 32),
+              Text(title, style: theme.textTheme.titleMedium?.copyWith(color: selected ? theme.colorScheme.primary : theme.colorScheme.onSurface)),
+              const SizedBox(height: 6),
               Text(
-                title,
-                style: TextStyle(
-                  fontSize: 15, 
-                  fontWeight: FontWeight.w800,
-                  color: isSelected ? theme.colorScheme.primary : theme.colorScheme.onSurfaceVariant,
-                ),
+                '${oldPrice.toInt()} ₽',
+                style: theme.textTheme.bodySmall?.copyWith(decoration: TextDecoration.lineThrough),
               ),
-              const SizedBox(height: 4), 
-
-              Text(
-                "${finalOldPrice.toInt()} ₽",
-                style: TextStyle(
-                  fontSize: 13, 
-                  color: theme.colorScheme.onSurfaceVariant,
-                  decoration: TextDecoration.lineThrough,
-                  fontWeight: FontWeight.w600,
-                ),
-              ),
-
-              Text(
-                "${finalPrice.toInt()} ₽",
-                style: TextStyle(
-                  fontSize: 26, 
-                  fontWeight: FontWeight.w900,
-                  color: theme.colorScheme.onSurface,
-                  letterSpacing: -1.0,
-                ),
-              ),
-
-              if (subtitle != null) ...[
-                const SizedBox(height: 8), 
-                Container(
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: 8,
-                    vertical: 6,
-                  ),
-                  decoration: BoxDecoration(
-                    color: theme.colorScheme.primary.withValues(alpha: 0.15),
-                    borderRadius: BorderRadius.circular(8),
-                  ),
-                  child: Text(
-                    subtitle,
-                    style: TextStyle(
-                      color: theme.colorScheme.primary,
-                      fontSize: 11,
-                      fontWeight: FontWeight.w800,
-                    ),
-                  ),
-                ),
+              Text('$finalPrice ₽', style: theme.textTheme.headlineLarge),
+              if (note != null) ...[
+                const SizedBox(height: 6),
+                Text(note, style: theme.textTheme.labelMedium?.copyWith(color: palette.gold)),
               ],
             ],
           ),

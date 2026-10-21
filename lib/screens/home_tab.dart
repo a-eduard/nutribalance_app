@@ -442,107 +442,111 @@ class _HomeTabState extends State<HomeTab> with AutomaticKeepAliveClientMixin, W
     }
     final bool hasData = lastStartTs != null;
 
+    final Widget calendarButton = EvaCircleButton(
+      icon: Icons.calendar_month_rounded,
+      tooltip: 'Изменить дату начала цикла',
+      size: 46,
+      onTap: () async {
+        final picked = await showDatePicker(
+          context: context,
+          initialDate: lastStartTs?.toDate() ?? DateTime.now(),
+          firstDate: DateTime.now().subtract(const Duration(days: 365)),
+          lastDate: DateTime.now(),
+        );
+        if (picked != null && _uid != null) {
+          FirebaseFirestore.instance
+              .collection('users')
+              .doc(_uid)
+              .set({'lastPeriodStartDate': Timestamp.fromDate(picked), 'lastPeriodEndDate': FieldValue.delete()}, SetOptions(merge: true))
+              .catchError((e) => debugPrint('$e'));
+        }
+      },
+    );
+
+    final Widget infoButton = EvaCircleButton(
+      icon: Icons.info_outline_rounded,
+      tooltip: 'Справка',
+      size: 46,
+      onTap: () => HarmonyBottomSheets.showInfoSheet(
+        context: context,
+        title: 'Твой цикл',
+        description: 'Розовая дуга — дни менструации, лавандовая — окно овуляции. Точка показывает сегодняшний день.',
+      ),
+    );
+
+    // Кольцо по центру, кнопки по бокам; название фазы и описание — под кольцом
+    // на всю ширину карточки, чтобы длинные названия не рвались посреди слова.
     return EvaCard(
       padding: const EdgeInsets.all(20),
       child: Column(
         children: [
           Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
-              SizedBox(
-                width: 132,
-                height: 132,
-                child: Stack(
-                  alignment: Alignment.center,
-                  children: [
-                    CustomPaint(
-                      size: const Size(132, 132),
-                      painter: CycleRingPainter(
-                        cycleLength: cycleLength,
-                        periodDuration: periodDuration,
-                        currentDay: currentDay,
-                        ovulationDay: manualOv ?? max(1, cycleLength - 13),
-                        hasData: hasData,
-                        baseColor: palette.fieldFill,
-                        primaryColor: EvaColors.menstruation,
-                        ovulationColor: palette.lavender,
-                        indicatorColor: theme.colorScheme.surface,
-                        dotColor: theme.colorScheme.primary,
+              calendarButton,
+              // Кольцо фиксированного размера: ограничиваем рост шрифта внутри него,
+              // иначе при крупном шрифте в настройках телефона цифра не помещается.
+              MediaQuery.withClampedTextScaling(
+                maxScaleFactor: 1.2,
+                child: SizedBox(
+                  width: 132,
+                  height: 132,
+                  child: Stack(
+                    alignment: Alignment.center,
+                    children: [
+                      CustomPaint(
+                        size: const Size(132, 132),
+                        painter: CycleRingPainter(
+                          cycleLength: cycleLength,
+                          periodDuration: periodDuration,
+                          currentDay: currentDay,
+                          ovulationDay: manualOv ?? max(1, cycleLength - 13),
+                          hasData: hasData,
+                          baseColor: palette.fieldFill,
+                          primaryColor: EvaColors.menstruation,
+                          ovulationColor: palette.lavender,
+                          indicatorColor: theme.colorScheme.surface,
+                          dotColor: theme.colorScheme.primary,
+                        ),
                       ),
-                    ),
-                    Column(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        Text(hasData ? '$currentDay' : '—', style: theme.textTheme.displayMedium?.copyWith(height: 1)),
-                        Text('день цикла', style: theme.textTheme.labelSmall?.copyWith(color: theme.colorScheme.onSurfaceVariant)),
-                      ],
-                    ),
-                  ],
+                      Column(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Text(hasData ? '$currentDay' : '—', style: theme.textTheme.displayMedium?.copyWith(height: 1)),
+                          Text('день цикла', style: theme.textTheme.labelSmall?.copyWith(color: theme.colorScheme.onSurfaceVariant)),
+                        ],
+                      ),
+                    ],
+                  ),
                 ),
               ),
-              const SizedBox(width: 16),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    const EvaOverline('Мой цикл'),
-                    const SizedBox(height: 4),
-                    Text(hasData ? phase.title : 'Отметь начало цикла', style: theme.textTheme.titleLarge),
-                    const SizedBox(height: 4),
-                    Text(
-                      hasData ? phase.description : 'Ева будет подсказывать питание и самочувствие по фазам.',
-                      style: theme.textTheme.bodySmall,
-                      maxLines: 3,
-                      overflow: TextOverflow.ellipsis,
-                    ),
-                  ],
-                ),
-              ),
+              infoButton,
             ],
           ),
+          const SizedBox(height: 14),
+          const EvaOverline('Мой цикл'),
+          const SizedBox(height: 4),
+          Text(
+            hasData ? phase.title : 'Отметь начало цикла',
+            style: theme.textTheme.titleLarge,
+            textAlign: TextAlign.center,
+            maxLines: 2,
+            overflow: TextOverflow.ellipsis,
+          ),
+          const SizedBox(height: 4),
+          Text(
+            hasData ? phase.description : 'Ева будет подсказывать питание и самочувствие по фазам.',
+            style: theme.textTheme.bodySmall,
+            textAlign: TextAlign.center,
+            maxLines: 3,
+            overflow: TextOverflow.ellipsis,
+          ),
           const SizedBox(height: 16),
-          Row(
-            children: [
-              Expanded(
-                child: EvaPrimaryButton(
-                  label: 'Отметить день',
-                  icon: Icons.edit_note_rounded,
-                  height: 46,
-                  onPressed: () => _openDailyTracker(userData),
-                ),
-              ),
-              const SizedBox(width: 10),
-              EvaCircleButton(
-                icon: Icons.calendar_month_rounded,
-                tooltip: 'Изменить дату начала цикла',
-                size: 46,
-                onTap: () async {
-                  final picked = await showDatePicker(
-                    context: context,
-                    initialDate: lastStartTs?.toDate() ?? DateTime.now(),
-                    firstDate: DateTime.now().subtract(const Duration(days: 365)),
-                    lastDate: DateTime.now(),
-                  );
-                  if (picked != null && _uid != null) {
-                    FirebaseFirestore.instance
-                        .collection('users')
-                        .doc(_uid)
-                        .set({'lastPeriodStartDate': Timestamp.fromDate(picked), 'lastPeriodEndDate': FieldValue.delete()}, SetOptions(merge: true))
-                        .catchError((e) => debugPrint('$e'));
-                  }
-                },
-              ),
-              const SizedBox(width: 8),
-              EvaCircleButton(
-                icon: Icons.info_outline_rounded,
-                tooltip: 'Справка',
-                size: 46,
-                onTap: () => HarmonyBottomSheets.showInfoSheet(
-                  context: context,
-                  title: 'Твой цикл',
-                  description: 'Розовая дуга — дни менструации, лавандовая — окно овуляции. Точка показывает сегодняшний день.',
-                ),
-              ),
-            ],
+          EvaPrimaryButton(
+            label: 'Отметить день',
+            icon: Icons.edit_note_rounded,
+            height: 46,
+            onPressed: () => _openDailyTracker(userData),
           ),
         ],
       ),

@@ -37,7 +37,7 @@
     }
   ],
   "firestore": {
-    "rules": "security/firestore.rules.phase1"
+    "rules": "security/firestore.rules.strict"
   },
   "storage": {
     "rules": "security/storage.rules"

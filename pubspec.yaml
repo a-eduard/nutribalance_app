@@ -52,6 +52,8 @@ dependencies:
   table_calendar: ^3.2.0
   file_picker: ^10.3.10
   flutter_rustore_billing: ^7.0.0
+  # Окно оценки RuStore. Версия совпадает с billing: все SDK RuStore должны быть одной версии.
+  flutter_rustore_review: 7.0.1
 
   # PDF Export (ПРАВИЛЬНОЕ РАСПОЛОЖЕНИЕ)
   pdf: ^3.11.0

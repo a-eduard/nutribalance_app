@@ -571,6 +571,14 @@ packages:
       url: "https://pub.dev"
     source: hosted
     version: "7.0.1"
+  flutter_rustore_review:
+    dependency: "direct main"
+    description:
+      name: flutter_rustore_review
+      sha256: cf5bb02f0081928db2934fc95df57f0cb5715bd968f4f3b439c002a6f7d46355
+      url: "https://pub.dev"
+    source: hosted
+    version: "7.0.1"
   flutter_svg:
     dependency: "direct main"
     description:

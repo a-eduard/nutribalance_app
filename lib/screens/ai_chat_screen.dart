@@ -22,6 +22,7 @@ import '../widgets/eva_ui.dart';
 import '../widgets/image_viewer.dart';
 import 'shopping_list_screen.dart';
 import '../services/analytics_service.dart';
+import '../services/review_prompt_service.dart';
 
 class AIChatScreen extends StatefulWidget {
   final String botType;
@@ -58,6 +59,9 @@ class _AIChatScreenState extends State<AIChatScreen> {
   static const int _maxImages = 5;
 
   bool _isTyping = false;
+
+  /// Ева успешно ответила в этом заходе — при выходе из чата можно предложить окно оценки RuStore.
+  bool _hadGoodAnswer = false;
   List<File> _selectedImages = [];
   File? _selectedPdf;
   String? _pdfFileName;
@@ -94,6 +98,10 @@ class _AIChatScreenState extends State<AIChatScreen> {
     _scrollController.dispose();
     if (PushNotificationService.currentActiveChatId == widget.botType) {
       PushNotificationService.currentActiveChatId = null;
+    }
+    if (_hadGoodAnswer) {
+      // Окно RuStore откроется после выхода из чата, чтобы не мешать читать ответ.
+      ReviewPromptService.maybeAsk();
     }
     super.dispose();
   }
@@ -344,6 +352,7 @@ class _AIChatScreenState extends State<AIChatScreen> {
         DatabaseService().saveBotChatMessage(widget.botType, reply.text, 'ai');
       }
       _lastFailedPrompt = null;
+      _hadGoodAnswer = true;
     } on EvaQuotaException {
       if (!mounted) return;
       Navigator.of(context).push(MaterialPageRoute(builder: (_) => const PaywallScreen(isFromProfile: true, source: 'eva_limit')));

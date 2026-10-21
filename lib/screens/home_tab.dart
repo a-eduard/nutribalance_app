@@ -11,6 +11,7 @@ import '../services/analytics_service.dart';
 import '../services/calculation_service.dart';
 import '../services/cycle_calculator.dart';
 import '../services/database_service.dart';
+import '../services/review_prompt_service.dart';
 import '../theme/eva_colors.dart';
 import '../widgets/dashboard/cycle_nutrition_card.dart';
 import '../widgets/dashboard/nutrition_card.dart';
@@ -48,6 +49,7 @@ class _HomeTabState extends State<HomeTab> with AutomaticKeepAliveClientMixin, W
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
+    ReviewPromptService.recordActiveDay();
     _uid = FirebaseAuth.instance.currentUser?.uid;
     if (_uid != null) {
       final userRef = FirebaseFirestore.instance.collection('users').doc(_uid);
@@ -66,6 +68,7 @@ class _HomeTabState extends State<HomeTab> with AutomaticKeepAliveClientMixin, W
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
     if (state == AppLifecycleState.resumed) {
+      ReviewPromptService.recordActiveDay();
       final now = DateTime.now();
       if (_selectedDate.year != now.year || _selectedDate.month != now.month || _selectedDate.day != now.day) {
         setState(() {

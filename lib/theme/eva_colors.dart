@@ -63,6 +63,20 @@ class EvaColors {
   static const Color ovulation = Color(0xFF9A87B5);
   static const Color luteal = Color(0xFFD6AE67);
   static const Color pregnancy = Color(0xFFC98FA6);
+
+  /// Этапы беременности (см. CycleCalculator.pregnancyStages).
+  static const List<Color> pregnancyStages = [
+    Color(0xFFD99AC5), // зачатие и имплантация — орхидея
+    Color(0xFFD4707F), // эмбрион — роза
+    Color(0xFFE59A6B), // малыш становится плодом — абрикос
+    Color(0xFFD8B25E), // активный рост — золото
+    Color(0xFF7FB98F), // шевеления — шалфей
+    Color(0xFF6FA3D6), // набор веса — небесный
+    Color(0xFF9B85CC), // доношенная — лаванда
+  ];
+
+  static Color pregnancyStage(int? index) =>
+      index == null ? pregnancy : pregnancyStages[index.clamp(0, pregnancyStages.length - 1)];
 }
 
 /// Расширение темы с «премиальными» токенами, которых нет в ColorScheme.

@@ -10,6 +10,7 @@ import '../widgets/eva_ui.dart';
 import 'auth_screen.dart';
 import 'dashboard_screen.dart';
 import 'onboarding_screen.dart';
+import '../services/analytics_service.dart';
 
 class HomeWrapper extends StatelessWidget {
   const HomeWrapper({super.key});
@@ -86,16 +87,33 @@ class _FirestoreRoleLoaderState extends State<FirestoreRoleLoader> {
     super.initState();
     _userStream = FirebaseFirestore.instance.collection('users').doc(widget.user.uid).snapshots();
     P2PChatService().resetCaches();
+    Analytics.setUser(widget.user.uid);
 
     // Фоновые задачи НЕ блокируют показ приложения (раньше старт ждал
     // ответа сервера о «режиме модерации» — при VPN это была вечная загрузка).
     WidgetsBinding.instance.addPostFrameCallback((_) {
       PushNotificationService().initialize();
       LocalNotificationService().syncNotificationsOnStartup();
+      // Приложение открыли нажатием на напоминание Евы — покажем его в чате.
+      LocalNotificationService().handlePendingLaunch();
     });
 
     Future.delayed(const Duration(seconds: 8), () {
       if (mounted) setState(() => _slowNetworkHint = true);
+    });
+  }
+
+  /// Обезличенные свойства для фильтров в статистике (без имени и данных о здоровье).
+  void _reportUserProperties(Map<String, dynamic> data) {
+    final String appMode = (data['appMode'] ?? (data['isPregnant'] == true ? 'pregnancy' : 'standard')).toString();
+    final dynamic proUntil = data['proUntil'];
+    final bool premium = data['isPro'] == true && (proUntil is! Timestamp || proUntil.toDate().isAfter(DateTime.now()));
+    Analytics.setUserProperties({
+      'app_mode': appMode,
+      'is_premium': premium ? 'yes' : 'no',
+      'goal': data['goal']?.toString(),
+      'reminders_on': data['notificationsEnabled'] == true ? 'yes' : 'no',
+      'role': data['activeRole']?.toString(),
     });
   }
 
@@ -128,6 +146,7 @@ class _FirestoreRoleLoaderState extends State<FirestoreRoleLoader> {
 
         final data = snapshot.data!.data() ?? <String, dynamic>{};
         SubscriptionService().refreshIfNeeded(data);
+        _reportUserProperties(data);
 
         final bool isOnboardingCompleted = data['isOnboardingCompleted'] ?? true;
         if (isOnboardingCompleted == false) {

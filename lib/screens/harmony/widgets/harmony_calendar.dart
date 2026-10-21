@@ -1,7 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:table_calendar/table_calendar.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
-import '../../../../services/cycle_calculator.dart';
+import '../../../services/cycle_calculator.dart';
+import '../../../theme/eva_colors.dart';
 
 class HarmonyCalendar extends StatefulWidget {
   final Map<String, dynamic> userData;
@@ -63,8 +64,13 @@ class _HarmonyCalendarState extends State<HarmonyCalendar> {
 
     // Адаптивная палитра цветов
     if (dayInfo.phaseType == 'pregnancy') {
-      bgColor = theme.colorScheme.primary.withValues(alpha: isDark ? 0.3 : 0.2);
-      txtColor = isDark ? Colors.white : theme.colorScheme.onSurface;
+      // Каждый этап развития малыша — свой цвет (легенда под календарём).
+      final Color stageColor = EvaColors.pregnancyStage(dayInfo.pregnancyStage);
+      bgColor = stageColor.withValues(alpha: isOutside ? (isDark ? 0.18 : 0.14) : (isDark ? 0.45 : 0.34));
+      txtColor = isOutside ? theme.colorScheme.onSurfaceVariant.withValues(alpha: 0.5) : theme.colorScheme.onSurface;
+      if (dayInfo.isDueDate) {
+        border = Border.all(color: const Color(0xFFC6A27C), width: 2.5);
+      }
     } else if (dayInfo.phaseType == 'pregnancy_done') {
       bgColor = isDark ? const Color(0xFF5E35B1) : Colors.deepPurpleAccent;
       txtColor = Colors.white;
@@ -95,8 +101,7 @@ class _HarmonyCalendarState extends State<HarmonyCalendar> {
     } else if (isToday && dayInfo.phaseType != 'pregnancy' && dayInfo.phaseType != 'pregnancy_done') {
       border = Border.all(color: theme.colorScheme.primary.withValues(alpha: 0.5), width: 2);
     } else if (isToday && dayInfo.phaseType == 'pregnancy') {
-      border = Border.all(color: (isDark ? const Color(0xFFB39DDB) : Colors.deepPurpleAccent).withValues(alpha: 0.6), width: 2);
-      txtColor = isDark ? const Color(0xFFB39DDB) : Colors.deepPurpleAccent;
+      border = Border.all(color: theme.colorScheme.onSurface.withValues(alpha: 0.75), width: 2);
     }
 
     final String cheatStatus = CycleCalculator.getCheatStatus(targetDate: day, userData: widget.userData);
@@ -153,5 +158,87 @@ class _HarmonyCalendarState extends State<HarmonyCalendar> {
         selectedBuilder: (c, d, f) => _buildCalendarDay(c, d, isSelected: true),
       ),
     );
+  }
+}
+
+/// Легенда этапов беременности под календарём.
+class PregnancyStagesLegend extends StatelessWidget {
+  final int? currentStage;
+
+  const PregnancyStagesLegend({super.key, this.currentStage});
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final bool isDark = theme.brightness == Brightness.dark;
+
+    Widget row({required Widget marker, required String range, required String title, bool current = false}) {
+      return Padding(
+        padding: const EdgeInsets.symmetric(vertical: 5),
+        child: Row(
+          children: [
+            SizedBox(width: 22, height: 22, child: Center(child: marker)),
+            const SizedBox(width: 12),
+            SizedBox(
+              width: 74,
+              child: Text(range, style: theme.textTheme.bodySmall?.copyWith(fontWeight: current ? FontWeight.w700 : FontWeight.w500)),
+            ),
+            Expanded(
+              child: Text(
+                title,
+                style: theme.textTheme.bodyMedium?.copyWith(fontWeight: current ? FontWeight.w700 : FontWeight.w400),
+              ),
+            ),
+            if (current)
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                decoration: BoxDecoration(
+                  color: theme.colorScheme.primary.withValues(alpha: 0.12),
+                  borderRadius: BorderRadius.circular(20),
+                ),
+                child: Text('сейчас', style: theme.textTheme.labelSmall?.copyWith(color: theme.colorScheme.primary, fontWeight: FontWeight.w700)),
+              ),
+          ],
+        ),
+      );
+    }
+
+    int? lastTrimester;
+    final List<Widget> rows = [];
+    for (final stage in CycleCalculator.pregnancyStages) {
+      if (stage.trimester != lastTrimester) {
+        lastTrimester = stage.trimester;
+        rows.add(Padding(
+          padding: EdgeInsets.only(top: rows.isEmpty ? 0 : 10, bottom: 2),
+          child: Text(
+            '${stage.trimester} ТРИМЕСТР',
+            style: theme.textTheme.labelSmall?.copyWith(letterSpacing: 1.6, color: theme.colorScheme.onSurfaceVariant, fontWeight: FontWeight.w700),
+          ),
+        ));
+      }
+      final Color color = EvaColors.pregnancyStages[stage.index];
+      rows.add(row(
+        marker: Container(
+          width: 18,
+          height: 18,
+          decoration: BoxDecoration(color: color.withValues(alpha: isDark ? 0.55 : 0.45), shape: BoxShape.circle, border: Border.all(color: color, width: 1.5)),
+        ),
+        range: stage.range,
+        title: stage.title,
+        current: stage.index == currentStage,
+      ));
+    }
+    rows.add(const SizedBox(height: 6));
+    rows.add(row(
+      marker: Container(
+        width: 18,
+        height: 18,
+        decoration: BoxDecoration(shape: BoxShape.circle, border: Border.all(color: const Color(0xFFC6A27C), width: 2.5)),
+      ),
+      range: 'ПДР',
+      title: 'Предполагаемая дата родов',
+    ));
+
+    return Column(crossAxisAlignment: CrossAxisAlignment.start, children: rows);
   }
 }

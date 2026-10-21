@@ -9,6 +9,7 @@ import '../services/auth_service.dart';
 import '../services/theme_service.dart';
 import '../theme/eva_colors.dart';
 import '../widgets/eva_ui.dart';
+import '../services/analytics_service.dart';
 
 class AuthScreen extends StatefulWidget {
   const AuthScreen({super.key});
@@ -122,8 +123,10 @@ class _AuthScreenState extends State<AuthScreen> {
     try {
       if (_isLogin) {
         await _auth.signInWithEmailAndPassword(email: email, password: password);
+        Analytics.login('email');
       } else {
         final cred = await _auth.createUserWithEmailAndPassword(email: email, password: password);
+        Analytics.signUp('email');
         if (cred.user != null) {
           // Не ждём сервер: профиль создастся локально сразу и досинхронизируется.
           _db.collection('users').doc(cred.user!.uid).set({
@@ -155,6 +158,11 @@ class _AuthScreenState extends State<AuthScreen> {
       final result = await AuthService().signInWithGoogle();
       if (result is UserCredential && result.user != null) {
         final uid = result.user!.uid;
+        if (result.additionalUserInfo?.isNewUser == true) {
+          Analytics.signUp('google');
+        } else {
+          Analytics.login('google');
+        }
         DocumentSnapshot<Map<String, dynamic>>? userDoc;
         try {
           userDoc = await _db.collection('users').doc(uid).get().timeout(const Duration(seconds: 10));

@@ -7,6 +7,7 @@ import 'package:intl/intl.dart';
 import 'package:url_launcher/url_launcher.dart';
 
 import '../paywall_screen.dart';
+import '../services/analytics_service.dart';
 import '../services/database_service.dart';
 import '../theme/eva_colors.dart';
 import '../widgets/eva_ui.dart';
@@ -244,6 +245,12 @@ class _ProfileScreenState extends State<ProfileScreen> {
                         title: 'Обновить публичные профили',
                         subtitle: 'Один раз после обновления сервера — для поиска в чатах',
                         onTap: _runBackfill,
+                      ),
+                      EvaMenuTile(
+                        icon: Icons.bug_report_outlined,
+                        title: 'Тестовый сбой Crashlytics',
+                        subtitle: 'Приложение закроется. Откройте его снова — отчёт уйдёт в Firebase',
+                        onTap: Analytics.testCrash,
                       ),
                     ],
                   ),

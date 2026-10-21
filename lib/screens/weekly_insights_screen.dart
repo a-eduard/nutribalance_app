@@ -9,6 +9,7 @@ import 'package:intl/intl.dart';
 import '../theme/eva_colors.dart';
 import '../widgets/eva_ui.dart';
 import 'ai_chat_screen.dart';
+import '../services/analytics_service.dart';
 
 class WeeklyInsightsScreen extends StatefulWidget {
   const WeeklyInsightsScreen({super.key});
@@ -25,6 +26,7 @@ class _WeeklyInsightsScreenState extends State<WeeklyInsightsScreen> {
   @override
   void initState() {
     super.initState();
+    Analytics.event('weekly_insights_open');
     _load();
   }
 

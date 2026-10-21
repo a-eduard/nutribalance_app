@@ -10,6 +10,7 @@ import '../../services/ai_service.dart';
 import '../../services/database_service.dart';
 import '../../theme/eva_colors.dart';
 import '../eva_ui.dart';
+import '../../services/analytics_service.dart';
 
 /// Быстрый сканер еды по фото.
 class FastFoodScannerSheet extends StatefulWidget {
@@ -66,22 +67,26 @@ class _FastFoodScannerSheetState extends State<FastFoodScannerSheet> {
       final parsedJson = _extractJson(response);
       if (!mounted) return;
       if (parsedJson != null && parsedJson['items'] is List && (parsedJson['items'] as List).isNotEmpty) {
+        Analytics.event('food_scan', {'result': 'ok', 'items': (parsedJson['items'] as List).length});
         setState(() {
           _resultData = parsedJson;
           _state = _ScanState.result;
         });
       } else {
+        Analytics.event('food_scan', {'result': 'not_recognized'});
         setState(() {
           _state = _ScanState.selecting;
           _errorMessage = 'Ева не смогла распознать еду. Попробуй сфотографировать ближе и при хорошем свете.';
         });
       }
     } on EvaQuotaException {
+      Analytics.event('food_scan', {'result': 'quota'});
       if (!mounted) return;
       final nav = Navigator.of(context);
       nav.pop();
-      nav.push(MaterialPageRoute(builder: (_) => const PaywallScreen()));
+      nav.push(MaterialPageRoute(builder: (_) => const PaywallScreen(source: 'scan_limit')));
     } catch (e) {
+      Analytics.event('food_scan', {'result': 'error'});
       if (!mounted) return;
       setState(() {
         _state = _ScanState.selecting;
@@ -118,6 +123,7 @@ class _FastFoodScannerSheetState extends State<FastFoodScannerSheet> {
     final messenger = ScaffoldMessenger.of(context);
     final theme = Theme.of(context);
     Navigator.pop(context);
+    Analytics.event('meal_logged', {'source': 'photo_scan'});
     DatabaseService().logMeal(data, imageBytes: _imageBytes).catchError((e) => debugPrint('scanner save: $e'));
     EvaSnack.showOn(messenger, theme, 'Блюдо добавлено в дневник ✨', type: EvaSnackType.success);
   }

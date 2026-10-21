@@ -62,7 +62,7 @@ class _P2PChatScreenState extends State<P2PChatScreen> {
     _messagesStream = _chat.messagesStream(_chatId, collection: _collection);
     _chatDocStream = _chat.chatDocStream(_chatId, collection: _collection);
     PushNotificationService.currentActiveChatId = _chatId;
-    LocalNotificationService().cancelAll();
+    LocalNotificationService().dismissDisplayed();
     _chat.markRead(_chatId, collection: _collection);
     _chat.profile(widget.otherUserId).then((p) {
       if (mounted && p != null) setState(() => _other = p);

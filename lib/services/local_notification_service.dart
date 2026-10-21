@@ -1,23 +1,61 @@
+import 'dart:convert';
 import 'dart:io';
-import 'dart:math';
+
+import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
+import 'package:flutter_timezone/flutter_timezone.dart';
 import 'package:timezone/data/latest_all.dart' as tz;
 import 'package:timezone/timezone.dart' as tz;
-import 'package:firebase_auth/firebase_auth.dart';
-import 'package:cloud_firestore/cloud_firestore.dart';
-import 'package:flutter_timezone/flutter_timezone.dart';
+
+import '../screens/ai_chat_screen.dart';
+import 'app_navigator.dart';
+import 'analytics_service.dart';
+
+/// Одно «заботливое» сообщение Евы: короткий текст для шторки уведомлений
+/// и полный текст, который пользователь читает в чате с Евой.
+class _CareMessage {
+  final String title;
+  final String teaser;
+  final String full;
+  const _CareMessage(this.title, this.teaser, this.full);
+}
+
+class _CareSlot {
+  final String key;
+  final int hour;
+  final int minute;
+  final List<_CareMessage> messages;
+  const _CareSlot(this.key, this.hour, this.minute, this.messages);
+}
 
 class LocalNotificationService {
-  static final LocalNotificationService _instance =
-      LocalNotificationService._internal();
+  static final LocalNotificationService _instance = LocalNotificationService._internal();
   factory LocalNotificationService() => _instance;
   LocalNotificationService._internal();
 
-  final FlutterLocalNotificationsPlugin flutterLocalNotificationsPlugin =
-      FlutterLocalNotificationsPlugin();
+  final FlutterLocalNotificationsPlugin flutterLocalNotificationsPlugin = FlutterLocalNotificationsPlugin();
+
+  /// Обработчик нажатий на прочие локальные уведомления (например, пуши чата,
+  /// показанные, пока приложение открыто). Регистрирует PushNotificationService.
+  static void Function(Map<String, dynamic> data)? externalTapHandler;
 
   bool _initialized = false;
+  Map<String, dynamic>? _pendingCare;
+
+  // --- Заботливые напоминания ---
+  // Канал оставлен прежним, чтобы не сбрасывать настройки звука у пользователей.
+  static const String _careChannelId = 'eva_daily_reminders_v5';
+  static const String _careChannelName = 'Заботливые напоминания';
+
+  /// ID разовых напоминаний: 2000 + день * 3 + слот.
+  static const int _careIdBase = 2000;
+  static const int _careIdEnd = 2100;
+  static const int _daysAhead = 7;
+
+  /// ID повторяющихся напоминаний из прошлых версий приложения.
+  static const List<int> _legacyIds = [1, 2, 3, 101, 102, 103, 999];
 
   Future<void> init() async {
     // ФИКС ЗАПУСКА ЗА РУБЕЖОМ: если часовой пояс устройства отсутствует в базе
@@ -25,26 +63,32 @@ class LocalNotificationService {
     // прямо в main() и приложение зависало на заставке. Теперь — безопасный фолбэк.
     await _initTimeZone();
 
-    const AndroidInitializationSettings initializationSettingsAndroid =
-        AndroidInitializationSettings('@mipmap/launcher_icon');
-
-    const DarwinInitializationSettings initializationSettingsIOS =
-        DarwinInitializationSettings(
-          requestAlertPermission: false,
-          requestBadgePermission: false,
-          requestSoundPermission: false,
-        );
-
-    const InitializationSettings initializationSettings =
-        InitializationSettings(
-          android: initializationSettingsAndroid,
-          iOS: initializationSettingsIOS,
-        );
+    const InitializationSettings initializationSettings = InitializationSettings(
+      android: AndroidInitializationSettings('@mipmap/launcher_icon'),
+      iOS: DarwinInitializationSettings(
+        requestAlertPermission: false,
+        requestBadgePermission: false,
+        requestSoundPermission: false,
+      ),
+    );
 
     await flutterLocalNotificationsPlugin.initialize(
       settings: initializationSettings,
+      onDidReceiveNotificationResponse: _onNotificationTap,
     );
     _initialized = true;
+
+    // Приложение запустили нажатием на уведомление — откроем сообщение после входа.
+    try {
+      final details = await flutterLocalNotificationsPlugin.getNotificationAppLaunchDetails();
+      final String? payload = details?.notificationResponse?.payload;
+      if (details?.didNotificationLaunchApp == true && payload != null) {
+        final data = _decode(payload);
+        if (data != null && data['type'] == 'eva_care') _pendingCare = data;
+      }
+    } catch (e) {
+      debugPrint('launch details: $e');
+    }
   }
 
   bool get isInitialized => _initialized;
@@ -81,237 +125,298 @@ class LocalNotificationService {
   Future<bool> requestPermissions() async {
     if (Platform.isAndroid) {
       final AndroidFlutterLocalNotificationsPlugin? androidImplementation =
-          flutterLocalNotificationsPlugin
-              .resolvePlatformSpecificImplementation<
-                AndroidFlutterLocalNotificationsPlugin
-              >();
-
-      final bool? grantedNotification = await androidImplementation
-          ?.requestNotificationsPermission();
-      // ФИКС: запрос точных будильников (requestExactAlarmsPermission) открывал
-      // системные настройки при каждом запуске. Напоминания используют
-      // inexact-режим, поэтому это разрешение не нужно.
+          flutterLocalNotificationsPlugin.resolvePlatformSpecificImplementation<AndroidFlutterLocalNotificationsPlugin>();
+      final bool? grantedNotification = await androidImplementation?.requestNotificationsPermission();
+      // Разрешение на точные будильники не запрашиваем: напоминания работают в
+      // inexact-режиме, а запрос открывал системные настройки при каждом запуске.
       return grantedNotification ?? true;
     } else if (Platform.isIOS) {
       final bool? granted = await flutterLocalNotificationsPlugin
-          .resolvePlatformSpecificImplementation<
-            IOSFlutterLocalNotificationsPlugin
-          >()
+          .resolvePlatformSpecificImplementation<IOSFlutterLocalNotificationsPlugin>()
           ?.requestPermissions(alert: true, badge: true, sound: true);
       return granted ?? false;
     }
     return true;
   }
 
-  Future<void> scheduleDailyNotifications() async {
-    // 1. Очищаем все вообще
-    await cancelAll();
-    
-    // 2. ЖЕСТКАЯ ОЧИСТКА по ID (на случай, если cancelAll не сработал из-за кэша ОС)
-    await flutterLocalNotificationsPlugin.cancel(id: 1);
-    await flutterLocalNotificationsPlugin.cancel(id: 2);
-    await flutterLocalNotificationsPlugin.cancel(id: 3);
+  // ===========================================================================
+  // Планирование
+  // ===========================================================================
 
-    String userName = 'дорогая';
-    try {
-      final uid = FirebaseAuth.instance.currentUser?.uid;
-      if (uid != null) {
-        final doc = await FirebaseFirestore.instance
-            .collection('users')
-            .doc(uid)
-            .get();
-        if (doc.exists) {
-          final nameFromDb = doc.data()?['name']?.toString().trim();
-          if (nameFromDb != null && nameFromDb.isNotEmpty) {
-            userName = nameFromDb;
-          }
+  /// Планирует заботливые напоминания на ближайшие 7 дней.
+  ///
+  /// ПОЧЕМУ НЕ ПОВТОРЯЮЩИЕСЯ: раньше использовался `matchDateTimeComponents`.
+  /// После показа плагин сам переносит уведомление на «сегодня в то же время,
+  /// если оно ещё не наступило». Некоторые прошивки (MIUI/HyperOS и др.)
+  /// выравнивают будильники и срабатывают на несколько минут РАНЬШЕ — тогда
+  /// «сегодня 14:00» ещё не наступило, и уведомление приходило второй раз через
+  /// ~5 минут. Разовые уведомления на неделю вперёд такой проблемы не имеют и
+  /// обновляются при каждом запуске приложения.
+  Future<void> scheduleDailyNotifications() async {
+    await cancelCareReminders();
+
+    final String name = await _loadUserName();
+    final tz.TZDateTime now = tz.TZDateTime.now(tz.local);
+    final NotificationDetails details = _careDetails;
+
+    for (int dayOffset = 0; dayOffset < _daysAhead; dayOffset++) {
+      for (int slotIndex = 0; slotIndex < _slots.length; slotIndex++) {
+        final _CareSlot slot = _slots[slotIndex];
+        final tz.TZDateTime when = tz.TZDateTime(tz.local, now.year, now.month, now.day + dayOffset, slot.hour, slot.minute);
+        if (!when.isAfter(now.add(const Duration(minutes: 1)))) continue;
+
+        final int dayNumber = DateTime(when.year, when.month, when.day).difference(DateTime(2024)).inDays;
+        final _CareMessage msg = slot.messages[(dayNumber + slotIndex * 2) % slot.messages.length];
+        final String title = _fill(msg.title, name);
+        final String teaser = _fill(msg.teaser, name);
+        final String full = _fill(msg.full, name);
+        final String dateKey = '${when.year}${when.month.toString().padLeft(2, '0')}${when.day.toString().padLeft(2, '0')}';
+
+        try {
+          await flutterLocalNotificationsPlugin.zonedSchedule(
+            id: _careIdBase + dayOffset * _slots.length + slotIndex,
+            title: title,
+            body: teaser,
+            scheduledDate: when,
+            notificationDetails: _withBigText(details, title, full),
+            androidScheduleMode: AndroidScheduleMode.inexactAllowWhileIdle,
+            payload: jsonEncode({'type': 'eva_care', 'id': 'care_${dateKey}_${slot.key}', 'title': title, 'text': full}),
+          );
+        } catch (e) {
+          debugPrint('schedule care: $e');
         }
       }
-    } catch (e) {
-      debugPrint('Ошибка получения имени: $e');
     }
-
-    final random = Random();
-
-    // === УТРО (10:00) ===
-    final morningTitles = [
-      'Доброе утро! 🌸',
-      'Просыпайся, $userName! 🌅',
-      'Новый день! ✨',
-    ];
-    final morningBodies = [
-      'Не забудь выпить стакан воды — твое тело скажет тебе спасибо 💧',
-      'Время для себя! Сделай глубокий вдох и настройся на позитив 🌬️',
-      'Улыбнись новому дню! Ты прекрасна, и у тебя всё получится ☀️',
-    ];
-    int mIdx = random.nextInt(morningTitles.length);
-
-    await _scheduleDailyNotification(
-      id: 101,
-      title: morningTitles[mIdx],
-      body: morningBodies[mIdx],
-      hour: 10,
-      minute: 00,
-    );
-
-    // === ОБЕД (14:00) ===
-    final noonTitles = [
-      'Время перерыва ☕️',
-      'Пора пообедать 🥗',
-      'Выдыхай! 🧘‍♀️',
-    ];
-    final noonBodies = [
-      'Время выдохнуть и отдохнуть пару минут. Я здесь, если захочешь поболтать ❤️',
-      'Твоему телу нужна энергия. Не забудь про вкусный и полезный обед 🥑',
-      'Сделай паузу, разомни спину и выпей немного воды. Ты отлично справляешься! 💦',
-    ];
-    int nIdx = random.nextInt(noonTitles.length);
-
-    await _scheduleDailyNotification(
-      id: 102,
-      title: noonTitles[nIdx],
-      body: noonBodies[nIdx],
-      hour: 14,
-      minute: 00,
-    );
-
-    // === ВЕЧЕР (20:30) ===
-    final eveningTitles = [
-      'Время выдохнуть 🌙',
-      'Итоги дня 🛁',
-      'Пора отдыхать 💤',
-    ];
-    final eveningBodies = [
-      'День позади! Отложи телефон, прими теплую ванну и расслабься 🕯️',
-      'Ты отлично потрудилась. Самое время поблагодарить себя за этот день 🌸',
-      'Сладких снов! Пусть эта ночь принесет тебе полное восстановление ✨',
-    ];
-    int eIdx = random.nextInt(eveningTitles.length);
-
-    await _scheduleDailyNotification(
-      id: 103,
-      title: eveningTitles[eIdx],
-      body: eveningBodies[eIdx],
-      hour: 20,
-      minute: 30,
-    );
   }
 
-  Future<void> _scheduleDailyNotification({
-    required int id,
-    required String title,
-    required String body,
-    required int hour,
-    required int minute,
-  }) async {
-    const details = NotificationDetails(
+  NotificationDetails get _careDetails => const NotificationDetails(
+        android: AndroidNotificationDetails(
+          _careChannelId,
+          _careChannelName,
+          channelDescription: 'Ежедневные уведомления от Евы',
+          importance: Importance.high,
+          priority: Priority.high,
+          color: Color(0xFFB76E79),
+        ),
+        iOS: DarwinNotificationDetails(presentAlert: true, presentBadge: true, presentSound: true),
+      );
+
+  NotificationDetails _withBigText(NotificationDetails base, String title, String full) {
+    return NotificationDetails(
       android: AndroidNotificationDetails(
-        'eva_daily_reminders_v5',
-        'Заботливые напоминания',
+        _careChannelId,
+        _careChannelName,
         channelDescription: 'Ежедневные уведомления от Евы',
-        importance: Importance.max,
-        priority: Priority.max,
-        color: Color(0xFFB76E79),
+        importance: Importance.high,
+        priority: Priority.high,
+        color: const Color(0xFFB76E79),
+        // Свёрнутое уведомление — короткая фраза, развёрнутое — полный текст.
+        styleInformation: BigTextStyleInformation(full, contentTitle: title, summaryText: 'Ева'),
       ),
-      iOS: DarwinNotificationDetails(
-        presentAlert: true,
-        presentBadge: true,
-        presentSound: true,
-      ),
-    );
-
-    await flutterLocalNotificationsPlugin.zonedSchedule(
-      id: id,
-      title: title,
-      body: body,
-      scheduledDate: _nextInstanceOfTime(hour, minute),
-      notificationDetails: details,
-      // ИСПРАВЛЕНИЕ: inexactAllowWhileIdle решает проблему двойных пушей на Android
-      androidScheduleMode: AndroidScheduleMode.inexactAllowWhileIdle,
-      matchDateTimeComponents: DateTimeComponents.time,
+      iOS: base.iOS,
     );
   }
 
-  tz.TZDateTime _nextInstanceOfTime(int hour, int minute) {
-    final tz.TZDateTime now = tz.TZDateTime.now(tz.local);
-    tz.TZDateTime scheduledDate = tz.TZDateTime(
-      tz.local,
-      now.year,
-      now.month,
-      now.day,
-      hour,
-      minute,
-    );
-    // ИСПРАВЛЕНИЕ: Защита от моментального двойного срабатывания, если таймер ставится минута-в-минуту
-    if (scheduledDate.isBefore(now) || scheduledDate.isAtSameMomentAs(now)) {
-      scheduledDate = scheduledDate.add(const Duration(days: 1));
+  Future<String> _loadUserName() async {
+    final uid = FirebaseAuth.instance.currentUser?.uid;
+    if (uid == null) return '';
+    final ref = FirebaseFirestore.instance.collection('users').doc(uid);
+    DocumentSnapshot<Map<String, dynamic>>? doc;
+    try {
+      doc = await ref.get(const GetOptions(source: Source.cache));
+    } catch (_) {
+      try {
+        doc = await ref.get().timeout(const Duration(seconds: 6));
+      } catch (e) {
+        debugPrint('Ошибка получения имени: $e');
+      }
     }
-    return scheduledDate;
+    final String name = (doc?.data()?['name'] ?? '').toString().trim();
+    return name.split(' ').first;
   }
 
+  String _fill(String template, String name) {
+    final String n = name.isEmpty ? 'дорогая' : name;
+    final String capital = n[0].toUpperCase() + n.substring(1);
+    return template.replaceAll('{Name}', capital).replaceAll('{name}', n);
+  }
+
+  /// Отменяет только заботливые напоминания (и старые повторяющиеся).
+  Future<void> cancelCareReminders() async {
+    final Set<int> ids = {..._legacyIds};
+    for (int id = _careIdBase; id < _careIdBase + _daysAhead * _slots.length; id++) {
+      ids.add(id);
+    }
+    try {
+      final pending = await flutterLocalNotificationsPlugin.pendingNotificationRequests();
+      for (final p in pending) {
+        if ((p.id >= _careIdBase && p.id < _careIdEnd) || _legacyIds.contains(p.id)) ids.add(p.id);
+      }
+    } catch (e) {
+      debugPrint('pending notifications: $e');
+    }
+    for (final id in ids) {
+      try {
+        await flutterLocalNotificationsPlugin.cancel(id: id);
+      } catch (_) {}
+    }
+  }
+
+  /// Полная очистка (выход из аккаунта, удаление аккаунта).
   Future<void> cancelAll() async {
-    await flutterLocalNotificationsPlugin.cancelAll();
-    // ФИКС 2: Жестко добиваем все возможные зависшие ID (и старые, и новые)
-    await flutterLocalNotificationsPlugin.cancel(id: 1);
-    await flutterLocalNotificationsPlugin.cancel(id: 2);
-    await flutterLocalNotificationsPlugin.cancel(id: 3);
-    await flutterLocalNotificationsPlugin.cancel(id: 101);
-    await flutterLocalNotificationsPlugin.cancel(id: 102);
-    await flutterLocalNotificationsPlugin.cancel(id: 103);
+    try {
+      await flutterLocalNotificationsPlugin.cancelAll();
+    } catch (_) {}
+    await cancelCareReminders();
   }
 
-  // === ФИКС 3: Умная синхронизация при запуске приложения ===
+  /// Убирает из шторки уже показанные уведомления (например, при открытии чата),
+  /// НЕ трогая запланированные напоминания.
+  Future<void> dismissDisplayed() async {
+    try {
+      final active = await flutterLocalNotificationsPlugin.getActiveNotifications();
+      for (final n in active) {
+        final int? id = n.id;
+        if (id == null) continue;
+        await flutterLocalNotificationsPlugin.cancel(id: id, tag: n.tag);
+      }
+    } catch (e) {
+      debugPrint('dismiss notifications: $e');
+    }
+  }
+
+  /// Синхронизация при запуске приложения: тумблер хранится в профиле.
   Future<void> syncNotificationsOnStartup() async {
     try {
       final uid = FirebaseAuth.instance.currentUser?.uid;
       if (uid == null) return;
-      
-      final doc = await FirebaseFirestore.instance.collection('users').doc(uid).get();
-      // Проверяем тумблер из базы данных
-      final isEnabled = doc.data()?['notificationsEnabled'] == true;
-      
-      if (isEnabled) {
+      final ref = FirebaseFirestore.instance.collection('users').doc(uid);
+      DocumentSnapshot<Map<String, dynamic>> doc;
+      try {
+        doc = await ref.get(const GetOptions(source: Source.cache));
+      } catch (_) {
+        doc = await ref.get().timeout(const Duration(seconds: 8));
+      }
+      if (doc.data()?['notificationsEnabled'] == true) {
         await scheduleDailyNotifications();
       } else {
-        await cancelAll(); // Жестко отменяем, если тумблер был выключен
+        await cancelCareReminders();
       }
     } catch (e) {
-      debugPrint('Ошибка синхронизации пушей при старте: $e');
+      debugPrint('Ошибка синхронизации напоминаний при старте: $e');
     }
   }
 
-  Future<void> testPushIn5Seconds() async {
+  // ===========================================================================
+  // Нажатие на уведомление
+  // ===========================================================================
+
+  Map<String, dynamic>? _decode(String payload) {
     try {
-      final bool granted = await requestPermissions();
-      if (!granted) return;
-      
-      const details = NotificationDetails(
-        android: AndroidNotificationDetails(
-          'test_channel_v4',
-          'Тестовые уведомления',
-          importance: Importance.max,
-          priority: Priority.max,
-          color: Color(0xFFB76E79),
-        ),
-        iOS: DarwinNotificationDetails(
-          presentAlert: true,
-          presentBadge: true,
-          presentSound: true,
-        ),
-      );
-      
-      final tz.TZDateTime scheduledTime = tz.TZDateTime.now(tz.local).add(const Duration(seconds: 5));
-
-      await flutterLocalNotificationsPlugin.zonedSchedule(
-        id: 999,
-        title: 'Отложенный тест! ⏳',
-        body: 'Таймеры в фоне тоже работают!',
-        scheduledDate: scheduledTime,
-        notificationDetails: details,
-        androidScheduleMode: AndroidScheduleMode.inexactAllowWhileIdle,
-      );
-    } catch (e) {
-      debugPrint('❌ ОШИБКА ТЕСТОВОГО ПУША: $e');
+      final decoded = jsonDecode(payload);
+      return decoded is Map<String, dynamic> ? decoded : null;
+    } catch (_) {
+      return null;
     }
   }
+
+  void _onNotificationTap(NotificationResponse response) {
+    final String? payload = response.payload;
+    if (payload == null || payload.isEmpty) return;
+    final data = _decode(payload);
+    if (data == null) return;
+    if (data['type'] == 'eva_care') {
+      _openCareMessage(data);
+    } else {
+      externalTapHandler?.call(data);
+    }
+  }
+
+  /// Вызывается после входа в аккаунт: если приложение открыли тапом по
+  /// напоминанию, показываем сообщение Евы в чате.
+  void handlePendingLaunch() {
+    final data = _pendingCare;
+    if (data == null) return;
+    _pendingCare = null;
+    _openCareMessage(data);
+  }
+
+  void _openCareMessage(Map<String, dynamic> data) {
+    final uid = FirebaseAuth.instance.currentUser?.uid;
+    final nav = AppNavigator.nav;
+    if (uid == null || nav == null) {
+      _pendingCare = data;
+      return;
+    }
+    final String text = (data['text'] ?? '').toString().trim();
+    final String docId = (data['id'] ?? '').toString();
+    if (text.isNotEmpty && RegExp(r'^[A-Za-z0-9_]{1,80}$').hasMatch(docId)) {
+      // Полный текст напоминания появляется в чате с Евой — на него можно ответить.
+      FirebaseFirestore.instance
+          .collection('users')
+          .doc(uid)
+          .collection('ai_chats_dietitian')
+          .doc(docId)
+          .set({
+            'text': text,
+            'role': 'ai',
+            'kind': 'care',
+            'timestamp': FieldValue.serverTimestamp(),
+            'isActionCompleted': true,
+          })
+          .catchError((Object e) => debugPrint('care message save: $e'));
+    }
+    final String slot = docId.split('_').last;
+    Analytics.event('care_reminder_open', {'slot': slot});
+    nav.push(MaterialPageRoute(builder: (_) => const AIChatScreen(botType: 'dietitian')));
+  }
+
+  // ===========================================================================
+  // Тексты
+  // ===========================================================================
+
+  static const List<_CareSlot> _slots = [
+    _CareSlot('morning', 10, 0, [
+      _CareMessage('Доброе утро 🌸', 'Начнём день со стакана воды?',
+          'Доброе утро, {name}! 🌸 За ночь организм теряет немало жидкости, поэтому стакан тёплой воды — лучший способ мягко проснуться. Можно добавить дольку лимона. Я рядом, если захочешь подобрать вкусный завтрак ☀️'),
+      _CareMessage('Новый день ✨', 'Маленькая цель на сегодня',
+          'Привет, {name}! ✨ Давай выберем одну маленькую цель на сегодня: 10 минут прогулки, тарелка овощей к обеду или лечь спать на полчаса раньше. Маленькие шаги каждый день дают большой результат. Какую выберешь?'),
+      _CareMessage('Время завтрака 🥣', 'Белок утром — энергия до обеда',
+          'Доброе утро, {name}! 🥣 Завтрак с белком — яйца, творог, греческий йогурт — даёт ровную энергию и помогает меньше тянуться к сладкому днём. Хочешь, подскажу пару быстрых вариантов на 5 минут?'),
+      _CareMessage('С добрым утром ☀️', 'Три глубоких вдоха — и в путь',
+          '{Name}, с добрым утром! ☀️ Прежде чем открыть соцсети, сделай три медленных вдоха и потянись. Это займёт минуту, но настроит тебя на спокойный день. Ты справишься со всем, что запланировала 💛'),
+      _CareMessage('Доброе утро 💧', 'Как ты себя чувствуешь?',
+          'Доброе утро, {name}! 💧 Прислушайся к себе: как спалось, есть ли энергия? Отметь самочувствие в «Гармонии» — так мне будет проще давать советы именно под твой цикл и настроение.'),
+      _CareMessage('Утро для себя 🌿', 'Пара минут только для тебя',
+          '{Name}, доброе утро! 🌿 Подари себе пару минут тишины: чашка чая, окно, спокойное дыхание. Забота о себе — не роскошь, а основа хорошего дня. Я в тебя верю!'),
+    ]),
+    _CareSlot('noon', 14, 0, [
+      _CareMessage('Время обеда 🥗', 'Половину тарелки — овощам',
+          '{Name}, как проходит день? 🥗 Подсказка к обеду: половина тарелки — овощи, четверть — белок (мясо, рыба, бобовые), четверть — крупы или хлеб. Так сытость сохранится надолго. Сфотографируй обед — я посчитаю КБЖУ 📸'),
+      _CareMessage('Пауза ☕️', 'Разомни плечи и выпей воды',
+          'Привет, {name}! ☕️ Самое время для короткой паузы: разомни шею и плечи, пройдись пару минут и выпей стакан воды. Даже небольшая активность снимает дневную усталость. Ты отлично справляешься!'),
+      _CareMessage('Как ты? 💛', 'Я рядом, если нужна поддержка',
+          '{Name}, просто хотела напомнить: ты молодец 💛 Если день выдался напряжённым — выдохни и не требуй от себя идеальности. Можешь написать мне о чём угодно: о еде, самочувствии или настроении.'),
+      _CareMessage('Вода 💧', 'Уже выпила пару стаканов?',
+          '{Name}, середина дня — хороший момент проверить, сколько воды ты уже выпила 💧 Часто лёгкая усталость и головная боль — это просто жажда. Отмечай стаканы на главном экране, чтобы не сбиться.'),
+      _CareMessage('Перекус с пользой 🍎', 'Идеи, если хочется сладкого',
+          '{Name}, если после обеда тянет на сладкое 🍎 — попробуй яблоко с горстью орехов, йогурт с ягодами или пару долек тёмного шоколада. Сладкое не запрещено: главное — с удовольствием и без чувства вины.'),
+      _CareMessage('Минутка тишины 🧘‍♀️', 'Одна минута — и снова в строй',
+          'Привет, {name}! 🧘‍♀️ Закрой глаза на минуту: вдох на 4 счёта, выдох на 6. Такое дыхание помогает снизить стресс прямо посреди дня. Вернёшься к делам с ясной головой ✨'),
+    ]),
+    _CareSlot('evening', 20, 30, [
+      _CareMessage('Время выдохнуть 🌙', 'День позади — ты молодец',
+          '{Name}, день позади 🌙 Вспомни три вещи, за которые ты сегодня благодарна себе — даже самые маленькие. Эта простая привычка со временем делает нас спокойнее и счастливее. Спокойного вечера!'),
+      _CareMessage('Вечерний ритуал 🛁', 'Тёплый душ и меньше экранов',
+          '{Name}, пора замедлиться 🛁 Тёплый душ, приглушённый свет и час без телефона перед сном помогают уснуть быстрее и глубже. А хороший сон — лучшая поддержка для гормонов и настроения.'),
+      _CareMessage('Итоги дня ✨', 'Загляни в дневник питания',
+          'Привет, {name}! ✨ Загляни в дневник: всё ли записано за сегодня? Не переживай, если что-то пошло не по плану — важен общий курс, а не один день. Завтра — новая возможность позаботиться о себе.'),
+      _CareMessage('Лёгкий ужин 🍵', 'Ужин за 2–3 часа до сна',
+          '{Name}, подсказка на вечер 🍵 Лёгкий ужин за 2–3 часа до сна помогает лучше спать и просыпаться бодрой. Подойдут рыба или курица с овощами, омлет или творог. Хочешь рецепт?'),
+      _CareMessage('Сладких снов 💤', 'Пусть ночь будет спокойной',
+          '{Name}, ты сегодня отлично потрудилась 💤 Отложи телефон пораньше, проветри комнату и позволь себе полноценно отдохнуть. Во сне тело восстанавливается. Спокойной ночи!'),
+      _CareMessage('Как прошёл день? 🌸', 'Расскажи мне, я выслушаю',
+          '{Name}, как прошёл твой день? 🌸 Если хочется — расскажи мне, я выслушаю. А ещё можно отметить настроение в «Гармонии»: со временем ты увидишь, как оно связано с циклом.'),
+    ]),
+  ];
 }

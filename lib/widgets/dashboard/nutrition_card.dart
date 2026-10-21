@@ -6,6 +6,7 @@ import '../../screens/ai_chat_screen.dart';
 import '../../services/database_service.dart';
 import '../../theme/eva_colors.dart';
 import '../eva_ui.dart';
+import '../../services/analytics_service.dart';
 
 class NutritionSummaryCard extends StatefulWidget {
   final String uid;
@@ -96,6 +97,7 @@ class _NutritionSummaryCardState extends State<NutritionSummaryCard> {
   }
 
   Future<void> _sendDietitianRequest(int remaining, int remP, int remF, int remC, int remFiber, String planRule, String displayMessage) async {
+    Analytics.event('what_to_eat', {'plan': planRule, 'kcal_left': remaining});
     final user = FirebaseAuth.instance.currentUser;
     if (user == null) return;
     String userName = 'пользователь';
@@ -104,30 +106,28 @@ class _NutritionSummaryCardState extends State<NutritionSummaryCard> {
       userName = (userDoc.data()?['name'] ?? userName).toString();
     } catch (_) {}
 
-    final String technicalPrompt = """Меня зовут $userName. Мне осталось съесть $remaining ккал. Моя цель сейчас: $planRule.
+    final String technicalPrompt = """Меня зовут $userName. На сегодня у меня осталось $remaining ккал. Нужно: $planRule.
 
-Остатки на сегодня:
-- Белки: $remP г
-- Жиры: $remF г
-- Углеводы: $remC г
-- Клетчатка: $remFiber г
+Остаток на сегодня: белки $remP г, жиры $remF г, углеводы $remC г, клетчатка $remFiber г.
+(Если значение отрицательное — я уже превысила норму этого нутриента, его нужно минимизировать.)
 
-Инструкция:
-1. Если значение отрицательное (я перебрала норму), минимизируй этот нутриент.
-2. Если прошу несколько приёмов пищи, распиши меню на все приёмы, разделив $remaining ккал между ними.
-3. Закрой дефицит клетчатки (овощи, зелень).
-4. Дай краткий понятный рецепт для каждого блюда.
-5. Используй только простые продукты из обычного супермаркета.
-6. В конце выведи общий список всех ингредиентов в формате JSON внутри тегов [SHOPPING_LIST].""";
+Составь меню. Требования:
+- Это только идеи — я ещё ничего не съела, поэтому НЕ записывай еду в дневник и НЕ добавляй JSON log_food.
+- Раздели $remaining ккал между приёмами и закрой дефицит клетчатки овощами или зеленью.
+- Для каждого блюда: заголовок с названием, одна строка «≈ ккал · Б/Ж/У», ингредиенты с граммовкой одной строкой и приготовление в 2–3 коротких шага.
+- Только простые продукты из обычного супермаркета. Без длинных вступлений и выводов.
+- В самом конце — общий список ингредиентов в блоке [SHOPPING_LIST].""";
 
-    _openEva(displayMessage, technicalPrompt);
+    _openEva(displayMessage, technicalPrompt, mode: 'meal_plan');
   }
 
-  void _openEva(String display, String prompt) {
+  void _openEva(String display, String prompt, {String? mode}) {
     if (!mounted) return;
     Navigator.push(
       context,
-      MaterialPageRoute(builder: (_) => AIChatScreen(botType: 'dietitian', initialDisplayMessage: display, initialTechnicalPrompt: prompt)),
+      MaterialPageRoute(
+        builder: (_) => AIChatScreen(botType: 'dietitian', initialDisplayMessage: display, initialTechnicalPrompt: prompt, initialMode: mode),
+      ),
     );
   }
 

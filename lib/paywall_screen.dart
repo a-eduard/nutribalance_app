@@ -9,11 +9,15 @@ import 'package:url_launcher/url_launcher.dart';
 import 'services/subscription_service.dart';
 import 'theme/eva_colors.dart';
 import 'widgets/eva_ui.dart';
+import 'services/analytics_service.dart';
 
 class PaywallScreen extends StatefulWidget {
   final bool isFromProfile;
 
-  const PaywallScreen({super.key, this.isFromProfile = false});
+  /// Откуда открыт пейвол — для статистики (profile, eva_limit, scan_limit…).
+  final String? source;
+
+  const PaywallScreen({super.key, this.isFromProfile = false, this.source});
 
   @override
   State<PaywallScreen> createState() => _PaywallScreenState();
@@ -33,6 +37,7 @@ class _PaywallScreenState extends State<PaywallScreen> {
   void initState() {
     super.initState();
     _promoController = TextEditingController();
+    Analytics.event('paywall_view', {'source': widget.source ?? (widget.isFromProfile ? 'profile' : 'other')});
   }
 
   @override
@@ -56,6 +61,7 @@ class _PaywallScreenState extends State<PaywallScreen> {
     // Скидочные коды применяются локально (цена фиксируется продуктом RuStore).
     if (cleanCode == 'SALE50EVA' || cleanCode == 'SALE50') {
       setState(() => _appliedPromo = 'SALE50');
+      Analytics.event('promo_redeemed', {'code': cleanCode, 'type': 'discount'});
       EvaSnack.show(context, 'Промокод применён: скидка 50% ✨', type: EvaSnackType.success);
       return;
     }
@@ -67,6 +73,7 @@ class _PaywallScreenState extends State<PaywallScreen> {
           .call({'code': cleanCode});
       if (!mounted) return;
       final data = res.data is Map ? res.data as Map : const {};
+      Analytics.event('promo_redeemed', {'code': cleanCode, 'type': (data['type'] ?? 'trial').toString()});
       if (data['type'] == 'discount') {
         setState(() => _appliedPromo = (data['code'] ?? 'SALE50').toString());
         EvaSnack.show(context, 'Промокод применён: скидка ${data['percent'] ?? 50}% ✨', type: EvaSnackType.success);
@@ -129,6 +136,7 @@ class _PaywallScreenState extends State<PaywallScreen> {
     try {
       final purchaseResult = await RustoreBillingClient.purchase(productId, user.uid);
       if (purchaseResult.successPurchase == null) {
+        Analytics.event('purchase_cancelled', {'product_id': productId});
         debugPrint("Оплата отменена пользователем или не удалась на устройстве.");
         return;
       }
@@ -157,6 +165,7 @@ class _PaywallScreenState extends State<PaywallScreen> {
           .httpsCallable('verifyRuStorePurchase', options: HttpsCallableOptions(timeout: const Duration(seconds: 30)))
           .call({'productId': productId, 'purchaseToken': pToken});
       if (!mounted) return;
+      Analytics.purchase(productId: productId);
       EvaSnack.show(context, 'Добро пожаловать в Моя Ева Premium ✨', type: EvaSnackType.success);
       _close();
     } catch (serverError) {

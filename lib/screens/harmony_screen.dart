@@ -224,7 +224,9 @@ class _HarmonyScreenState extends State<HarmonyScreen> {
                     if (entry.key == 'pregnancy') {
                       final picked = await showDatePicker(
                         context: context,
-                        helpText: 'Дата начала беременности',
+                        // Срок и ПДР считаются по акушерскому правилу (+280 дней
+                        // от первого дня последних месячных).
+                        helpText: 'Первый день последних месячных',
                         initialDate: DateTime.now(),
                         firstDate: DateTime.now().subtract(const Duration(days: 300)),
                         lastDate: DateTime.now(),
@@ -439,7 +441,7 @@ class _HarmonyScreenState extends State<HarmonyScreen> {
             manualOvulationDay: manualOvulationDay,
             pregStartTs: pregStartTs,
           );
-          final Color phaseColor = _phaseColor(dayInfo.phaseType);
+          final Color phaseColor = dayInfo.pregnancyStage != null ? EvaColors.pregnancyStage(dayInfo.pregnancyStage) : _phaseColor(dayInfo.phaseType);
 
           return SafeArea(
             bottom: false,
@@ -499,11 +501,27 @@ class _HarmonyScreenState extends State<HarmonyScreen> {
                     onDaySelected: (selectedDay, uData) => _onDaySelected(selectedDay, uData, uid, globalWeight),
                   ),
                 ),
+                if (appMode == 'pregnancy' && pregStartTs != null) ...[
+                  const SizedBox(height: 14),
+                  EvaCard(
+                    padding: const EdgeInsets.fromLTRB(18, 16, 18, 14),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text('Этапы развития малыша', style: theme.textTheme.titleLarge),
+                        const SizedBox(height: 12),
+                        PregnancyStagesLegend(currentStage: dayInfo.pregnancyStage),
+                      ],
+                    ),
+                  ),
+                ],
                 const SizedBox(height: 10),
                 Padding(
                   padding: const EdgeInsets.symmetric(horizontal: 4),
                   child: Text(
-                    'Нажми на день в календаре, чтобы отметить самочувствие, настроение, вес или начало цикла.',
+                    appMode == 'pregnancy'
+                        ? 'Нажми на день в календаре, чтобы узнать срок и этап или отметить самочувствие, настроение и вес.'
+                        : 'Нажми на день в календаре, чтобы отметить самочувствие, настроение, вес или начало цикла.',
                     style: theme.textTheme.bodySmall,
                   ),
                 ),

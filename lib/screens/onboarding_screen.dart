@@ -7,6 +7,7 @@ import 'package:intl/intl.dart';
 import '../services/calculation_service.dart';
 import '../theme/eva_colors.dart';
 import '../widgets/eva_ui.dart';
+import '../services/analytics_service.dart';
 
 class OnboardingScreen extends StatefulWidget {
   const OnboardingScreen({super.key});
@@ -161,6 +162,7 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
       );
       // Флаг завершения онбординга пишем последним — HomeWrapper сам откроет главный экран.
       FirebaseFirestore.instance.collection('users').doc(uid).set(userData, SetOptions(merge: true)).catchError((e) => debugPrint('onboarding save: $e'));
+      Analytics.event('onboarding_complete', {'goal': _selectedGoal, 'app_mode': _isPregnancy ? 'pregnancy' : 'standard'});
     } catch (e) {
       if (mounted) {
         setState(() => _isLoading = false);

@@ -21,17 +21,22 @@ import '../widgets/chat_widgets.dart';
 import '../widgets/eva_ui.dart';
 import '../widgets/image_viewer.dart';
 import 'shopping_list_screen.dart';
+import '../services/analytics_service.dart';
 
 class AIChatScreen extends StatefulWidget {
   final String botType;
   final String? initialDisplayMessage;
   final String? initialTechnicalPrompt;
 
+  /// Режим запроса для сервера (например, 'meal_plan' — «Что съесть?»).
+  final String? initialMode;
+
   const AIChatScreen({
     super.key,
     required this.botType,
     this.initialDisplayMessage,
     this.initialTechnicalPrompt,
+    this.initialMode,
   });
 
   @override
@@ -61,6 +66,8 @@ class _AIChatScreenState extends State<AIChatScreen> {
   final Map<String, _ParsedAiMessage> _parsedCache = {};
 
   String? _lastFailedPrompt;
+
+  String? _lastFailedMode;
 
   @override
   void initState() {
@@ -128,7 +135,7 @@ class _AIChatScreenState extends State<AIChatScreen> {
     }
 
     if (widget.initialDisplayMessage != null && widget.initialTechnicalPrompt != null) {
-      _sendToEva(displayText: widget.initialDisplayMessage!, technicalPrompt: widget.initialTechnicalPrompt!);
+      _sendToEva(displayText: widget.initialDisplayMessage!, technicalPrompt: widget.initialTechnicalPrompt!, mode: widget.initialMode);
     }
   }
 
@@ -250,6 +257,7 @@ class _AIChatScreenState extends State<AIChatScreen> {
     File? pdf,
     String? pdfName,
     bool addUserMessage = true,
+    String? mode,
   }) async {
     final col = _col;
     final uid = FirebaseAuth.instance.currentUser?.uid;
@@ -257,6 +265,12 @@ class _AIChatScreenState extends State<AIChatScreen> {
 
     setState(() => _isTyping = true);
     _scrollToBottom();
+    Analytics.event('eva_message', {
+      'mode': mode ?? 'chat',
+      'has_photo': images.isNotEmpty,
+      'has_pdf': pdf != null,
+      'retry': !addUserMessage,
+    });
 
     try {
       final int serverVersion = await AIService.serverVersion();
@@ -323,6 +337,7 @@ class _AIChatScreenState extends State<AIChatScreen> {
         pdfBase64: pdfBase64,
         quota: 'message',
         saveReply: true,
+        mode: mode,
       );
 
       if (!reply.savedByServer) {
@@ -331,10 +346,12 @@ class _AIChatScreenState extends State<AIChatScreen> {
       _lastFailedPrompt = null;
     } on EvaQuotaException {
       if (!mounted) return;
-      Navigator.of(context).push(MaterialPageRoute(builder: (_) => const PaywallScreen(isFromProfile: true)));
+      Navigator.of(context).push(MaterialPageRoute(builder: (_) => const PaywallScreen(isFromProfile: true, source: 'eva_limit')));
     } catch (e) {
       debugPrint('Eva error: $e');
+      Analytics.event('eva_error', {'type': e is EvaUnavailableException ? 'unavailable' : 'network'});
       _lastFailedPrompt = technicalPrompt;
+      _lastFailedMode = mode;
       if (!mounted) return;
       EvaSnack.show(
         context,
@@ -347,7 +364,7 @@ class _AIChatScreenState extends State<AIChatScreen> {
                 label: 'Повторить',
                 onPressed: () {
                   final p = _lastFailedPrompt;
-                  if (p != null) _sendToEva(displayText: p, technicalPrompt: p, addUserMessage: false);
+                  if (p != null) _sendToEva(displayText: p, technicalPrompt: p, addUserMessage: false, mode: _lastFailedMode);
                 },
               ),
       );
@@ -366,50 +383,59 @@ class _AIChatScreenState extends State<AIChatScreen> {
   // Разбор ответа Евы (JSON-действия, список покупок)
   // ---------------------------------------------------------------------------
 
-  Map<String, dynamic>? _tryParseJson(String text) {
-    try {
-      String jsonString = text;
-      final String tripleTick = String.fromCharCode(96) * 3;
-      final exp = RegExp(tripleTick + r"(?:json)?\s*([\s\S]*?)\s*" + tripleTick, caseSensitive: false);
-      final match = exp.firstMatch(text);
-      if (match != null) {
-        jsonString = match.group(1)!;
-      } else {
-        final startIdx = text.indexOf('{');
-        final endIdx = text.lastIndexOf('}');
-        if (startIdx != -1 && endIdx != -1 && endIdx > startIdx) {
-          jsonString = text.substring(startIdx, endIdx + 1);
-        } else {
-          return null;
+  /// Находит все JSON-объекты в тексте с учётом вложенности, строк и
+  /// экранирования. Раньше брался фрагмент «от первой { до последней }» — если
+  /// Ева вставляла JSON посреди текста (или несколько блоков), разбор падал
+  /// и пользователь видел «сырой» JSON.
+  List<({int start, int end, Map<String, dynamic> value})> _extractJsonObjects(String text) {
+    final result = <({int start, int end, Map<String, dynamic> value})>[];
+    int from = 0;
+    while (from < text.length) {
+      final int start = text.indexOf('{', from);
+      if (start == -1) break;
+      int depth = 0;
+      bool inString = false;
+      bool escaped = false;
+      int end = -1;
+      for (int j = start; j < text.length; j++) {
+        final int c = text.codeUnitAt(j);
+        if (inString) {
+          if (escaped) {
+            escaped = false;
+          } else if (c == 0x5C) {
+            escaped = true;
+          } else if (c == 0x22) {
+            inString = false;
+          }
+          continue;
+        }
+        if (c == 0x22) {
+          inString = true;
+        } else if (c == 0x7B) {
+          depth++;
+        } else if (c == 0x7D) {
+          depth--;
+          if (depth == 0) {
+            end = j + 1;
+            break;
+          }
         }
       }
-      final decoded = jsonDecode(jsonString);
-      return decoded is Map<String, dynamic> ? decoded : null;
-    } catch (e) {
-      return null;
-    }
-  }
-
-  String _cleanText(String text, Map<String, dynamic>? jsonData) {
-    if (jsonData == null) return text.trim();
-
-    final String tripleTick = String.fromCharCode(96) * 3;
-    String stripped = text.replaceAll(RegExp(tripleTick + r"(?:json)?\s*([\s\S]*?)\s*" + tripleTick, caseSensitive: false), '').trim();
-
-    final startIdx = stripped.indexOf('{');
-    final endIdx = stripped.lastIndexOf('}');
-    if (startIdx != -1 && endIdx != -1 && endIdx > startIdx) {
-      final String possibleJson = stripped.substring(startIdx, endIdx + 1);
+      if (end == -1) {
+        from = start + 1;
+        continue;
+      }
       try {
-        jsonDecode(possibleJson);
-        stripped = stripped.replaceRange(startIdx, endIdx + 1, '').trim();
+        final decoded = jsonDecode(text.substring(start, end));
+        if (decoded is Map<String, dynamic>) {
+          result.add((start: start, end: end, value: decoded));
+          from = end;
+          continue;
+        }
       } catch (_) {}
+      from = start + 1;
     }
-
-    if (stripped.isEmpty && jsonData['coach_message'] != null && jsonData['coach_message'].toString().isNotEmpty) {
-      return jsonData['coach_message'].toString().trim();
-    }
-    return stripped;
+    return result;
   }
 
   _ParsedAiMessage _parse(String id, String rawText, bool isUser) {
@@ -442,8 +468,25 @@ class _AIChatScreenState extends State<AIChatScreen> {
     clean = clean.replaceAll(RegExp(tick + tick + tick + r'(?:json)?\s*'), '').trim();
     clean = clean.replaceAll(RegExp(r'\[\/?SHOPP?ING_LIST\]', caseSensitive: false), '').trim();
 
-    final jsonData = _tryParseJson(clean);
-    final parsed = _ParsedAiMessage(_cleanText(clean, jsonData), shopping, jsonData);
+    // Действие для карточки — первый JSON с action_type. Все JSON-фрагменты
+    // убираем из текста, чтобы пользователь не видел технические данные.
+    final objects = _extractJsonObjects(clean);
+    Map<String, dynamic>? jsonData;
+    for (final o in objects) {
+      if (o.value['action_type'] != null || o.value['type'] != null) {
+        jsonData = o.value;
+        break;
+      }
+    }
+    String display = clean;
+    for (final o in objects.reversed) {
+      display = display.replaceRange(o.start, o.end, '');
+    }
+    display = display.replaceAll(RegExp(r'\n{3,}'), '\n\n').trim();
+    if (display.isEmpty && (jsonData?['coach_message'] ?? '').toString().isNotEmpty) {
+      display = jsonData!['coach_message'].toString().trim();
+    }
+    final parsed = _ParsedAiMessage(display, shopping, jsonData);
     _parsedCache[id] = parsed;
     return parsed;
   }

@@ -23,6 +23,7 @@ import 'package:cloud_functions/cloud_functions.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:firebase_storage/firebase_storage.dart';
 import 'package:flutter/foundation.dart';
+import 'analytics_service.dart';
 
 enum ChatDeliveryState { sending, sent, read, failed }
 
@@ -268,6 +269,7 @@ class P2PChatService {
     Future<ChatDeliveryState> deliver() async {
       try {
         await write.timeout(const Duration(seconds: 7));
+        Analytics.event('chat_message_sent', {'delivery': 'direct', 'has_image': imageUrl != null});
         return ChatDeliveryState.sent;
       } on TimeoutException {
         // Соединение Firestore «залипло» (частая история с VPN/роумингом).
@@ -283,9 +285,11 @@ class P2PChatService {
             'text': trimmed,
             'imageUrl': imageUrl,
           });
+          Analytics.event('chat_message_sent', {'delivery': 'https_fallback', 'has_image': imageUrl != null});
           return ChatDeliveryState.sent;
         } catch (e) {
           debugPrint('sendChatMessage fallback: $e');
+          Analytics.event('chat_message_sent', {'delivery': 'queued_offline', 'has_image': imageUrl != null});
           // Сообщение останется в локальной очереди Firestore и уйдёт само,
           // как только связь восстановится.
           return ChatDeliveryState.sending;

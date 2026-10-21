@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:convert';
 
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
@@ -68,6 +69,8 @@ class PushNotificationService {
 
     _messageSub ??= FirebaseMessaging.onMessage.listen(_onForegroundMessage, onError: (e) => debugPrint('onMessage: $e'));
     _openedSub ??= FirebaseMessaging.onMessageOpenedApp.listen(_openFromMessage, onError: (e) => debugPrint('onMessageOpenedApp: $e'));
+    // Нажатие на пуш, показанный как локальное уведомление (приложение было открыто).
+    LocalNotificationService.externalTapHandler = (data) => _openFromData(data);
 
     try {
       final initial = await fcm.getInitialMessage();
@@ -98,10 +101,12 @@ class PushNotificationService {
 
     if (notification == null) return;
     try {
+      final String body = notification.body ?? '';
       _localNotifications.show(
         id: notification.hashCode,
         title: notification.title,
-        body: notification.body,
+        body: body,
+        payload: jsonEncode({...message.data, if (notification.title != null) 'title': notification.title}),
         notificationDetails: NotificationDetails(
           android: AndroidNotificationDetails(
             _channel.id,
@@ -111,6 +116,8 @@ class PushNotificationService {
             importance: Importance.max,
             priority: Priority.high,
             color: const Color(0xFFB76E79),
+            // Длинные сообщения целиком видны при разворачивании уведомления.
+            styleInformation: BigTextStyleInformation(body, contentTitle: notification.title),
           ),
           iOS: const DarwinNotificationDetails(presentAlert: true, presentSound: true),
         ),
@@ -122,9 +129,12 @@ class PushNotificationService {
 
   /// Открытие нужного экрана по тапу на пуш.
   void _openFromMessage(RemoteMessage message) {
+    _openFromData(message.data, title: message.notification?.title);
+  }
+
+  void _openFromData(Map<String, dynamic> data, {String? title}) {
     final nav = AppNavigator.nav;
     if (nav == null) return;
-    final data = message.data;
     final String type = (data['type'] ?? '').toString();
     try {
       if (type == 'chat') {
@@ -136,7 +146,7 @@ class PushNotificationService {
         }
         if (otherId == null || otherId.isEmpty) return;
         final String target = otherId;
-        final String name = (data['senderName'] ?? message.notification?.title ?? 'Собеседник').toString();
+        final String name = (data['senderName'] ?? title ?? data['title'] ?? 'Собеседник').toString();
         nav.push(MaterialPageRoute(builder: (_) => P2PChatScreen(otherUserId: target, otherUserName: name)));
       } else if (type == 'eva' || type == 'ai') {
         nav.push(MaterialPageRoute(builder: (_) => const AIChatScreen(botType: 'dietitian')));
@@ -146,11 +156,9 @@ class PushNotificationService {
     }
   }
 
-  Future<void> clearAllNotifications() async {
-    try {
-      await _localNotifications.cancelAll();
-    } catch (_) {}
-  }
+  /// Убирает показанные уведомления из шторки. Запланированные напоминания
+  /// Евы НЕ трогает (раньше cancelAll() удалял и их при каждом открытии чата).
+  Future<void> clearAllNotifications() => LocalNotificationService().dismissDisplayed();
 
   Future<void> forceUpdateToken() async {
     final fcm = _fcm;

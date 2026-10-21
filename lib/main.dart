@@ -12,6 +12,7 @@ import 'package:intl/date_symbol_data_local.dart';
 
 import 'firebase_options.dart';
 import 'screens/home_wrapper.dart';
+import 'services/analytics_service.dart';
 import 'services/app_navigator.dart';
 import 'services/local_notification_service.dart';
 import 'services/theme_service.dart';
@@ -32,9 +33,11 @@ Future<void> main() async {
   FlutterError.onError = (details) {
     FlutterError.presentError(details);
     debugPrint('FlutterError: ${details.exceptionAsString()}');
+    Analytics.recordFlutterError(details);
   };
   WidgetsBinding.instance.platformDispatcher.onError = (error, stack) {
     debugPrint('Uncaught async error: $error');
+    Analytics.recordError(error, stack, fatal: true);
     return true;
   };
 
@@ -45,6 +48,9 @@ Future<void> main() async {
   } catch (e) {
     debugPrint('⚠️ Firebase init error: $e');
   }
+
+  // Статистика и отчёты о падениях (Firebase Analytics, Crashlytics, AppMetrica).
+  await Analytics.init();
 
   try {
     // Офлайн-кэш без ограничения размера: данные показываются мгновенно,
@@ -101,6 +107,7 @@ class MyApp extends StatelessWidget {
           title: 'Моя Ева',
           debugShowCheckedModeBanner: false,
           navigatorKey: AppNavigator.key,
+          navigatorObservers: Analytics.navigatorObservers,
           scaffoldMessengerKey: AppNavigator.messengerKey,
           localizationsDelegates: context.localizationDelegates,
           supportedLocales: context.supportedLocales,

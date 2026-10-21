@@ -285,7 +285,7 @@ class _HomeTabState extends State<HomeTab> with AutomaticKeepAliveClientMixin, W
                           const SizedBox(height: 14),
                           _WaterCard(key: ValueKey('water_$_docId'), serverGlasses: evaInt(mealsData?['water_glasses'])),
                           const SizedBox(height: 14),
-                          CycleNutritionCard(phaseType: phase.phaseType, phaseLabel: phase.title),
+                          CycleNutritionCard(phaseType: phase.phaseType, phaseLabel: phase.phaseType == 'pregnancy' ? 'беременность, срок ${phase.title}' : phase.title),
                           const SizedBox(height: 14),
                           _buildInsightsTeaser(theme),
                           const SizedBox(height: 28),
@@ -403,22 +403,23 @@ class _HomeTabState extends State<HomeTab> with AutomaticKeepAliveClientMixin, W
     final String appMode = (userData['appMode'] ?? (userData['isPregnant'] == true ? 'pregnancy' : 'standard')).toString();
 
     if (appMode == 'pregnancy') {
+      final Color stageColor = EvaColors.pregnancyStage(phase.pregnancyStage);
       return EvaCard(
         padding: const EdgeInsets.all(22),
         gradient: LinearGradient(
-          colors: [EvaColors.pregnancy.withValues(alpha: context.isDark ? 0.35 : 0.18), theme.colorScheme.surface],
+          colors: [stageColor.withValues(alpha: context.isDark ? 0.35 : 0.18), theme.colorScheme.surface],
           begin: Alignment.topLeft,
           end: Alignment.bottomRight,
         ),
         child: Row(
           children: [
-            const EvaIconBubble(icon: Icons.child_friendly_rounded, color: EvaColors.pregnancy, size: 56, iconSize: 28),
+            EvaIconBubble(icon: Icons.child_friendly_rounded, color: stageColor, size: 56, iconSize: 28),
             const SizedBox(width: 16),
             Expanded(
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  const EvaOverline('Беременность', color: EvaColors.pregnancy),
+                  EvaOverline('Беременность', color: stageColor),
                   const SizedBox(height: 4),
                   Text(phase.title, style: theme.textTheme.headlineMedium),
                   const SizedBox(height: 4),

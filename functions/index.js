@@ -351,6 +351,7 @@ const EVA_SYSTEM_PROMPT = `Ты — Ева, элитный нутрициоло�
 
 СЦЕНАРИИ:
 - Оценка еды (фото/текст): очень коротко — 1 предложение поддержки, КБЖУ и обязательный JSON-блок.
+- JSON log_food добавляй ТОЛЬКО когда пользователь сообщает, что УЖЕ съела что-то, или присылает фото своей еды. В меню, рецептах и советах «что съесть» log_food НЕ добавляй. В одном ответе — не больше одного JSON-блока.
 - Анализы: объясни простым языком, дай общие рекомендации по питанию, напомни, что диагноз ставит врач.
 - Рецепты: вступление (1 предложение), ингредиенты, шаги и блок [SHOPPING_LIST].
 
@@ -367,6 +368,12 @@ const EVA_SYSTEM_PROMPT = `Ты — Ева, элитный нутрициоло�
 [SHOPPING_LIST]
 {"items": [{"name": "Гречка", "amount": "200 г", "category": "Бакалея"}]}
 [/SHOPPING_LIST]`;
+
+/** Доп. правила для «Что съесть?» — короткое меню без записи в дневник. */
+const MEAL_PLAN_RULES = `
+
+РЕЖИМ «ЧТО СЪЕСТЬ»: пользователь просит идеи меню, а НЕ записывает еду. Не добавляй JSON log_food и update_goal.
+Формат: для каждого блюда — заголовок с названием, одна строка «≈ ккал · Б/Ж/У», ингредиенты с граммовкой одной строкой, приготовление в 2–3 коротких шага. Без длинных вступлений и заключений. В самом конце — блок [SHOPPING_LIST].`;
 
 /** Атомарно списывает бесплатную попытку. Premium с действующим сроком — без ограничений. */
 async function consumeQuota(uid, kind) {
@@ -455,6 +462,7 @@ exports.askDietitian = onCall({ cors: true, maxInstances: 20, timeoutSeconds: 12
   const botType = typeof data.botType === "string" && /^[a-z_]{1,32}$/.test(data.botType) ? data.botType : null;
   const saveReply = data.saveReply === true && !!botType;
   const quotaKind = data.quota === "scan" || data.quota === "message" ? data.quota : null;
+  const mode = data.mode === "meal_plan" ? "meal_plan" : "chat";
 
   // --- Лимиты бесплатных запросов (только для новых версий клиента) ---
   let quota = null;
@@ -478,8 +486,14 @@ exports.askDietitian = onCall({ cors: true, maxInstances: 20, timeoutSeconds: 12
     const hasFiles = imagesBase64.length > 0 || !!pdfBase64;
     const model = getGenAI().getGenerativeModel({
       model: GEMINI_MODEL,
-      systemInstruction: `${EVA_SYSTEM_PROMPT}\n\nДОСЬЕ ПОЛЬЗОВАТЕЛЯ (ТЕКУЩИЙ КОНТЕКСТ):\n${userContext || "(Профиль пока не заполнен)"}`,
-      generationConfig: { temperature: hasFiles ? 0.1 : 0.4 },
+      systemInstruction: `${EVA_SYSTEM_PROMPT}${mode === "meal_plan" ? MEAL_PLAN_RULES : ""}\n\nДОСЬЕ ПОЛЬЗОВАТЕЛЯ (ТЕКУЩИЙ КОНТЕКСТ):\n${userContext || "(Профиль пока не заполнен)"}`,
+      generationConfig: {
+        temperature: hasFiles ? 0.1 : 0.4,
+        // Gemini 2.5 Flash по умолчанию «размышляет» перед ответом — отсюда
+        // ожидание 20–40 секунд. Для переписки и меню это не нужно, для фото и
+        // анализов оставляем небольшой бюджет.
+        thinkingConfig: { thinkingBudget: hasFiles ? 1024 : 0 },
+      },
     });
 
     const userPrompt = prompt || (hasFiles ? "Посмотри файлы" : "Привет!");

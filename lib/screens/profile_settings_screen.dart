@@ -133,7 +133,7 @@ class _ProfileSettingsScreenState extends State<ProfileSettingsScreen> {
       if (value) {
         await LocalNotificationService().scheduleDailyNotifications();
       } else {
-        await LocalNotificationService().cancelAll();
+        await LocalNotificationService().cancelCareReminders();
       }
     } catch (e) {
       debugPrint('notifications: $e');

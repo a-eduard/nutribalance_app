@@ -67,6 +67,7 @@ class AIService {
     String? pdfPath,
     String quota = 'message',
     bool saveReply = true,
+    String? mode,
     Duration timeout = const Duration(seconds: 120),
   }) async {
     final int version = await serverVersion();
@@ -92,6 +93,7 @@ class AIService {
       // (иначе — на клиенте выше), чтобы не списать попытку дважды.
       if (serverV2) 'quota': quota,
       'clientVersion': 2,
+      if (mode != null) 'mode': mode,
       if (serverV2 && imagePaths.isNotEmpty) 'imagePaths': imagePaths else 'imagesBase64': imagesBase64,
       if (serverV2 && pdfPath != null) 'pdfPath': pdfPath else if (pdfBase64 != null) 'pdfBase64': pdfBase64,
     };

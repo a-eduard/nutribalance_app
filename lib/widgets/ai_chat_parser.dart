@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import '../services/database_service.dart';
 import '../theme/eva_colors.dart';
 import 'eva_ui.dart';
+import '../services/analytics_service.dart';
 
 class AIChatSaveCardWidget extends StatefulWidget {
   final Map<String, dynamic> jsonData;
@@ -172,6 +173,7 @@ class _AIChatSaveCardWidgetState extends State<AIChatSaveCardWidget> {
         await DatabaseService().saveNutritionGoal(_editableData);
       } else if (isLogFood) {
         await DatabaseService().logMeal(_editableData);
+        Analytics.event('meal_logged', {'source': 'eva_chat'});
       } else if (actionType == 'shopping_list') {
         await DatabaseService().saveShoppingList(_editableData);
       }

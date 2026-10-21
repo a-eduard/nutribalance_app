@@ -4,6 +4,7 @@ import 'package:flutter/cupertino.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:intl/intl.dart';
+import '../../../services/analytics_service.dart';
 import '../../../../services/cycle_calculator.dart'; // ИМПОРТ ДОБАВЛЕН
 
 class HarmonyBottomSheets {
@@ -69,7 +70,9 @@ class HarmonyBottomSheets {
       pregStartTs: pregStartTs,
     );
 
-    final Color phaseColor = _getPhaseColor(dayInfo.phaseType, theme);
+    final Color phaseColor = dayInfo.pregnancyStage != null
+        ? EvaColors.pregnancyStage(dayInfo.pregnancyStage)
+        : _getPhaseColor(dayInfo.phaseType, theme);
 
     showModalBottomSheet(
       context: context,
@@ -117,6 +120,7 @@ class HarmonyBottomSheets {
                           FirebaseFirestore.instance.collection('users').doc(uid).update({'lastPeriodStartDate': FieldValue.delete()});
                         } else {
                           FirebaseFirestore.instance.collection('users').doc(uid).update({'lastPeriodStartDate': Timestamp.fromDate(day), 'lastPeriodEndDate': FieldValue.delete()});
+                          Analytics.event('harmony_action', {'type': 'period_start'});
                         }
                         Navigator.pop(ctx);
                       },
@@ -152,10 +156,10 @@ class HarmonyBottomSheets {
               crossAxisSpacing: 12,
               childAspectRatio: 1.0,
               children: [
-                _buildSquareAction("Симптомы", Icons.tune, Colors.orange, theme, () { Navigator.pop(ctx); onSymptomsTap(); }),
-                _buildSquareAction("Настроение", Icons.emoji_emotions, Colors.purple, theme, () { Navigator.pop(ctx); onMoodTap(); }),
-                _buildSquareAction("Медикаменты", Icons.medication_outlined, Colors.teal, theme, () { Navigator.pop(ctx); onMedsTap(); }),
-                _buildSquareAction("Вес", Icons.monitor_weight_outlined, Colors.blueGrey, theme, () { Navigator.pop(ctx); onWeightTap(); }),
+                _buildSquareAction("Симптомы", Icons.tune, Colors.orange, theme, () { Navigator.pop(ctx); Analytics.event('harmony_action', {'type': 'symptoms'}); onSymptomsTap(); }),
+                _buildSquareAction("Настроение", Icons.emoji_emotions, Colors.purple, theme, () { Navigator.pop(ctx); Analytics.event('harmony_action', {'type': 'mood'}); onMoodTap(); }),
+                _buildSquareAction("Медикаменты", Icons.medication_outlined, Colors.teal, theme, () { Navigator.pop(ctx); Analytics.event('harmony_action', {'type': 'meds'}); onMedsTap(); }),
+                _buildSquareAction("Вес", Icons.monitor_weight_outlined, Colors.blueGrey, theme, () { Navigator.pop(ctx); Analytics.event('harmony_action', {'type': 'weight'}); onWeightTap(); }),
                 _buildSquareAction("Секс", Icons.favorite_outline, Colors.pinkAccent, theme, () { Navigator.pop(ctx); onSexTap(); }),
                 _buildSquareAction("БТТ", Icons.thermostat_outlined, Colors.redAccent, theme, () { Navigator.pop(ctx); onTempTap(); }),
               ],

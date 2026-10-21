@@ -4,13 +4,84 @@ import 'package:intl/intl.dart';
 class CyclePhaseInfo {
   final String title;
   final String description;
-  final String phaseType; 
+  final String phaseType;
 
-  CyclePhaseInfo({required this.title, required this.description, required this.phaseType});
+  /// Этап беременности (индекс в [CycleCalculator.pregnancyStages]) — только в режиме беременности.
+  final int? pregnancyStage;
+
+  /// Акушерский срок: полные недели и дни.
+  final int? pregnancyWeeks;
+  final int? pregnancyDays;
+
+  /// День предполагаемой даты родов (ПДР).
+  final bool isDueDate;
+
+  CyclePhaseInfo({
+    required this.title,
+    required this.description,
+    required this.phaseType,
+    this.pregnancyStage,
+    this.pregnancyWeeks,
+    this.pregnancyDays,
+    this.isDueDate = false,
+  });
+}
+
+/// Этап развития малыша. Недели — полные акушерские недели (от первого дня
+/// последних месячных), как в обменной карте: «12 нед. 3 дн.» → 12.
+class PregnancyStage {
+  final int index;
+  final int fromWeek;
+  final int toWeek;
+  final String title;
+  final String description;
+
+  const PregnancyStage(this.index, this.fromWeek, this.toWeek, this.title, this.description);
+
+  String get range => '$fromWeek–$toWeek нед.';
+
+  int get trimester => fromWeek <= 13 ? 1 : (fromWeek <= 27 ? 2 : 3);
 }
 
 class CycleCalculator {
-  
+  static const List<PregnancyStage> pregnancyStages = [
+    PregnancyStage(0, 0, 3, 'Зачатие и имплантация',
+        'Срок считают от первого дня последних месячных: в эти недели происходят овуляция, зачатие и прикрепление плодного яйца. Особенно важна фолиевая кислота — по назначению врача.'),
+    PregnancyStage(1, 4, 9, 'Эмбрион: закладка органов',
+        'Формируются все основные органы, начинает биться сердце. Время встать на учёт, больше отдыхать и питаться бережно.'),
+    PregnancyStage(2, 10, 13, 'Малыш становится плодом',
+        'Завершается I триместр: органы сформированы и начинают работать. На 11–13 неделе проводят первый скрининг.'),
+    PregnancyStage(3, 14, 19, 'Активный рост',
+        'II триместр: малыш быстро растёт, формируются черты лица. Самочувствие часто улучшается. Второй скрининг — на 18–21 неделе.'),
+    PregnancyStage(4, 20, 27, 'Шевеления и чувства',
+        'Ты чувствуешь шевеления, малыш слышит звуки и реагирует на твой голос. Растёт жировая прослойка.'),
+    PregnancyStage(5, 28, 36, 'Набор веса и созревание',
+        'III триместр: малыш набирает вес, созревают лёгкие. Больше отдыха, следи за отёками и давлением.'),
+    PregnancyStage(6, 37, 42, 'Малыш готов к рождению',
+        'Беременность доношенная — роды могут начаться в любой день. Держи сумку в роддом наготове 👜'),
+  ];
+
+  static PregnancyStage pregnancyStageForWeek(int weeks) {
+    for (final stage in pregnancyStages) {
+      if (weeks <= stage.toWeek) return stage;
+    }
+    return pregnancyStages.last;
+  }
+
+  static String _plural(int n, String one, String few, String many) {
+    final int mod10 = n % 10, mod100 = n % 100;
+    if (mod10 == 1 && mod100 != 11) return one;
+    if (mod10 >= 2 && mod10 <= 4 && (mod100 < 12 || mod100 > 14)) return few;
+    return many;
+  }
+
+  /// «12 недель 3 дня»
+  static String pregnancyTermLabel(int weeks, int days) {
+    final String w = '$weeks ${_plural(weeks, 'неделя', 'недели', 'недель')}';
+    if (days == 0) return w;
+    return '$w $days ${_plural(days, 'день', 'дня', 'дней')}';
+  }
+
   static CyclePhaseInfo getDayInfo({
     required DateTime targetDate,
     required DateTime? lastStartDate,
@@ -23,15 +94,29 @@ class CycleCalculator {
   }) {
     if (appMode == 'pregnancy') {
       if (pregStartTs != null) {
-        final pregStart = pregStartTs.toDate();
-        final days = targetDate.difference(pregStart).inDays;
-        final weeks = days ~/ 7;
-        
-        if (days < 0) return CyclePhaseInfo(title: 'До беременности', description: 'Этот день был до начала отсчета беременности.', phaseType: 'none');
-        if (weeks > 42) return CyclePhaseInfo(title: 'Малыш уже с вами! 🎉', description: 'Период беременности завершен.', phaseType: 'pregnancy_done');
-        
+        final DateTime rawStart = pregStartTs.toDate();
+        // Сравниваем только календарные даты: календарь передаёт дни в UTC,
+        // а дата начала хранится в местном времени — иначе срок «прыгал» на день.
+        final DateTime pregStart = DateTime.utc(rawStart.year, rawStart.month, rawStart.day);
+        final DateTime current = DateTime.utc(targetDate.year, targetDate.month, targetDate.day);
+        final int totalDays = current.difference(pregStart).inDays;
+        final int weeks = totalDays ~/ 7;
+        final int days = totalDays % 7;
+
+        if (totalDays < 0) return CyclePhaseInfo(title: 'До беременности', description: 'Этот день был до начала отсчёта беременности.', phaseType: 'none');
+        if (weeks > 42) return CyclePhaseInfo(title: 'Малыш уже с вами! 🎉', description: 'Период беременности завершён.', phaseType: 'pregnancy_done');
+
         final DateTime dueDate = pregStart.add(const Duration(days: 280));
-        return CyclePhaseInfo(title: '$weeks неделя 🤰', description: 'ПДР: ${DateFormat('dd.MM.yyyy').format(dueDate)}\nСледите за питанием и отдыхайте.', phaseType: 'pregnancy');
+        final PregnancyStage stage = pregnancyStageForWeek(weeks);
+        return CyclePhaseInfo(
+          title: '${pregnancyTermLabel(weeks, days)} 🤰',
+          description: '${stage.title} · ${stage.trimester} триместр\n${stage.description}\nПДР: ${DateFormat('dd.MM.yyyy').format(dueDate)}',
+          phaseType: 'pregnancy',
+          pregnancyStage: stage.index,
+          pregnancyWeeks: weeks,
+          pregnancyDays: days,
+          isDueDate: totalDays == 280,
+        );
       }
       return CyclePhaseInfo(title: 'Беременность', description: 'Укажите дату начала в настройках.', phaseType: 'pregnancy');
     }

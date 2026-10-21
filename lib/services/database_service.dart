@@ -5,6 +5,9 @@ import 'package:firebase_auth/firebase_auth.dart';
 import 'package:firebase_storage/firebase_storage.dart';
 import 'package:flutter/foundation.dart';
 
+import 'cycle_calculator.dart';
+import 'analytics_service.dart';
+
 class DatabaseService {
   final FirebaseFirestore _db = FirebaseFirestore.instance;
   final FirebaseAuth _auth = FirebaseAuth.instance;
@@ -162,6 +165,7 @@ class DatabaseService {
   }
   
   Future<void> updateWaterGlasses(int count) async {
+    Analytics.event('water_updated', {'glasses': count});
     final user = _auth.currentUser;
     if (user == null) {
       return;
@@ -784,7 +788,8 @@ class DatabaseService {
             weeks = 42;
           }
         }
-        pregnancyContext = "ПОЛЬЗОВАТЕЛЬ БЕРЕМЕННА (Срок: $weeks недель). Категорически запрещены жесткие диеты для похудения. Давай советы, адаптированные для беременных. Тон: максимально бережный и заботливый.";
+        final stage = CycleCalculator.pregnancyStageForWeek(weeks);
+        pregnancyContext = "ПОЛЬЗОВАТЕЛЬ БЕРЕМЕННА (Срок: $weeks недель, ${stage.trimester} триместр, этап: «${stage.title}»). Категорически запрещены жесткие диеты для похудения. Давай советы, адаптированные для беременных и текущего триместра. Тон: максимально бережный и заботливый.";
         cyclePhase = "Беременность ($weeks недель)";
       } else {
         final Timestamp? lastPeriod = userData['lastPeriodStartDate'] as Timestamp?;

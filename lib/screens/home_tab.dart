@@ -7,6 +7,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:intl/intl.dart';
 
+import '../services/analytics_service.dart';
 import '../services/calculation_service.dart';
 import '../services/cycle_calculator.dart';
 import '../services/database_service.dart';
@@ -394,6 +395,19 @@ class _HomeTabState extends State<HomeTab> with AutomaticKeepAliveClientMixin, W
     );
   }
 
+  /// «Месячные начались» в карточке задержки: сегодня — начало нового цикла.
+  /// Запись без ожидания сервера (офлайн и VPN), как и выбор даты в календаре.
+  void _markPeriodStartedToday() {
+    if (_uid == null) return;
+    final DateTime n = DateTime.now();
+    FirebaseFirestore.instance
+        .collection('users')
+        .doc(_uid)
+        .set({'lastPeriodStartDate': Timestamp.fromDate(DateTime(n.year, n.month, n.day)), 'lastPeriodEndDate': FieldValue.delete()}, SetOptions(merge: true))
+        .catchError((e) => debugPrint('$e'));
+    Analytics.event('period_started_from_delay');
+  }
+
   Widget _buildCycleCard(ThemeData theme, Map<String, dynamic> userData, CyclePhaseInfo phase) {
     final palette = context.eva;
     final Timestamp? lastStartTs = userData['lastPeriodStartDate'] as Timestamp?;
@@ -439,8 +453,11 @@ class _HomeTabState extends State<HomeTab> with AutomaticKeepAliveClientMixin, W
       final now = DateTime(_selectedDate.year, _selectedDate.month, _selectedDate.day);
       final int diff = now.difference(start).inDays;
       if (diff >= 0) currentDay = (diff % cycleLength) + 1;
+      // При задержке цикл не «перескакивает» на новый: показываем реальный день (например, 33-й).
+      if (phase.phaseType == 'delay' && diff >= 0) currentDay = diff + 1;
     }
     final bool hasData = lastStartTs != null;
+    final bool isDelay = phase.phaseType == 'delay';
 
     final Widget calendarButton = EvaCircleButton(
       icon: Icons.calendar_month_rounded,
@@ -499,7 +516,7 @@ class _HomeTabState extends State<HomeTab> with AutomaticKeepAliveClientMixin, W
                         painter: CycleRingPainter(
                           cycleLength: cycleLength,
                           periodDuration: periodDuration,
-                          currentDay: currentDay,
+                          currentDay: min(currentDay, cycleLength),
                           ovulationDay: manualOv ?? max(1, cycleLength - 13),
                           hasData: hasData,
                           baseColor: palette.fieldFill,
@@ -538,16 +555,31 @@ class _HomeTabState extends State<HomeTab> with AutomaticKeepAliveClientMixin, W
             hasData ? phase.description : 'Ева будет подсказывать питание и самочувствие по фазам.',
             style: theme.textTheme.bodySmall,
             textAlign: TextAlign.center,
-            maxLines: 3,
+            maxLines: 4,
             overflow: TextOverflow.ellipsis,
           ),
           const SizedBox(height: 16),
-          EvaPrimaryButton(
-            label: 'Отметить день',
-            icon: Icons.edit_note_rounded,
-            height: 46,
-            onPressed: () => _openDailyTracker(userData),
-          ),
+          if (isDelay) ...[
+            EvaPrimaryButton(
+              label: 'Месячные начались',
+              icon: Icons.water_drop_rounded,
+              height: 46,
+              onPressed: _markPeriodStartedToday,
+            ),
+            const SizedBox(height: 10),
+            EvaSecondaryButton(
+              label: 'Отметить день',
+              icon: Icons.edit_note_rounded,
+              height: 46,
+              onPressed: () => _openDailyTracker(userData),
+            ),
+          ] else
+            EvaPrimaryButton(
+              label: 'Отметить день',
+              icon: Icons.edit_note_rounded,
+              height: 46,
+              onPressed: () => _openDailyTracker(userData),
+            ),
         ],
       ),
     );

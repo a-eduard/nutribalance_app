@@ -82,6 +82,41 @@ class CycleCalculator {
     return '$w $days ${_plural(days, 'день', 'дня', 'дней')}';
   }
 
+  /// Первые дни после ожидаемой даты не считаем задержкой: цикл в норме немного сдвигается.
+  static const int delayGraceDays = 2;
+
+  /// С какого дня задержки подсказываем сделать тест или сходить к гинекологу.
+  static const int delayHintDays = 7;
+
+  /// Сколько дней прошло после ожидаемого начала месячных, если новое начало не отмечено.
+  /// null — задержки нет (или она ещё в пределах [delayGraceDays]).
+  static int? activeDelayDays({required DateTime? lastStartDate, required int cycleLength, DateTime? now}) {
+    if (lastStartDate == null || cycleLength <= 0) return null;
+    final DateTime n = now ?? DateTime.now();
+    final DateTime today = DateTime(n.year, n.month, n.day);
+    final DateTime start = DateTime(lastStartDate.year, lastStartDate.month, lastStartDate.day);
+    final int late = today.difference(start).inDays - cycleLength;
+    return late > delayGraceDays ? late : null;
+  }
+
+  static CyclePhaseInfo _delayInfo(int daysLate) {
+    if (daysLate > 60) {
+      return CyclePhaseInfo(
+        title: 'Давно нет отметок',
+        description: 'Отметь начало последних месячных — и прогноз снова станет точным.',
+        phaseType: 'delay',
+      );
+    }
+    final String days = '$daysLate ${_plural(daysLate, 'день', 'дня', 'дней')}';
+    return CyclePhaseInfo(
+      title: 'Задержка $days',
+      description: daysLate >= delayHintDays
+          ? 'Если задержка неделю и больше, сделай тест на беременность или покажись гинекологу.'
+          : 'Цикл может сдвигаться из-за стресса, сна или болезни. Когда месячные начнутся — отметь.',
+      phaseType: 'delay',
+    );
+  }
+
   static CyclePhaseInfo getDayInfo({
     required DateTime targetDate,
     required DateTime? lastStartDate,
@@ -131,6 +166,20 @@ class CycleCalculator {
       final int diff = current.difference(start).inDays;
 
       if (diff < 0) return CyclePhaseInfo(title: 'Обычный день', description: 'Данных о цикле на этот день еще нет.', phaseType: 'none');
+
+      // Задержка: новое начало не отмечено, а ожидаемая дата прошла больше чем на delayGraceDays.
+      // Раньше календарь молча начинал следующий цикл и мог показать «Менструацию», которой нет.
+      final int? lateNow = activeDelayDays(lastStartDate: lastStartDate, cycleLength: cycleLength);
+      if (lateNow != null && diff >= cycleLength) {
+        final DateTime n = DateTime.now();
+        final DateTime today = DateTime(n.year, n.month, n.day);
+        if (current.isAfter(today)) {
+          return CyclePhaseInfo(title: 'Прогноз уточнится', description: 'Прогноз обновится, когда ты отметишь начало месячных.', phaseType: 'none');
+        }
+        final int dayLate = diff - cycleLength;
+        if (dayLate > delayGraceDays) return _delayInfo(dayLate);
+        return CyclePhaseInfo(title: 'Ожидались месячные', description: 'По прогнозу в этот день мог начаться новый цикл.', phaseType: 'none');
+      }
 
       final int cycleIndex = diff ~/ cycleLength;
       final int normalizedDay = diff % cycleLength;

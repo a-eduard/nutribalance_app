@@ -336,6 +336,42 @@ exports.onNewChatMessage = onDocumentCreated("chats/{chatId}/messages/{messageId
 });
 
 // ==========================================
+// 4б. ПРИВЕТСТВИЕ НОВОМУ ПОЛЬЗОВАТЕЛЮ ОТ СЛУЖБЫ ЗАБОТЫ
+// ==========================================
+// Текст меняется здесь; после правки — деплой функций.
+const WELCOME_TEXT = `Здравствуйте! 👋 Добро пожаловать! Я Мария, менеджер службы заботы пользователей.
+Мы сейчас активно развиваем приложение и собираем отзывы от наших первых пользователей. Буду очень благодарна, если вы поделитесь впечатлениями: всё ли удобно нажимается, понятен ли интерфейс, чего вам не хватает? Не забудьте применить промокод START3.
+
+Пишите сюда любые технические пожелания или вопросы — я всегда на связи и мы с радостью поможем сделать приложение лучше для вас!`;
+
+/**
+ * Срабатывает один раз при создании аккаунта. Кладёт сообщение от аккаунта поддержки
+ * в обычный чат с поддержкой; счётчик непрочитанных и пуш делает onNewChatMessage.
+ * Фиксированный ID сообщения — повторный запуск не создаст дубль.
+ */
+exports.sendWelcomeMessage = auth.user().onCreate(async (user) => {
+  const uid = user && user.uid;
+  if (!uid || uid === SUPPORT_ADMIN_UID) return;
+  const chatId = [uid, SUPPORT_ADMIN_UID].sort().join("_");
+  const msgRef = db.collection("chats").doc(chatId).collection("messages").doc("welcome_v1");
+  try {
+    await msgRef.create({
+      senderId: SUPPORT_ADMIN_UID,
+      receiverId: uid,
+      text: WELCOME_TEXT,
+      type: "text",
+      timestamp: FieldValue.serverTimestamp(),
+      clientTs: Timestamp.now(),
+      v: 2,
+      via: "welcome",
+    });
+  } catch (e) {
+    if (e.code === 6) return; // уже отправлено
+    console.error("[sendWelcomeMessage] failed", e.code || "", e.message || "");
+  }
+});
+
+// ==========================================
 // 5. EVA — ИИ-НУТРИЦИОЛОГ
 // ==========================================
 const EVA_SYSTEM_PROMPT = `Ты — Ева, элитный нутрициолог, велнес-ментор и заботливая ИИ-подруга в приложении «Моя Ева». Твоя цель — помогать с питанием, женским здоровьем и образом жизни.

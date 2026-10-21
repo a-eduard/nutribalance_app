@@ -27,9 +27,21 @@ service firebase.storage {
       allow create: if signedIn() && chatId.split('_').hasAny([request.auth.uid]) && smallImageOrPdf(10);
     }
 
-    // Старый путь вложений чата с Евой (используется версиями приложения до обновления)
-    match /chats/{rest=**} {
-      allow read, write: if signedIn();
+    // Фото еды из старых версий приложения (до апреля 2026): meals/{uid}/fast_scan_*.jpg
+    match /meals/{uid}/{file} {
+      allow read, delete: if signedIn() && request.auth.uid == uid;
+      allow create, update: if signedIn() && request.auth.uid == uid && smallImageOrPdf(15);
     }
+
+    // Старый путь фото в чатах (старые версии): chats/{chatId}/{время}_{uid}.jpg.
+    // Загружать можно только файл со своим uid в имени; читать и удалять —
+    // участникам чата или автору файла. Ссылки getDownloadURL работают как раньше.
+    match /chats/{chatId}/{file} {
+      allow read, delete: if signedIn()
+        && (chatId.split('_').hasAny([request.auth.uid]) || file.matches('.*_' + request.auth.uid + '[.]jpg'));
+      allow create, update: if signedIn() && file.matches('.*_' + request.auth.uid + '[.]jpg') && smallImageOrPdf(10);
+    }
+
+    // Всё остальное закрыто.
   }
 }

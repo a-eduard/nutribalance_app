@@ -13,6 +13,8 @@ allprojects {
     repositories {
         google()
         mavenCentral()
+        // Новый репозиторий SDK RuStore (оценки и отзывы, платежи); старый artifactory больше не отдаёт новые библиотеки.
+        maven { url = uri("https://nexus-external.rustore.ru/repository/maven-rustore-exposed") }
     }
 }
 

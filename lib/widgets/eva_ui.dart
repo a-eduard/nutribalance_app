@@ -1194,7 +1194,12 @@ class EvaMacroBar extends StatelessWidget {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Text(label, maxLines: 1, overflow: TextOverflow.ellipsis, style: theme.textTheme.labelMedium?.copyWith(color: theme.colorScheme.onSurfaceVariant)),
+        // Подпись и цифры ужимаются по ширине колонки, а не обрезаются («Клетчат…»).
+        FittedBox(
+          fit: BoxFit.scaleDown,
+          alignment: Alignment.centerLeft,
+          child: Text(label, maxLines: 1, style: theme.textTheme.labelMedium?.copyWith(color: theme.colorScheme.onSurfaceVariant)),
+        ),
         const SizedBox(height: 6),
         ClipRRect(
           borderRadius: BorderRadius.circular(10),
@@ -1211,18 +1216,21 @@ class EvaMacroBar extends StatelessWidget {
           ),
         ),
         const SizedBox(height: 6),
-        RichText(
-          maxLines: 1,
-          overflow: TextOverflow.ellipsis,
-          text: TextSpan(
-            style: theme.textTheme.labelMedium?.copyWith(color: theme.colorScheme.onSurface),
-            children: [
-              TextSpan(text: '$current'),
-              TextSpan(
-                text: target > 0 ? ' / $target $unit' : ' $unit',
-                style: TextStyle(color: theme.colorScheme.onSurfaceVariant, fontWeight: FontWeight.w500),
-              ),
-            ],
+        FittedBox(
+          fit: BoxFit.scaleDown,
+          alignment: Alignment.centerLeft,
+          child: Text.rich(
+            TextSpan(
+              style: theme.textTheme.labelMedium?.copyWith(color: theme.colorScheme.onSurface),
+              children: [
+                TextSpan(text: '$current'),
+                TextSpan(
+                  text: target > 0 ? ' / $target $unit' : ' $unit',
+                  style: TextStyle(color: theme.colorScheme.onSurfaceVariant, fontWeight: FontWeight.w500),
+                ),
+              ],
+            ),
+            maxLines: 1,
           ),
         ),
       ],

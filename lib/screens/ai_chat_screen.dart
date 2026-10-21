@@ -1018,7 +1018,7 @@ class _RecipeShoppingCardWidgetState extends State<RecipeShoppingCardWidget> {
                     onPressed: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const ShoppingListScreen())),
                   )
                 : EvaPrimaryButton(
-                    label: 'Добавить в «Мой список»',
+                    label: 'В список покупок',
                     icon: Icons.add_rounded,
                     height: 48,
                     loading: _isLoading,

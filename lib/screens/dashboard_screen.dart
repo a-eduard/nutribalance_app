@@ -260,59 +260,72 @@ class _EvaNavBar extends StatelessWidget {
       );
     }
 
-    return SafeArea(
-      top: false,
-      child: Padding(
-        padding: const EdgeInsets.fromLTRB(14, 0, 14, 10),
-        child: SizedBox(
-          height: 82,
-          child: Stack(
-            clipBehavior: Clip.none,
-            alignment: Alignment.bottomCenter,
-            children: [
-              Container(
-                height: 70,
-                decoration: BoxDecoration(
-                  color: theme.colorScheme.surface.withValues(alpha: context.isDark ? 0.97 : 0.98),
-                  borderRadius: BorderRadius.circular(28),
-                  border: Border.all(color: palette.hairline),
-                  boxShadow: palette.floatingShadow,
+    final Color bg = theme.scaffoldBackgroundColor;
+    // Под плавающим меню — заливка цветом фона с плавным переходом:
+    // карточки при прокрутке уходят под меню, а не просвечивают по краям.
+    return DecoratedBox(
+      decoration: BoxDecoration(
+        gradient: LinearGradient(
+          begin: Alignment.topCenter,
+          end: Alignment.bottomCenter,
+          colors: [bg.withValues(alpha: 0), bg.withValues(alpha: 0.92), bg],
+          stops: const [0.0, 0.45, 1.0],
+        ),
+      ),
+      child: SafeArea(
+        top: false,
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(14, 0, 14, 10),
+          child: SizedBox(
+            height: 82,
+            child: Stack(
+              clipBehavior: Clip.none,
+              alignment: Alignment.bottomCenter,
+              children: [
+                Container(
+                  height: 70,
+                  decoration: BoxDecoration(
+                    color: theme.colorScheme.surface.withValues(alpha: context.isDark ? 0.97 : 0.98),
+                    borderRadius: BorderRadius.circular(28),
+                    border: Border.all(color: palette.hairline),
+                    boxShadow: palette.floatingShadow,
+                  ),
+                  child: Row(
+                    children: [
+                      item(0),
+                      item(1),
+                      const SizedBox(width: 72),
+                      item(2),
+                      item(3),
+                    ],
+                  ),
                 ),
-                child: Row(
-                  children: [
-                    item(0),
-                    item(1),
-                    const SizedBox(width: 72),
-                    item(2),
-                    item(3),
-                  ],
-                ),
-              ),
-              Positioned(
-                top: 0,
-                child: Semantics(
-                  button: true,
-                  label: 'Добавить еду по фото',
-                  child: EvaPressable(
-                    onTap: onCenterTap,
-                    pressedScale: 0.92,
-                    child: Container(
-                      width: 62,
-                      height: 62,
-                      decoration: BoxDecoration(
-                        gradient: palette.hero,
-                        shape: BoxShape.circle,
-                        border: Border.all(color: theme.colorScheme.surface, width: 4),
-                        boxShadow: [
-                          BoxShadow(color: theme.colorScheme.primary.withValues(alpha: 0.35), blurRadius: 18, offset: const Offset(0, 8)),
-                        ],
+                Positioned(
+                  top: 0,
+                  child: Semantics(
+                    button: true,
+                    label: 'Добавить еду по фото',
+                    child: EvaPressable(
+                      onTap: onCenterTap,
+                      pressedScale: 0.92,
+                      child: Container(
+                        width: 62,
+                        height: 62,
+                        decoration: BoxDecoration(
+                          gradient: palette.hero,
+                          shape: BoxShape.circle,
+                          border: Border.all(color: theme.colorScheme.surface, width: 4),
+                          boxShadow: [
+                            BoxShadow(color: theme.colorScheme.primary.withValues(alpha: 0.35), blurRadius: 18, offset: const Offset(0, 8)),
+                          ],
+                        ),
+                        child: const Icon(Icons.photo_camera_rounded, color: Colors.white, size: 26),
                       ),
-                      child: const Icon(Icons.photo_camera_rounded, color: Colors.white, size: 26),
                     ),
                   ),
                 ),
-              ),
-            ],
+              ],
+            ),
           ),
         ),
       ),

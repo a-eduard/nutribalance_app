@@ -847,7 +847,7 @@ class _WaterCardState extends State<_WaterCard> {
             children: [
               const Expanded(child: EvaOverline('Вода')),
               Text(
-                '${(glasses * _glassLiters).toStringAsFixed(1)} л',
+                '${(glasses * _glassLiters).toStringAsFixed(1).replaceAll('.', ',')} л',
                 style: theme.textTheme.titleMedium?.copyWith(color: EvaColors.water),
               ),
             ],

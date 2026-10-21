@@ -179,13 +179,6 @@ class CycleNutritionCard extends StatelessWidget {
           const SizedBox(height: 14),
           Row(
             children: [
-              Expanded(
-                child: Text(
-                  'Общие рекомендации, не заменяют консультацию врача',
-                  style: theme.textTheme.labelSmall?.copyWith(color: theme.colorScheme.onSurfaceVariant.withValues(alpha: 0.8), fontWeight: FontWeight.w500),
-                ),
-              ),
-              const SizedBox(width: 8),
               EvaPressable(
                 onTap: () => _askEva(context, info),
                 child: Container(
@@ -202,6 +195,11 @@ class CycleNutritionCard extends StatelessWidget {
                 ),
               ),
             ],
+          ),
+          const SizedBox(height: 10),
+          Text(
+            'Общие рекомендации, не заменяют консультацию врача',
+            style: theme.textTheme.labelSmall?.copyWith(color: theme.colorScheme.onSurfaceVariant.withValues(alpha: 0.8), fontWeight: FontWeight.w500),
           ),
         ],
       ),

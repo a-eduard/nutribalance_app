@@ -93,6 +93,11 @@ class _HarmonyCalendarState extends State<HarmonyCalendar> {
           bgColor = isDark ? const Color(0xFF6A1B9A).withValues(alpha: 0.3) : const Color(0xFFF3E5F5);
           txtColor = isDark ? const Color(0xFFCE93D8) : const Color(0xFF6A1B9A);
           break;
+        case 'delay':
+          // Задержка: месячные ожидались, но не отмечены — контур без заливки.
+          txtColor = theme.colorScheme.primary;
+          border = Border.all(color: theme.colorScheme.primary.withValues(alpha: 0.7), width: 1.5);
+          break;
       }
     }
 

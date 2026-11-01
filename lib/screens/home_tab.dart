@@ -24,6 +24,7 @@ import 'harmony/widgets/harmony_symptoms_sheet.dart';
 import 'meal_detail_screen.dart';
 import 'shopping_list_screen.dart';
 import 'weekly_insights_screen.dart';
+import '../widgets/cycle_icons.dart';
 
 class HomeTab extends StatefulWidget {
   const HomeTab({super.key});
@@ -462,10 +463,10 @@ class _HomeTabState extends State<HomeTab> with AutomaticKeepAliveClientMixin, W
     final bool hasData = lastStartTs != null;
     final bool isDelay = phase.phaseType == 'delay';
 
-    final Widget calendarButton = EvaCircleButton(
-      icon: Icons.calendar_month_rounded,
+    final Widget calendarButton = CycleActionButton(
+      kind: CycleIconKind.calendar,
+      label: 'Начало',
       tooltip: 'Изменить дату начала цикла',
-      size: 46,
       onTap: () async {
         final picked = await showDatePicker(
           context: context,
@@ -483,14 +484,19 @@ class _HomeTabState extends State<HomeTab> with AutomaticKeepAliveClientMixin, W
       },
     );
 
-    final Widget infoButton = EvaCircleButton(
-      icon: Icons.info_outline_rounded,
-      tooltip: 'Справка',
-      size: 46,
+    final Widget infoButton = CycleActionButton(
+      kind: CycleIconKind.phases,
+      label: 'О фазах',
+      tooltip: 'Как читать кольцо цикла',
       onTap: () => HarmonyBottomSheets.showInfoSheet(
         context: context,
-        title: 'Твой цикл',
-        description: 'Розовая дуга — дни менструации, лавандовая — окно овуляции. Точка показывает сегодняшний день.',
+        title: 'Фазы цикла',
+        description: 'Розовая дуга — дни менструации, лавандовая — окно овуляции, точка — сегодня.\n\n'
+            '🩸 Менструация — организму нужны железо и тепло: красное мясо, гречка, тёплые супы.\n'
+            '🌿 Фолликулярная — растёт энергия, хорошо идут тренировки и новые дела.\n'
+            '✨ Овуляция — пик сил и настроения, налегай на овощи и клетчатку.\n'
+            '🌙 Лютеиновая — может тянуть на сладкое: помогут сложные углеводы, магний и белок.\n\n'
+            'Спроси Еву — она подскажет меню именно под твою фазу.',
       ),
     );
 

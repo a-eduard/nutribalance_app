@@ -13,6 +13,7 @@ import '../theme/eva_colors.dart';
 import '../widgets/eva_ui.dart';
 import 'p2p_chat_screen.dart';
 import 'profile_settings_screen.dart';
+import 'admin_stats_screen.dart';
 import 'progress_screen.dart';
 import 'smart_questionnaire_screen.dart';
 import 'specialist_paywall_screen.dart';
@@ -22,6 +23,14 @@ class ProfileScreen extends StatefulWidget {
   const ProfileScreen({super.key});
 
   static const String supportAdminUid = 'VlTTLh2o7GVaXUzw32sNUtQ6alD3';
+
+  /// Аккаунты владельца — им виден экран статистики (сервер проверяет то же самое).
+  static const List<String> ownerEmails = ['a.eduardmail@gmail.com'];
+
+  static bool get isOwnerAccount {
+    final String email = (FirebaseAuth.instance.currentUser?.email ?? '').toLowerCase();
+    return email.isNotEmpty && ownerEmails.contains(email);
+  }
 
   @override
   State<ProfileScreen> createState() => _ProfileScreenState();
@@ -207,16 +216,39 @@ class _ProfileScreenState extends State<ProfileScreen> {
                         MaterialPageRoute(builder: (_) => const P2PChatScreen(otherUserId: ProfileScreen.supportAdminUid, otherUserName: 'Поддержка «Моя Ева»')),
                       ),
                     ),
+                  ],
+                ),
+                const SizedBox(height: 22),
+                EvaMenuGroup(
+                  title: 'Мы в соцсетях',
+                  children: [
                     EvaMenuTile(
                       icon: FontAwesomeIcons.vk,
                       iconColor: const Color(0xFF4C75A3),
-                      title: 'Наше комьюнити в VK',
-                      onTap: () => _openUrl('https://vk.com/club237160300'),
+                      title: 'Сообщество ВКонтакте',
+                      subtitle: 'Советы о питании и цикле, новости и ответы на вопросы',
+                      onTap: () {
+                        Analytics.event('social_open', {'network': 'vk'});
+                        _openUrl('https://vk.ru/myeva_app');
+                      },
+                    ),
+                    EvaMenuTile(
+                      icon: FontAwesomeIcons.telegram,
+                      iconColor: const Color(0xFF2AABEE),
+                      title: 'Канал в Telegram',
+                      subtitle: 'Короткие советы каждый день',
+                      onTap: () {
+                        Analytics.event('social_open', {'network': 'telegram'});
+                        _openUrl('https://t.me/myeva_app');
+                      },
                     ),
                     EvaMenuTile(
                       icon: Icons.play_circle_outline_rounded,
                       title: 'Видео-обзор приложения',
-                      onTap: () => _openUrl('https://vkvideo.ru/video-237160300_456239022'),
+                      onTap: () {
+                        Analytics.event('social_open', {'network': 'vk_video'});
+                        _openUrl('https://vkvideo.ru/video-237160300_456239022');
+                      },
                     ),
                   ],
                 ),
@@ -235,23 +267,32 @@ class _ProfileScreenState extends State<ProfileScreen> {
                     ),
                   ],
                 ),
-                if (uid == ProfileScreen.supportAdminUid) ...[
+                if (uid == ProfileScreen.supportAdminUid || ProfileScreen.isOwnerAccount) ...[
                   const SizedBox(height: 22),
                   EvaMenuGroup(
                     title: 'Администратор',
                     children: [
+                      EvaMenuTile(
+                        icon: Icons.insights_rounded,
+                        iconColor: context.eva.gold,
+                        title: 'Статистика приложения',
+                        subtitle: 'Активные пользователи, регистрации, путь до оплаты',
+                        onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const AdminStatsScreen())),
+                      ),
+                      if (uid == ProfileScreen.supportAdminUid) ...[
                       EvaMenuTile(
                         icon: Icons.manage_accounts_outlined,
                         title: 'Обновить публичные профили',
                         subtitle: 'Один раз после обновления сервера — для поиска в чатах',
                         onTap: _runBackfill,
                       ),
-                      EvaMenuTile(
+                      const EvaMenuTile(
                         icon: Icons.bug_report_outlined,
                         title: 'Тестовый сбой Crashlytics',
                         subtitle: 'Приложение закроется. Откройте его снова — отчёт уйдёт в Firebase',
                         onTap: Analytics.testCrash,
                       ),
+                      ],
                     ],
                   ),
                 ],

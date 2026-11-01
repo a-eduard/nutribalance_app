@@ -63,6 +63,9 @@ class ChatBubble extends StatelessWidget {
   final EdgeInsetsGeometry padding;
   final double maxWidthFactor;
 
+  /// Отступ с «противоположной» стороны (у своих сообщений — слева).
+  final double sideGap;
+
   const ChatBubble({
     super.key,
     required this.isMe,
@@ -72,6 +75,7 @@ class ChatBubble extends StatelessWidget {
     this.compactTop = false,
     this.padding = const EdgeInsets.fromLTRB(14, 10, 14, 8),
     this.maxWidthFactor = 0.78,
+    this.sideGap = 48,
   });
 
   @override
@@ -82,7 +86,7 @@ class ChatBubble extends StatelessWidget {
     return Align(
       alignment: isMe ? Alignment.centerRight : Alignment.centerLeft,
       child: Container(
-        margin: EdgeInsets.only(top: compactTop ? 2 : 8, left: isMe ? 48 : 0, right: isMe ? 0 : 48),
+        margin: EdgeInsets.only(top: compactTop ? 2 : 8, left: isMe ? sideGap : 0, right: isMe ? 0 : sideGap),
         constraints: BoxConstraints(maxWidth: MediaQuery.sizeOf(context).width * maxWidthFactor),
         padding: padding,
         decoration: BoxDecoration(

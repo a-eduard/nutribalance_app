@@ -98,6 +98,7 @@ exports.cleanupOnAccountDelete = auth.user().onDelete(async (user) => {
     for (const subcoll of subcollections) await deleteCollectionInBatches(subcoll);
     await userRef.delete();
     await db.collection("public_profiles").doc(uid).delete().catch(() => null);
+    await db.collection("welcome_queue").doc(uid).delete().catch(() => null);
     await getStorage().bucket().deleteFiles({ prefix: `users/${uid}/` });
   } catch (error) {
     console.error(`[cleanupOnAccountDelete] ERROR for ${uid}:`, error);
@@ -349,9 +350,8 @@ const WELCOME_TEXT = `Здравствуйте! 👋 Добро пожалова
  * в обычный чат с поддержкой; счётчик непрочитанных и пуш делает onNewChatMessage.
  * Фиксированный ID сообщения — повторный запуск не создаст дубль.
  */
-exports.sendWelcomeMessage = auth.user().onCreate(async (user) => {
-  const uid = user && user.uid;
-  if (!uid || uid === SUPPORT_ADMIN_UID) return;
+/** Кладёт приветствие от службы заботы в чат с поддержкой (идемпотентно). */
+async function createWelcomeMessage(uid) {
   const chatId = [uid, SUPPORT_ADMIN_UID].sort().join("_");
   const msgRef = db.collection("chats").doc(chatId).collection("messages").doc("welcome_v1");
   try {
@@ -367,7 +367,27 @@ exports.sendWelcomeMessage = auth.user().onCreate(async (user) => {
     });
   } catch (e) {
     if (e.code === 6) return; // уже отправлено
-    console.error("[sendWelcomeMessage] failed", e.code || "", e.message || "");
+    throw e;
+  }
+}
+
+const WELCOME_DELAY_MS = 30 * 60 * 1000;
+
+/**
+ * При регистрации ставим приветствие в очередь: оно придёт через 30 минут,
+ * когда пользователь уже прошёл анкету и познакомился с Евой
+ * (раньше приходило сразу и перебивало онбординг). Отправляет processWelcomeQueue.
+ */
+exports.sendWelcomeMessage = auth.user().onCreate(async (user) => {
+  const uid = user && user.uid;
+  if (!uid || uid === SUPPORT_ADMIN_UID) return;
+  try {
+    await db.collection("welcome_queue").doc(uid).set({
+      dueAt: Timestamp.fromMillis(Date.now() + WELCOME_DELAY_MS),
+      createdAt: FieldValue.serverTimestamp(),
+    });
+  } catch (e) {
+    console.error("[sendWelcomeMessage] queue failed", e.code || "", e.message || "");
   }
 });
 
@@ -785,4 +805,376 @@ exports.redeemPromo = onCall(async (request) => {
     tx.set(userRef, { isPro: true, proUntil: Timestamp.fromDate(until), usedPromoCodes: FieldValue.arrayUnion(code) }, { merge: true });
     return { type: "trial", days: promo.days, proUntil: until.getTime() };
   });
+});
+
+
+// ==========================================
+// 9. СТАТИСТИКА ДЛЯ ВЛАДЕЛЬЦА (экран «Статистика приложения»)
+// ==========================================
+// Активность берётся из Firebase Auth: lastRefreshTime обновляется, пока
+// приложение открыто (токен продлевается примерно раз в час), поэтому
+// DAU/WAU/MAU считаются для всех версий приложения, включая старые.
+// История по дням копится в admin_stats_daily (клиентам закрыта правилами).
+const { getAuth } = require("firebase-admin/auth");
+const { onSchedule } = require("firebase-functions/v2/scheduler");
+
+const OWNER_EMAILS = ["a.eduardmail@gmail.com"];
+const MSK_OFFSET_MS = 3 * 3600000;
+const DAY_MS = 86400000;
+
+function canSeeStats(request) {
+  if (!request.auth) return false;
+  if (request.auth.uid === SUPPORT_ADMIN_UID) return true;
+  const t = request.auth.token || {};
+  const email = typeof t.email === "string" ? t.email.toLowerCase() : "";
+  return OWNER_EMAILS.includes(email) && t.email_verified === true;
+}
+
+function mskDateKey(ms) {
+  return new Date(ms + MSK_OFFSET_MS).toISOString().slice(0, 10);
+}
+
+async function safeCount(query) {
+  try {
+    const snap = await query.count().get();
+    return snap.data().count;
+  } catch (e) {
+    console.warn("[adminStats] count:", e && e.message);
+    return null;
+  }
+}
+
+async function computeStats() {
+  const now = Date.now();
+  const startTodayMsk = Math.floor((now + MSK_OFFSET_MS) / DAY_MS) * DAY_MS - MSK_OFFSET_MS;
+
+  // --- Пользователи и активность (Firebase Auth) ---
+  let total = 0, dau = 0, wau = 0, mau = 0, newToday = 0, new7 = 0, new30 = 0;
+  const regByDay = {};
+  let pageToken;
+  do {
+    const res = await getAuth().listUsers(1000, pageToken);
+    for (const u of res.users) {
+      if (u.disabled) continue;
+      total++;
+      const created = Date.parse(u.metadata.creationTime || "") || 0;
+      const lastSeen = Math.max(
+        Date.parse(u.metadata.lastRefreshTime || "") || 0,
+        Date.parse(u.metadata.lastSignInTime || "") || 0,
+        created,
+      );
+      const idle = now - lastSeen;
+      if (idle < DAY_MS) dau++;
+      if (idle < 7 * DAY_MS) wau++;
+      if (idle < 30 * DAY_MS) mau++;
+      if (created >= startTodayMsk) newToday++;
+      if (now - created < 7 * DAY_MS) new7++;
+      if (now - created < 30 * DAY_MS) {
+        new30++;
+        const k = mskDateKey(created);
+        regByDay[k] = (regByDay[k] || 0) + 1;
+      }
+    }
+    pageToken = res.pageToken;
+  } while (pageToken);
+
+  const registrations = [];
+  for (let i = 29; i >= 0; i--) {
+    const k = mskDateKey(now - i * DAY_MS);
+    registrations.push({ date: k, count: regByDay[k] || 0 });
+  }
+
+  // --- Путь до оплаты (Firestore) ---
+  const users = db.collection("users");
+  const [profiles, onboarded, usedEva, evaLimit, usedScan, scanLimit, trialStart3] = await Promise.all([
+    safeCount(users),
+    safeCount(users.where("isOnboardingCompleted", "==", true)),
+    safeCount(users.where("free_messages_left", "<", FREE_LIMITS.message)),
+    safeCount(users.where("free_messages_left", "==", 0)),
+    safeCount(users.where("free_scans_left", "<", FREE_LIMITS.scan)),
+    safeCount(users.where("free_scans_left", "==", 0)),
+    safeCount(users.where("usedPromoCodes", "array-contains", "START3")),
+  ]);
+
+  let premiumActive = 0, premiumEver = 0;
+  try {
+    const pro = await users.where("isPro", "==", true).select("isPro", "proUntil").get();
+    premiumEver = pro.size;
+    pro.forEach((d) => { if (isProActive(d.data())) premiumActive++; });
+  } catch (e) {
+    console.warn("[adminStats] premium:", e && e.message);
+  }
+
+  let purchasesTotal = null, purchases30 = null;
+  const purchasesByProduct = {};
+  try {
+    purchasesTotal = await safeCount(db.collection("purchases"));
+    const p30 = await db.collection("purchases").where("createdAt", ">=", Timestamp.fromMillis(now - 30 * DAY_MS)).get();
+    purchases30 = p30.size;
+    p30.forEach((d) => {
+      const id = String(d.data().productId || "unknown");
+      purchasesByProduct[id] = (purchasesByProduct[id] || 0) + 1;
+    });
+  } catch (e) {
+    console.warn("[adminStats] purchases:", e && e.message);
+  }
+
+  return {
+    generatedAt: now,
+    users: { total, dau, wau, mau, newToday, new7, new30, profiles },
+    funnel: { registered: total, onboarded, usedEva, evaLimit, usedScan, scanLimit, trialStart3, premiumEver, premiumActive },
+    purchases: { total: purchasesTotal, last30: purchases30, byProduct: purchasesByProduct },
+    registrations,
+  };
+}
+
+async function saveDailySnapshot(stats) {
+  const key = mskDateKey(stats.generatedAt);
+  await db.collection("admin_stats_daily").doc(key).set({
+    date: key,
+    dau: stats.users.dau,
+    wau: stats.users.wau,
+    mau: stats.users.mau,
+    total: stats.users.total,
+    newToday: stats.users.newToday,
+    premiumActive: stats.funnel.premiumActive,
+    updatedAt: FieldValue.serverTimestamp(),
+  }, { merge: true });
+}
+
+exports.adminStats = onCall({ timeoutSeconds: 120, memory: "512MiB", maxInstances: 2 }, async (request) => {
+  requireAuth(request);
+  if (!canSeeStats(request)) throw new HttpsError("permission-denied", "Нет доступа к статистике.");
+  const stats = await computeStats();
+  await saveDailySnapshot(stats).catch((e) => console.warn("[adminStats] snapshot:", e && e.message));
+  const hist = await db.collection("admin_stats_daily").orderBy("date", "desc").limit(60).get();
+  const history = hist.docs.map((d) => {
+    const x = d.data();
+    return { date: x.date, dau: x.dau || 0, wau: x.wau || 0, mau: x.mau || 0, total: x.total || 0, newToday: x.newToday || 0 };
+  }).reverse();
+  return { ...stats, history };
+});
+
+/** Каждый день в 23:55 по Москве сохраняем снимок — из них строится график активности. */
+exports.dailyStatsSnapshot = onSchedule({ schedule: "55 23 * * *", timeZone: "Europe/Moscow", timeoutSeconds: 300, memory: "512MiB" }, async () => {
+  const stats = await computeStats();
+  await saveDailySnapshot(stats);
+});
+
+// ==========================================
+// 10. ЕВА НАЧИНАЕТ РАЗГОВОР ПЕРВОЙ
+// ==========================================
+// • evaGreetOnOnboarding — как только пользователь прошёл анкету, Ева пишет
+//   персональное первое сообщение (имя, цель, фаза цикла) с кнопками-ответами.
+// • evaNudge — если за ~сутки после анкеты пользователь так и не написал Еве,
+//   Ева пишет ещё раз и присылает пуш (днём по Москве, один раз).
+// • processWelcomeQueue — приветствие от службы заботы приходит через 30 минут
+//   после регистрации, а не в момент регистрации (см. sendWelcomeMessage).
+
+const EVA_CHAT = "ai_chats_dietitian";
+const PHASE_NAMES = {
+  menstruation: "менструация",
+  follicular: "фолликулярная фаза",
+  ovulation: "овуляция",
+  luteal: "лютеиновая фаза",
+};
+
+function tsToMs(v) {
+  if (!v) return 0;
+  if (typeof v.toMillis === "function") return v.toMillis();
+  if (v instanceof Date) return v.getTime();
+  const n = Date.parse(v);
+  return Number.isFinite(n) ? n : 0;
+}
+
+/** Коротко о состоянии пользователя для первого сообщения Евы. */
+function userSnapshotForEva(data, now = Date.now()) {
+  const d = data || {};
+  const name = String(d.name || "").trim().split(/\s+/)[0] || "";
+  const goal = String(d.goal || "").trim();
+  const out = { name, goal, phaseKey: null, phase: null, cycleDay: null, pregnancyWeek: null };
+  if (d.isPregnant === true || d.appMode === "pregnancy") {
+    const start = tsToMs(d.pregnancyStartDate);
+    if (start) out.pregnancyWeek = Math.max(1, Math.min(42, Math.floor((now - start) / (7 * DAY_MS)) + 1));
+    return out;
+  }
+  const start = tsToMs(d.lastPeriodStartDate);
+  if (!start) return out;
+  const len = Math.min(45, Math.max(20, toInt(d.cycleLength, 28)));
+  const period = Math.min(10, Math.max(2, toInt(d.periodDuration, 5)));
+  const diff = Math.floor((now - start) / DAY_MS);
+  if (diff < 0) return out;
+  const day = (diff % len) + 1;
+  const ov = Math.max(period + 2, len - 14);
+  let key = "luteal";
+  if (day <= period) key = "menstruation";
+  else if (day < ov - 1) key = "follicular";
+  else if (day <= ov + 1) key = "ovulation";
+  out.cycleDay = day;
+  out.phaseKey = key;
+  out.phase = PHASE_NAMES[key];
+  return out;
+}
+
+function fallbackGreeting(s) {
+  const hi = s.name ? `Привет, ${s.name}! 🌸` : "Привет! 🌸";
+  let about = "Я посмотрела твою анкету и уже рассчитала твою норму на день.";
+  if (s.pregnancyWeek) about = `Я посмотрела твою анкету: у тебя ${s.pregnancyWeek}-я неделя — буду подсказывать питание именно под этот срок.`;
+  else if (s.phase) about = `Я посмотрела твою анкету: сейчас у тебя ${s.phase}, ${s.cycleDay}-й день цикла — в это время организму особенно важно правильное питание.`;
+  return {
+    text: `${hi} Я Ева — твой личный нутрициолог и подруга.\n\n${about}\n\nМогу прямо сейчас подсказать, что приготовить сегодня, посчитать калории по фото тарелки или объяснить анализы простым языком. С чего начнём?`,
+    suggestions: [
+      s.phase ? "Что мне есть в эту фазу?" : "Что мне есть сегодня?",
+      "Составь меню на день",
+      "Как ты считаешь калории по фото?",
+    ],
+  };
+}
+
+function cleanSuggestions(list) {
+  return (Array.isArray(list) ? list : [])
+    .map((x) => String(x || "").replace(/\s+/g, " ").trim())
+    .filter((x) => x.length >= 3 && x.length <= 48)
+    .slice(0, 3);
+}
+
+async function generateGreeting(s) {
+  const facts = [
+    s.name ? `Имя: ${s.name}` : "Имя не указано",
+    s.goal ? `Цель: ${s.goal}` : null,
+    s.pregnancyWeek ? `Беременность, ${s.pregnancyWeek}-я неделя` : null,
+    s.phase ? `Сейчас ${s.phase}, ${s.cycleDay}-й день цикла` : null,
+  ].filter(Boolean).join("\n");
+  const model = getGenAI().getGenerativeModel({
+    model: GEMINI_MODEL,
+    systemInstruction: EVA_SYSTEM_PROMPT,
+    generationConfig: { temperature: 0.7, responseMimeType: "application/json", thinkingConfig: { thinkingBudget: 0 } },
+  });
+  const prompt = `Пользователь только что зарегистрировался и заполнил анкету. Напиши ПЕРВОЕ сообщение от себя — ты начинаешь разговор.
+Данные анкеты:
+${facts}
+
+Требования к тексту:
+- поздоровайся по имени и коротко представься (одно предложение);
+- покажи, что ты уже знаешь её анкету: упомяни цель и фазу цикла (или срок беременности) и дай ОДИН конкретный полезный совет на сегодня именно под это;
+- одной фразой скажи, что ещё умеешь: калории по фото тарелки, меню, разбор анализов;
+- закончи простым вопросом, на который легко ответить;
+- 4–6 коротких предложений, тепло, на «ты», 1–2 эмодзи, без markdown-заголовков, без JSON-блоков внутри текста.
+Также придумай 3 коротких варианта ответа от лица пользователя (до 40 символов каждый), которые продолжают разговор.
+Ответ строго JSON: {"text": "...", "suggestions": ["...", "...", "..."]}`;
+  const result = await generateWithRetry(() => model.generateContent(prompt));
+  const raw = (result && result.response && result.response.text()) || "";
+  const parsed = JSON.parse(raw.replace(/^```(?:json)?\s*|\s*```$/g, ""));
+  const text = String(parsed.text || "").trim();
+  if (text.length < 40 || text.length > 1500) throw new Error("BAD_GREETING");
+  const suggestions = cleanSuggestions(parsed.suggestions);
+  return { text, suggestions: suggestions.length === 3 ? suggestions : fallbackGreeting(s).suggestions };
+}
+
+exports.evaGreetOnOnboarding = onDocumentWritten({ document: "users/{uid}", timeoutSeconds: 60, memory: "256MiB" }, async (event) => {
+  const before = event.data && event.data.before && event.data.before.exists ? event.data.before.data() : null;
+  const after = event.data && event.data.after && event.data.after.exists ? event.data.after.data() : null;
+  // Только переход «анкета не пройдена» → «пройдена» (новые регистрации).
+  if (!before || !after || before.isOnboardingCompleted !== false || after.isOnboardingCompleted !== true) return;
+  const uid = event.params.uid;
+  const ref = db.collection("users").doc(uid).collection(EVA_CHAT).doc("eva_greeting_v1");
+  const s = userSnapshotForEva(after);
+  let msg;
+  try {
+    msg = await generateGreeting(s);
+  } catch (e) {
+    console.warn("[evaGreetOnOnboarding] fallback:", e && e.message);
+    msg = fallbackGreeting(s);
+  }
+  try {
+    await ref.create({
+      text: msg.text,
+      role: "ai",
+      kind: "greeting",
+      suggestions: msg.suggestions,
+      timestamp: FieldValue.serverTimestamp(),
+      isActionCompleted: true,
+    });
+  } catch (e) {
+    if (e.code !== 6) console.error("[evaGreetOnOnboarding]", uid, e.message); // 6 = уже есть
+  }
+});
+
+function nudgeText(s) {
+  const hi = s.name ? `${s.name}, ` : "";
+  if (s.pregnancyWeek) {
+    return {
+      push: `${hi}я подобрала, что полезно есть на ${s.pregnancyWeek}-й неделе 🤍 Посмотришь?`,
+      chat: `${s.name ? s.name + ", привет" : "Привет"}! 🤍 У тебя сейчас ${s.pregnancyWeek}-я неделя — это время, когда особенно важны белок, железо и фолиевая кислота.\n\nХочешь, составлю простое меню на сегодня из обычных продуктов? Или пришли фото своей тарелки — посчитаю, всего ли хватает.`,
+      suggestions: ["Да, составь меню", "Что важно на моём сроке?", "Посчитать еду по фото"],
+    };
+  }
+  if (s.phase) {
+    return {
+      push: `${hi}у тебя сейчас ${s.phase} 🌿 Подскажу, что лучше есть сегодня — загляни!`,
+      chat: `${s.name ? s.name + ", привет" : "Привет"}! 🌿 У тебя ${s.cycleDay}-й день цикла — ${s.phase}. В эти дни питание заметно влияет на энергию, настроение и аппетит.\n\nПодсказать, что лучше есть сегодня? Могу сразу составить меню на твою норму.`,
+      suggestions: ["Да, что мне есть сегодня?", "Составь меню на день", "Почему фаза важна?"],
+    };
+  }
+  return {
+    push: `${hi}я подготовила идеи, что приготовить сегодня под твою цель 🌸 Загляни!`,
+    chat: `${s.name ? s.name + ", привет" : "Привет"}! 🌸 Я подготовила для тебя пару идей, что приготовить сегодня под твою цель${s.goal ? ` «${s.goal}»` : ""}.\n\nПоказать меню на день? А ещё можешь прислать фото тарелки — посчитаю калории за секунды.`,
+    suggestions: ["Да, покажи меню", "Посчитать еду по фото", "Как ты можешь помочь?"],
+  };
+}
+
+async function hasUserWrittenToEva(uid) {
+  const snap = await db.collection("users").doc(uid).collection(EVA_CHAT).where("role", "==", "user").limit(1).get();
+  return !snap.empty;
+}
+
+exports.evaNudge = onSchedule({ schedule: "20 * * * *", timeZone: "Europe/Moscow", timeoutSeconds: 300, memory: "256MiB" }, async () => {
+  const now = Date.now();
+  const mskHour = new Date(now + MSK_OFFSET_MS).getUTCHours();
+  if (mskHour < 10 || mskHour > 20) return; // не будим ночью
+  const snap = await db.collection("users")
+    .where("joinDate", ">=", Timestamp.fromMillis(now - 72 * 3600000))
+    .where("joinDate", "<=", Timestamp.fromMillis(now - 20 * 3600000))
+    .get();
+  let sent = 0;
+  for (const doc of snap.docs) {
+    const d = doc.data();
+    if (d.evaNudgeSent || d.isOnboardingCompleted !== true || isProActive(d)) continue;
+    try {
+      if (await hasUserWrittenToEva(doc.id)) {
+        await doc.ref.set({ evaNudgeSent: "skipped" }, { merge: true });
+        continue;
+      }
+      const s = userSnapshotForEva(d, now);
+      const t = nudgeText(s);
+      await doc.ref.collection(EVA_CHAT).doc("eva_nudge_v1").set({
+        text: t.chat,
+        role: "ai",
+        kind: "nudge",
+        suggestions: t.suggestions,
+        timestamp: FieldValue.serverTimestamp(),
+        isActionCompleted: true,
+      });
+      await doc.ref.set({ evaNudgeSent: true }, { merge: true });
+      await sendPush(doc.id, "Ева", t.push, { type: "eva", botType: "dietitian" });
+      sent++;
+    } catch (e) {
+      console.error("[evaNudge]", doc.id, e && e.message);
+    }
+  }
+  if (sent) console.log(`[evaNudge] sent ${sent}`);
+});
+
+exports.processWelcomeQueue = onSchedule({ schedule: "every 5 minutes", timeoutSeconds: 120, memory: "256MiB" }, async () => {
+  const due = await db.collection("welcome_queue").where("dueAt", "<=", Timestamp.now()).limit(100).get();
+  for (const q of due.docs) {
+    const uid = q.id;
+    try {
+      const user = await db.collection("users").doc(uid).get();
+      if (user.exists) await createWelcomeMessage(uid);
+      await q.ref.delete();
+    } catch (e) {
+      console.error("[processWelcomeQueue]", uid, e && e.message);
+    }
+  }
 });

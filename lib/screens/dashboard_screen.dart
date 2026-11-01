@@ -6,6 +6,8 @@ import 'package:flutter/services.dart';
 import '../theme/eva_colors.dart';
 import '../widgets/dashboard/fast_food_scanner_sheet.dart';
 import '../widgets/eva_ui.dart';
+import '../services/analytics_service.dart';
+import 'ai_chat_screen.dart';
 import 'community_screen.dart';
 import 'harmony_screen.dart';
 import 'home_tab.dart';
@@ -44,6 +46,15 @@ class _DashboardScreenState extends State<DashboardScreen> {
     Future.delayed(const Duration(milliseconds: 800), () {
       if (mounted) _checkAndMigrateOldUsers();
     });
+    if (AIChatScreen.pendingGreeting) {
+      // Только что прошла анкету — сразу знакомим с Евой: она пишет первой.
+      AIChatScreen.pendingGreeting = false;
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (!mounted) return;
+        Analytics.event('eva_auto_open', {'source': 'onboarding'});
+        Navigator.of(context).push(MaterialPageRoute(builder: (_) => const AIChatScreen(botType: 'dietitian', awaitGreeting: true)));
+      });
+    }
   }
 
   @override

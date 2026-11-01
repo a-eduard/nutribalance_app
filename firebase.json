@@ -4,7 +4,7 @@
       "android": {
         "default": {
           "projectId": "nutribalance-app-11a09",
-          "appId": "1:942600708331:android:ba4a1ccb69a4024495deae",
+          "appId": "1:942600708331:android:fee294fb55d22fd595deae",
           "fileOutput": "android/app/google-services.json"
         }
       },
@@ -12,7 +12,7 @@
         "lib/firebase_options.dart": {
           "projectId": "nutribalance-app-11a09",
           "configurations": {
-            "android": "1:942600708331:android:ba4a1ccb69a4024495deae",
+            "android": "1:942600708331:android:fee294fb55d22fd595deae",
             "ios": "1:942600708331:ios:557d359f99353f3595deae",
             "macos": "1:942600708331:ios:557d359f99353f3595deae",
             "web": "1:942600708331:web:8fc9bc6207c454ee95deae",

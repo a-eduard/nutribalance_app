@@ -8,6 +8,7 @@ import '../services/calculation_service.dart';
 import '../theme/eva_colors.dart';
 import '../widgets/eva_ui.dart';
 import '../services/analytics_service.dart';
+import 'ai_chat_screen.dart';
 
 class OnboardingScreen extends StatefulWidget {
   const OnboardingScreen({super.key});
@@ -160,6 +161,8 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
         activityLevel: _selectedActivity,
         isPregnant: _isPregnancy,
       );
+      // После анкеты главный экран сразу откроет чат: Ева напишет первой.
+      AIChatScreen.pendingGreeting = true;
       // Флаг завершения онбординга пишем последним — HomeWrapper сам откроет главный экран.
       FirebaseFirestore.instance.collection('users').doc(uid).set(userData, SetOptions(merge: true)).catchError((e) => debugPrint('onboarding save: $e'));
       Analytics.event('onboarding_complete', {'goal': _selectedGoal, 'app_mode': _isPregnancy ? 'pregnancy' : 'standard'});

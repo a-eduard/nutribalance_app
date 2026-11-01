@@ -32,12 +32,20 @@ class AIChatScreen extends StatefulWidget {
   /// Режим запроса для сервера (например, 'meal_plan' — «Что съесть?»).
   final String? initialMode;
 
+  /// Чат открыт сразу после анкеты: первое сообщение пишет сервер
+  /// (evaGreetOnOnboarding), пока ждём его — показываем «Ева печатает…».
+  final bool awaitGreeting;
+
+  /// Ставится анкетой: главный экран при первом показе сам откроет чат с Евой.
+  static bool pendingGreeting = false;
+
   const AIChatScreen({
     super.key,
     required this.botType,
     this.initialDisplayMessage,
     this.initialTechnicalPrompt,
     this.initialMode,
+    this.awaitGreeting = false,
   });
 
   @override
@@ -60,6 +68,9 @@ class _AIChatScreenState extends State<AIChatScreen> {
 
   bool _isTyping = false;
 
+  /// Ждём персональное первое сообщение Евы от сервера.
+  bool _waitingGreeting = false;
+
   /// Ева успешно ответила в этом заходе — при выходе из чата можно предложить окно оценки RuStore.
   bool _hadGoodAnswer = false;
   List<File> _selectedImages = [];
@@ -77,6 +88,7 @@ class _AIChatScreenState extends State<AIChatScreen> {
   void initState() {
     super.initState();
     _chatStream = _buildStream();
+    _waitingGreeting = widget.awaitGreeting;
     _initChatAndContext();
   }
 
@@ -127,7 +139,16 @@ class _AIChatScreenState extends State<AIChatScreen> {
         historyCheck = await col.limit(1).get().timeout(const Duration(seconds: 8));
       }
 
-      if (historyCheck.docs.isEmpty) {
+      if (historyCheck.docs.isEmpty && widget.awaitGreeting) {
+        // Персональное приветствие придёт с сервера. Если сервер не ответил
+        // за 25 секунд (нет сети), покажем стандартное, чтобы чат не был пустым.
+        Future.delayed(const Duration(seconds: 25), () async {
+          if (!mounted || !_waitingGreeting) return;
+          setState(() => _waitingGreeting = false);
+          final again = await col.limit(1).get().catchError((_) => historyCheck);
+          if (again.docs.isEmpty) DatabaseService().saveBotChatMessage(widget.botType, _defaultWelcome, 'ai');
+        });
+      } else if (historyCheck.docs.isEmpty) {
         const String welcome = '''Привет! 🥰 Я Ева — твой личный ИИ-нутрициолог и заботливая подруга ✨
 
 Вот что я умею:
@@ -232,6 +253,15 @@ class _AIChatScreenState extends State<AIChatScreen> {
   // ---------------------------------------------------------------------------
   // Отправка
   // ---------------------------------------------------------------------------
+
+  static const String _defaultWelcome = '''Привет! 🥰 Я Ева — твой личный ИИ-нутрициолог и заботливая подруга ✨
+
+Вот что я умею:
+- **Фото тарелки** — посчитаю калории и БЖУ.
+- **Результаты анализов (PDF)** — объясню простым языком, без паники.
+- **Любой вопрос** — поддержу, когда тревожно или нужен совет.
+
+С чего начнём? 😉''';
 
   void _triggerSendMessage(String text) {
     _controller.text = text;
@@ -564,9 +594,10 @@ class _AIChatScreenState extends State<AIChatScreen> {
                   AnimatedSwitcher(
                     duration: const Duration(milliseconds: 250),
                     child: Text(
-                      _isTyping ? 'печатает…' : 'ИИ-нутрициолог · на связи',
-                      key: ValueKey(_isTyping),
-                      style: theme.textTheme.bodySmall?.copyWith(color: _isTyping ? theme.colorScheme.primary : theme.colorScheme.onSurfaceVariant),
+                      (_isTyping || _waitingGreeting) ? 'печатает…' : 'ИИ-нутрициолог · на связи',
+                      key: ValueKey(_isTyping || _waitingGreeting),
+                      style: theme.textTheme.bodySmall?.copyWith(
+                          color: (_isTyping || _waitingGreeting) ? theme.colorScheme.primary : theme.colorScheme.onSurfaceVariant),
                     ),
                   ),
                 ],
@@ -602,22 +633,33 @@ class _AIChatScreenState extends State<AIChatScreen> {
                   if (!snapshot.hasData) return const Center(child: CircularProgressIndicator());
 
                   final docs = snapshot.data!.docs;
-                  final bool showSuggestions = docs.length <= 1 && !_isTyping;
-                  final int extra = (_isTyping ? 1 : 0) + (docs.length >= _limit ? 1 : 0);
+                  final bool greetingTyping = _waitingGreeting && docs.isEmpty;
+                  if (_waitingGreeting && docs.isNotEmpty) _waitingGreeting = false;
+                  final bool typing = _isTyping || greetingTyping;
+                  // Кнопки-ответы, которые прислала Ева (первое сообщение, напоминание).
+                  List<String> quickReplies = const [];
+                  if (docs.isNotEmpty) {
+                    final first = docs.first.data() as Map<String, dynamic>;
+                    if (first['role'] == 'ai' && first['suggestions'] is List) {
+                      quickReplies = (first['suggestions'] as List).map((e) => e.toString().trim()).where((e) => e.isNotEmpty).take(3).toList();
+                    }
+                  }
+                  final bool showSuggestions = !typing && (docs.length <= 1 || quickReplies.isNotEmpty);
+                  final int extra = (typing ? 1 : 0) + (docs.length >= _limit ? 1 : 0);
 
                   return ListView.builder(
                     controller: _scrollController,
                     reverse: true,
                     keyboardDismissBehavior: ScrollViewKeyboardDismissBehavior.onDrag,
-                    padding: const EdgeInsets.fromLTRB(14, 12, 14, 16),
+                    padding: const EdgeInsets.fromLTRB(12, 12, 12, 16),
                     itemCount: docs.length + extra + (showSuggestions ? 1 : 0),
                     itemBuilder: (context, rawIndex) {
                       int index = rawIndex;
                       if (showSuggestions) {
-                        if (index == 0) return _buildSuggestions(theme);
+                        if (index == 0) return _buildSuggestions(theme, quickReplies);
                         index -= 1;
                       }
-                      if (_isTyping) {
+                      if (typing) {
                         if (index == 0) return _buildTypingBubble(theme);
                         index -= 1;
                       }
@@ -695,15 +737,13 @@ class _AIChatScreenState extends State<AIChatScreen> {
               mainAxisAlignment: isUser ? MainAxisAlignment.end : MainAxisAlignment.start,
               crossAxisAlignment: CrossAxisAlignment.end,
               children: [
-                if (!isUser) ...[
-                  const Padding(padding: EdgeInsets.only(bottom: 2), child: _EvaAvatar(size: 28)),
-                  const SizedBox(width: 8),
-                ],
                 Flexible(
                   child: ChatBubble(
                     isMe: isUser,
                     time: ts != null ? DateFormat('HH:mm').format(time) : '',
-                    maxWidthFactor: 0.8,
+                    // Ответы Евы длинные (меню, рецепты) — даём им всю ширину экрана.
+                    maxWidthFactor: isUser ? 0.8 : 1.0,
+                    sideGap: isUser ? 48 : 0,
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       mainAxisSize: MainAxisSize.min,
@@ -753,12 +793,12 @@ class _AIChatScreenState extends State<AIChatScreen> {
           ),
         if (parsed.shoppingListData != null)
           Padding(
-            padding: const EdgeInsets.only(left: 36),
+            padding: EdgeInsets.zero,
             child: RecipeShoppingCardWidget(data: parsed.shoppingListData!, msgId: doc.id),
           ),
         if (parsed.jsonData != null)
           Padding(
-            padding: const EdgeInsets.only(left: 36),
+            padding: EdgeInsets.zero,
             child: AIChatSaveCardWidget(
               jsonData: parsed.jsonData!,
               msgId: doc.id,
@@ -801,19 +841,25 @@ class _AIChatScreenState extends State<AIChatScreen> {
     );
   }
 
-  Widget _buildSuggestions(ThemeData theme) {
-    final suggestions = <(String, String, String)>[
-      ('🥗', 'Что приготовить на ужин?', 'Предложи лёгкий и сытный ужин на сегодня с учётом моей нормы'),
-      ('🌸', 'Питание в мою фазу цикла', 'Что мне лучше есть в текущей фазе цикла и почему?'),
-      ('😴', 'Как улучшить сон?', 'Какие продукты и привычки помогут мне лучше спать?'),
-      ('📸', 'Посчитать калории по фото', ''),
-    ];
+  Widget _buildSuggestions(ThemeData theme, [List<String> quickReplies = const []]) {
+    final bool fromEva = quickReplies.isNotEmpty;
+    final suggestions = fromEva
+        ? <(String?, String, String)>[
+            for (final q in quickReplies) (null, q, q),
+            ('📸', 'Посчитать еду по фото', ''),
+          ]
+        : <(String?, String, String)>[
+            ('🥗', 'Что приготовить на ужин?', 'Предложи лёгкий и сытный ужин на сегодня с учётом моей нормы'),
+            ('🌸', 'Питание в мою фазу цикла', 'Что мне лучше есть в текущей фазе цикла и почему?'),
+            ('😴', 'Как улучшить сон?', 'Какие продукты и привычки помогут мне лучше спать?'),
+            ('📸', 'Посчитать калории по фото', ''),
+          ];
     return Padding(
       padding: const EdgeInsets.only(top: 16, bottom: 4),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          const Padding(padding: EdgeInsets.only(left: 4, bottom: 10), child: EvaOverline('Можно начать с этого')),
+          Padding(padding: const EdgeInsets.only(left: 4, bottom: 10), child: EvaOverline(fromEva ? 'Ответить Еве' : 'Можно начать с этого')),
           Wrap(
             spacing: 8,
             runSpacing: 8,

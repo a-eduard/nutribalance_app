@@ -52,7 +52,7 @@ class DefaultFirebaseOptions {
 
   static const FirebaseOptions android = FirebaseOptions(
     apiKey: 'AIzaSyA_D0ULHVcDoNwbUD7DQW3gV66oXS-wo0I',
-    appId: '1:942600708331:android:ba4a1ccb69a4024495deae',
+    appId: '1:942600708331:android:fee294fb55d22fd595deae',
     messagingSenderId: '942600708331',
     projectId: 'nutribalance-app-11a09',
     storageBucket: 'nutribalance-app-11a09.firebasestorage.app',

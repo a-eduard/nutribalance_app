@@ -6,6 +6,7 @@ import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
 
+import '../screens/ai_chat_screen.dart';
 import '../theme/eva_colors.dart';
 import 'eva_ui.dart';
 
@@ -166,4 +167,111 @@ class _MoonPhasePainter extends CustomPainter {
 
   @override
   bool shouldRepaint(covariant _MoonPhasePainter old) => old.line != line || old.accent != accent;
+}
+
+/// Шторка «Фазы цикла»: легенда кольца и 4 фазы с подсказками по питанию.
+/// Прокручивается и не обрезается при крупном шрифте на маленьких экранах.
+void showCyclePhasesSheet(BuildContext context, {String? currentPhaseType}) {
+  final String? current = switch (currentPhaseType) {
+    'menstruation' => 'menstruation',
+    'follicular' => 'follicular',
+    'ovulation' || 'fertile' => 'ovulation',
+    'pms' || 'luteal' => 'luteal',
+    _ => null,
+  };
+  EvaSheet.show<void>(
+    context,
+    builder: (ctx) {
+      final theme = Theme.of(ctx);
+      final palette = ctx.eva;
+      final phases = <(String, Color, String, String)>[
+        ('menstruation', EvaColors.menstruation, 'Менструация', 'Организму нужны железо и тепло: красное мясо, гречка, тёплые супы.'),
+        ('follicular', EvaColors.follicular, 'Фолликулярная', 'Растёт энергия — хорошо идут тренировки и новые дела.'),
+        ('ovulation', palette.lavender, 'Овуляция', 'Пик сил и настроения. Налегай на овощи и клетчатку.'),
+        ('luteal', EvaColors.luteal, 'Лютеиновая', 'Может тянуть на сладкое: помогут сложные углеводы, магний и белок.'),
+      ];
+      return ConstrainedBox(
+        constraints: BoxConstraints(maxHeight: MediaQuery.sizeOf(ctx).height * 0.88),
+        child: SingleChildScrollView(
+          padding: const EdgeInsets.fromLTRB(EvaSpace.page, 10, EvaSpace.page, 24),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const Center(child: EvaSheetHandle()),
+              const SizedBox(height: 14),
+              Text('Фазы цикла', style: theme.textTheme.headlineSmall),
+              const SizedBox(height: 6),
+              Text(
+                'Розовая дуга на кольце — дни менструации, лавандовая — окно овуляции, точка — сегодня.',
+                style: theme.textTheme.bodyMedium?.copyWith(color: theme.colorScheme.onSurfaceVariant),
+              ),
+              const SizedBox(height: 18),
+              for (final ph in phases) ...[
+                Container(
+                  padding: const EdgeInsets.all(14),
+                  decoration: BoxDecoration(
+                    color: ph.$1 == current ? ph.$2.withValues(alpha: 0.12) : palette.fieldFill,
+                    borderRadius: BorderRadius.circular(18),
+                    border: Border.all(color: ph.$1 == current ? ph.$2.withValues(alpha: 0.55) : Colors.transparent),
+                  ),
+                  child: Row(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Container(
+                        margin: const EdgeInsets.only(top: 4),
+                        width: 12,
+                        height: 12,
+                        decoration: BoxDecoration(color: ph.$2, shape: BoxShape.circle),
+                      ),
+                      const SizedBox(width: 12),
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Row(children: [
+                              Flexible(child: Text(ph.$3, style: theme.textTheme.titleSmall)),
+                              if (ph.$1 == current) ...[
+                                const SizedBox(width: 8),
+                                Container(
+                                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+                                  decoration: BoxDecoration(color: ph.$2, borderRadius: BorderRadius.circular(20)),
+                                  child: Text('сейчас', style: theme.textTheme.labelSmall?.copyWith(color: Colors.white, fontWeight: FontWeight.w700)),
+                                ),
+                              ],
+                            ]),
+                            const SizedBox(height: 3),
+                            Text(ph.$4, style: theme.textTheme.bodyMedium?.copyWith(color: theme.colorScheme.onSurfaceVariant)),
+                          ],
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                const SizedBox(height: 10),
+              ],
+              const SizedBox(height: 10),
+              EvaPrimaryButton(
+                label: 'Спросить Еву о моей фазе',
+                icon: Icons.auto_awesome_rounded,
+                onPressed: () {
+                  Navigator.pop(ctx);
+                  Navigator.of(context).push(MaterialPageRoute(
+                    builder: (_) => const AIChatScreen(
+                      botType: 'dietitian',
+                      initialDisplayMessage: 'Что мне лучше есть в мою текущую фазу цикла?',
+                      initialTechnicalPrompt: 'Что мне лучше есть в текущей фазе цикла и почему? Дай короткое меню на сегодня под мою норму.',
+                      initialMode: 'meal_plan',
+                    ),
+                  ));
+                },
+              ),
+              const SizedBox(height: 8),
+              Center(child: TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Понятно'))),
+            ],
+          ),
+        ),
+      );
+    },
+  );
 }

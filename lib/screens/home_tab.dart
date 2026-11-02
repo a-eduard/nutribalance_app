@@ -488,16 +488,7 @@ class _HomeTabState extends State<HomeTab> with AutomaticKeepAliveClientMixin, W
       kind: CycleIconKind.phases,
       label: 'О фазах',
       tooltip: 'Как читать кольцо цикла',
-      onTap: () => HarmonyBottomSheets.showInfoSheet(
-        context: context,
-        title: 'Фазы цикла',
-        description: 'Розовая дуга — дни менструации, лавандовая — окно овуляции, точка — сегодня.\n\n'
-            '🩸 Менструация — организму нужны железо и тепло: красное мясо, гречка, тёплые супы.\n'
-            '🌿 Фолликулярная — растёт энергия, хорошо идут тренировки и новые дела.\n'
-            '✨ Овуляция — пик сил и настроения, налегай на овощи и клетчатку.\n'
-            '🌙 Лютеиновая — может тянуть на сладкое: помогут сложные углеводы, магний и белок.\n\n'
-            'Спроси Еву — она подскажет меню именно под твою фазу.',
-      ),
+      onTap: () => showCyclePhasesSheet(context, currentPhaseType: hasData ? phase.phaseType : null),
     );
 
     // Кольцо по центру, кнопки по бокам; название фазы и описание — под кольцом

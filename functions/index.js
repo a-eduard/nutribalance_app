@@ -66,7 +66,10 @@ function genConfig({ temperature, think = "off", json = false } = {}, model = ge
     if (typeof temperature === "number") cfg.temperature = temperature;
     cfg.thinkingConfig = { thinkingBudget: think === "off" ? 0 : think === "low" ? 1024 : 4096 };
   } else {
-    cfg.thinkingConfig = { thinkingLevel: think === "off" ? "minimal" : think };
+    // Gemini 3.7+ Flash не принимает "minimal" (ошибка 400) — для них самый низкий уровень "low".
+    const noMinimal = /^gemini-3\.([7-9]|\d{2,})/.test(model) || /^gemini-[4-9]/.test(model);
+    const level = think === "off" ? (noMinimal ? "low" : "minimal") : think;
+    cfg.thinkingConfig = { thinkingLevel: level };
   }
   return cfg;
 }
@@ -434,8 +437,8 @@ const EVA_SYSTEM_PROMPT = `Ты — Ева, элитный нутрициоло�
 
 СЦЕНАРИИ:
 - Оценка еды (фото/текст): очень коротко — 1 предложение поддержки, КБЖУ и обязательный JSON-блок.
-- JSON log_food добавляй ТОЛЬКО когда пользователь сообщает, что УЖЕ съела что-то, или присылает фото своей еды. В меню, рецептах и советах «что съесть» log_food НЕ добавляй. В одном ответе — не больше одного JSON-блока.
-- Анализы: объясни простым языком, дай общие рекомендации по питанию, напомни, что диагноз ставит врач.
+- JSON log_food добавляй ТОЛЬКО когда пользователь сообщает, что УЖЕ съела что-то, или присылает фото своей еды. В меню, рецептах и советах «что съесть» log_food НЕ добавляй. В одном ответе — не больше одного JSON-блока. Еду, о которой пользователь уже писал раньше в этой переписке, повторно НЕ записывай: она уже в дневнике — просто ответь на вопрос.
+- Анализы: объясни простым языком, дай общие рекомендации по питанию и ОБЯЗАТЕЛЬНО последней фразой напомни, что диагноз и лечение назначает врач.
 - Рецепты: вступление (1 предложение), ингредиенты, шаги и блок [SHOPPING_LIST].
 
 ТЕХНИЧЕСКИЕ ПРАВИЛА JSON (для интерфейса). Сначала текст ответа, В САМОМ КОНЦЕ — JSON:
@@ -1253,7 +1256,9 @@ exports.aiProbe = onRequest({ timeoutSeconds: 300, memory: "512MiB", maxInstance
 
   let imgB64 = null;
   try {
-    const r = await fetch(String(req.query.img || "https://tonna-fitness.ru/img/screen-diary.webp"));
+    const r = await fetch(String(req.query.img || "https://commons.wikimedia.org/wiki/Special:FilePath/Full_English_breakfast.jpg?width=800"), { headers: { "User-Agent": "MyEvaModelCheck/1.0 (https://my-eva.ru)" }, redirect: "follow" });
+    if (!r.ok) throw new Error(`image HTTP ${r.status}`);
+    out.imgType = r.headers.get("content-type");
     imgB64 = Buffer.from(await r.arrayBuffer()).toString("base64");
   } catch (e) {
     out.imgError = String(e && e.message);
@@ -1277,7 +1282,7 @@ exports.aiProbe = onRequest({ timeoutSeconds: 300, memory: "512MiB", maxInstance
       ["image", async () => {
         if (!imgB64) throw new Error("no image");
         const m = getGenAI().getGenerativeModel({ model: name, systemInstruction: EVA_SYSTEM_PROMPT, generationConfig: genConfig({ temperature: 0.1, think: "low" }, name) });
-        return m.generateContent(["Что на картинке? Перечисли блюда и калории, если видно.", { inlineData: { data: imgB64, mimeType: "image/webp" } }]);
+        return m.generateContent(["Запиши, что я съела на фото.", { inlineData: { data: imgB64, mimeType: (out.imgType || "image/jpeg").split(";")[0] } }]);
       }],
       ["pdf", async () => {
         const m = getGenAI().getGenerativeModel({ model: name, systemInstruction: EVA_SYSTEM_PROMPT, generationConfig: genConfig({ temperature: 0.1, think: "low" }, name) });

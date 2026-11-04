@@ -15,7 +15,7 @@
 //    правильное продление срока. Промокоды — на сервере.
 //  • Новое: weeklyInsights — «Итоги недели от Евы».
 
-const { onCall, onRequest, HttpsError } = require("firebase-functions/v2/https");
+const { onCall, HttpsError } = require("firebase-functions/v2/https");
 const { onDocumentCreated, onDocumentWritten } = require("firebase-functions/v2/firestore");
 const { defineString } = require("firebase-functions/params");
 const auth = require("firebase-functions/v1/auth");
@@ -46,11 +46,16 @@ const FREE_LIMITS = { message: 5, scan: 3 };
 // Модель меняется в functions/.env (GEMINI_MODEL) без правки кода и без релиза приложения.
 // С 01.12.2026 Google переводит gemini-2.5-flash на gemini-3.5-flash-lite.
 const geminiModelParam = defineString("GEMINI_MODEL", { default: "gemini-2.5-flash" });
-// Только для временной проверки моделей (функция aiProbe). Пусто — проверка выключена.
-const probeToken = defineString("AI_PROBE_TOKEN", { default: "" });
+
+// Отдельная модель для фото еды и анализов (там важнее точность). Пусто — та же, что GEMINI_MODEL.
+const geminiFilesModelParam = defineString("GEMINI_MODEL_FILES", { default: "" });
 
 function geminiModel() {
   return (geminiModelParam.value() || "gemini-2.5-flash").trim();
+}
+
+function geminiFilesModel() {
+  return (geminiFilesModelParam.value() || "").trim() || geminiModel();
 }
 
 /**
@@ -570,12 +575,13 @@ exports.askDietitian = onCall({ cors: true, maxInstances: 20, timeoutSeconds: 12
     }
 
     const hasFiles = imagesBase64.length > 0 || !!pdfBase64;
+    const modelName = hasFiles ? geminiFilesModel() : geminiModel();
     const model = getGenAI().getGenerativeModel({
-      model: geminiModel(),
+      model: modelName,
       systemInstruction: `${EVA_SYSTEM_PROMPT}${mode === "meal_plan" ? MEAL_PLAN_RULES : ""}\n\nДОСЬЕ ПОЛЬЗОВАТЕЛЯ (ТЕКУЩИЙ КОНТЕКСТ):\n${userContext || "(Профиль пока не заполнен)"}`,
       // Размышления перед ответом сильно увеличивают ожидание. Для переписки и меню
       // они не нужны, для фото и анализов оставляем немного.
-      generationConfig: genConfig({ temperature: hasFiles ? 0.1 : 0.4, think: hasFiles ? "low" : "off" }),
+      generationConfig: genConfig({ temperature: hasFiles ? 0.1 : 0.4, think: hasFiles ? "low" : "off" }, modelName),
     });
 
     const userPrompt = prompt || (hasFiles ? "Посмотри файлы" : "Привет!");
@@ -1204,102 +1210,4 @@ exports.processWelcomeQueue = onSchedule({ schedule: "every 5 minutes", timeoutS
       console.error("[processWelcomeQueue]", uid, e && e.message);
     }
   }
-});
-
-// ==========================================
-// ВРЕМЕННО: проверка моделей Gemini перед переходом с 2.5 Flash (до 01.12.2026).
-// Работает, только если в .env задан AI_PROBE_TOKEN; запрос — с этим токеном в заголовке.
-// Пользовательских данных не трогает: тестовые тексты, картинка с сайта и маленький PDF.
-// После выбора модели — удалить функцию и токен.
-// ==========================================
-function tinyPdfBase64() {
-  const text = "Blood test: Hemoglobin 112 g/L (ref 120-150). Ferritin 9 ng/mL (ref 15-150). Vitamin D 18 ng/mL (ref 30-100).";
-  const stream = `BT /F1 10 Tf 40 760 Td (${text}) Tj ET`;
-  const objs = [
-    "<< /Type /Catalog /Pages 2 0 R >>",
-    "<< /Type /Pages /Kids [3 0 R] /Count 1 >>",
-    "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Contents 4 0 R /Resources << /Font << /F1 5 0 R >> >> >>",
-    `<< /Length ${stream.length} >>\nstream\n${stream}\nendstream`,
-    "<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>",
-  ];
-  let pdf = "%PDF-1.4\n";
-  const offsets = [];
-  objs.forEach((o, i) => {
-    offsets.push(pdf.length);
-    pdf += `${i + 1} 0 obj\n${o}\nendobj\n`;
-  });
-  const xref = pdf.length;
-  pdf += `xref\n0 ${objs.length + 1}\n0000000000 65535 f \n${offsets.map((o) => `${String(o).padStart(10, "0")} 00000 n \n`).join("")}`;
-  pdf += `trailer\n<< /Size ${objs.length + 1} /Root 1 0 R >>\nstartxref\n${xref}\n%%EOF`;
-  return Buffer.from(pdf, "latin1").toString("base64");
-}
-
-exports.aiProbe = onRequest({ timeoutSeconds: 300, memory: "512MiB", maxInstances: 1 }, async (req, res) => {
-  const token = probeToken.value();
-  if (!token || req.get("x-probe-token") !== token) {
-    res.status(404).send("Not found");
-    return;
-  }
-  const models = String(req.query.models || "gemini-2.5-flash").split(",").map((s) => s.trim()).filter(Boolean).slice(0, 6);
-  const out = { listed: [], results: [] };
-
-  try {
-    const r = await fetch("https://generativelanguage.googleapis.com/v1beta/models?pageSize=200", { headers: { "x-goog-api-key": geminiKey.value() } });
-    const j = await r.json();
-    out.listed = (j.models || [])
-      .filter((m) => /flash/i.test(m.name) && (m.supportedGenerationMethods || []).includes("generateContent"))
-      .map((m) => m.name.replace("models/", ""));
-    if (j.error) out.listError = `${j.error.status}: ${j.error.message}`;
-  } catch (e) {
-    out.listError = String(e && e.message);
-  }
-
-  let imgB64 = null;
-  try {
-    const r = await fetch(String(req.query.img || "https://commons.wikimedia.org/wiki/Special:FilePath/Full_English_breakfast.jpg?width=800"), { headers: { "User-Agent": "MyEvaModelCheck/1.0 (https://my-eva.ru)" }, redirect: "follow" });
-    if (!r.ok) throw new Error(`image HTTP ${r.status}`);
-    out.imgType = r.headers.get("content-type");
-    imgB64 = Buffer.from(await r.arrayBuffer()).toString("base64");
-  } catch (e) {
-    out.imgError = String(e && e.message);
-  }
-  const pdfB64 = tinyPdfBase64();
-
-  for (const name of models) {
-    const tests = [
-      ["chat", async () => {
-        const m = getGenAI().getGenerativeModel({ model: name, systemInstruction: EVA_SYSTEM_PROMPT, generationConfig: genConfig({ temperature: 0.4, think: "off" }, name) });
-        const chat = m.startChat({ history: cleanHistory([
-          { role: "user", text: "Привет! Я съела овсянку с бананом на завтрак." },
-          { role: "ai", text: "Отличный завтрак! Овсянка с бананом даёт энергию надолго 💛" },
-        ]) });
-        return chat.sendMessage("Что я ела на завтрак и сколько там примерно калорий? Коротко.");
-      }],
-      ["json", async () => {
-        const m = getGenAI().getGenerativeModel({ model: name, systemInstruction: EVA_SYSTEM_PROMPT, generationConfig: genConfig({ temperature: 0.7, think: "off", json: true }, name) });
-        return m.generateContent('Верни строго JSON {"text":"приветствие в 2 предложения","suggestions":["...","...","..."]} для новой пользовательницы Анны с целью «похудеть».');
-      }],
-      ["image", async () => {
-        if (!imgB64) throw new Error("no image");
-        const m = getGenAI().getGenerativeModel({ model: name, systemInstruction: EVA_SYSTEM_PROMPT, generationConfig: genConfig({ temperature: 0.1, think: "low" }, name) });
-        return m.generateContent(["Запиши, что я съела на фото.", { inlineData: { data: imgB64, mimeType: (out.imgType || "image/jpeg").split(";")[0] } }]);
-      }],
-      ["pdf", async () => {
-        const m = getGenAI().getGenerativeModel({ model: name, systemInstruction: EVA_SYSTEM_PROMPT, generationConfig: genConfig({ temperature: 0.1, think: "low" }, name) });
-        return m.generateContent(["Расшифруй мои анализы коротко.", { inlineData: { data: pdfB64, mimeType: "application/pdf" } }]);
-      }],
-    ];
-    for (const [test, fn] of tests) {
-      const t0 = Date.now();
-      try {
-        const r = await fn();
-        const u = r.response.usageMetadata || {};
-        const text = r.response.text() || "";
-        out.results.push({ model: name, test, ok: !!text.trim(), ms: Date.now() - t0, in: u.promptTokenCount, out: u.candidatesTokenCount, think: u.thoughtsTokenCount, text: text.slice(0, 600) });
-      } catch (e) {
-        out.results.push({ model: name, test, ok: false, ms: Date.now() - t0, error: String(e && e.message).slice(0, 300) });
-      }
-    }
-  }
-  res.json(out);
 });

@@ -211,7 +211,9 @@ class AppTheme {
         foregroundColor: scheme.onPrimary,
         elevation: 0,
         highlightElevation: 0,
-        shape: const CircleBorder(),
+        // StadiumBorder: круглая FAB остаётся кругом, а широкая (extended) — капсулой.
+        // CircleBorder ломал FAB.extended — текст вылезал за розовый круг.
+        shape: const StadiumBorder(),
       ),
       inputDecorationTheme: InputDecorationTheme(
         filled: true,

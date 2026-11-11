@@ -2,6 +2,7 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
+import 'package:phosphor_flutter/phosphor_flutter.dart';
 import 'package:font_awesome_flutter/font_awesome_flutter.dart';
 import 'package:url_launcher/url_launcher.dart';
 
@@ -79,7 +80,7 @@ class _AuthScreenState extends State<AuthScreen> {
           controller: resetEmailController,
           keyboardType: TextInputType.emailAddress,
           autofocus: true,
-          decoration: const InputDecoration(hintText: 'Ваш email', prefixIcon: Icon(Icons.mail_outline_rounded)),
+          decoration: const InputDecoration(hintText: 'Ваш email', prefixIcon: Icon(PhosphorIconsLight.envelopeSimple)),
         ),
         actions: [
           TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Отмена')),
@@ -230,14 +231,14 @@ class _AuthScreenState extends State<AuthScreen> {
                         width: 84,
                         height: 84,
                         decoration: BoxDecoration(gradient: palette.hero, shape: BoxShape.circle, boxShadow: palette.floatingShadow),
-                        child: const Icon(Icons.spa_rounded, color: Colors.white, size: 40),
+                        child: const Icon(PhosphorIconsLight.flowerLotus, color: Colors.white, size: 40),
                       ),
                     ),
                     const SizedBox(height: 20),
                     Text('Моя Ева', textAlign: TextAlign.center, style: theme.textTheme.displayMedium),
                     const SizedBox(height: 6),
                     Text(
-                      'Гармония в каждой калории',
+                      'Забота о себе — каждый день',
                       textAlign: TextAlign.center,
                       style: TextStyle(fontFamily: EvaFonts.serif, fontStyle: FontStyle.italic, fontSize: 18, color: theme.colorScheme.primary),
                     ),
@@ -257,7 +258,7 @@ class _AuthScreenState extends State<AuthScreen> {
                                 controller: _nameController,
                                 textCapitalization: TextCapitalization.words,
                                 textInputAction: TextInputAction.next,
-                                decoration: const InputDecoration(hintText: 'Имя', prefixIcon: Icon(Icons.person_outline_rounded)),
+                                decoration: const InputDecoration(hintText: 'Имя', prefixIcon: Icon(PhosphorIconsLight.user)),
                               ),
                             ),
                     ),
@@ -266,7 +267,7 @@ class _AuthScreenState extends State<AuthScreen> {
                       keyboardType: TextInputType.emailAddress,
                       textInputAction: TextInputAction.next,
                       autofillHints: const [AutofillHints.email],
-                      decoration: const InputDecoration(hintText: 'Email', prefixIcon: Icon(Icons.mail_outline_rounded)),
+                      decoration: const InputDecoration(hintText: 'Email', prefixIcon: Icon(PhosphorIconsLight.envelopeSimple)),
                     ),
                     const SizedBox(height: 12),
                     TextField(
@@ -277,7 +278,7 @@ class _AuthScreenState extends State<AuthScreen> {
                       autofillHints: const [AutofillHints.password],
                       decoration: InputDecoration(
                         hintText: 'Пароль',
-                        prefixIcon: const Icon(Icons.lock_outline_rounded),
+                        prefixIcon: const Icon(PhosphorIconsLight.lock),
                         suffixIcon: IconButton(
                           icon: Icon(_obscure ? Icons.visibility_outlined : Icons.visibility_off_outlined),
                           onPressed: () => setState(() => _obscure = !_obscure),

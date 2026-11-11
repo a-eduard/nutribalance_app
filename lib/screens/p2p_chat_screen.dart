@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';
+import 'package:phosphor_flutter/phosphor_flutter.dart';
 import 'package:flutter/services.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:intl/intl.dart';
@@ -163,8 +164,8 @@ class _P2PChatScreenState extends State<P2PChatScreen> {
           mainAxisSize: MainAxisSize.min,
           children: [
             const EvaSheetHeader(title: 'Отправить фото'),
-            EvaOptionTile(title: 'Сделать фото', icon: Icons.photo_camera_outlined, selected: false, onTap: () => Navigator.pop(ctx, ImageSource.camera)),
-            EvaOptionTile(title: 'Выбрать из галереи', icon: Icons.photo_library_outlined, selected: false, onTap: () => Navigator.pop(ctx, ImageSource.gallery)),
+            EvaOptionTile(title: 'Сделать фото', icon: PhosphorIconsLight.camera, selected: false, onTap: () => Navigator.pop(ctx, ImageSource.camera)),
+            EvaOptionTile(title: 'Выбрать из галереи', icon: PhosphorIconsLight.images, selected: false, onTap: () => Navigator.pop(ctx, ImageSource.gallery)),
           ],
         ),
       ),
@@ -223,7 +224,7 @@ class _P2PChatScreenState extends State<P2PChatScreen> {
               ),
             if (isMe)
               EvaMenuTile(
-                icon: Icons.delete_outline_rounded,
+                icon: PhosphorIconsLight.trash,
                 title: 'Удалить',
                 destructive: true,
                 trailing: const SizedBox.shrink(),
@@ -337,7 +338,11 @@ class _P2PChatScreenState extends State<P2PChatScreen> {
             ),
           ),
         if (m.text.isNotEmpty)
-          Text(m.text, style: theme.textTheme.bodyLarge?.copyWith(fontSize: 15.5, height: 1.35, color: isMe ? Colors.white : theme.colorScheme.onSurface)),
+          EvaLinkText(
+            m.text,
+            style: theme.textTheme.bodyLarge?.copyWith(fontSize: 15.5, height: 1.35, color: isMe ? Colors.white : theme.colorScheme.onSurface),
+            linkColor: isMe ? Colors.white : theme.colorScheme.primary,
+          ),
         if (m.edited)
           Padding(
             padding: const EdgeInsets.only(top: 2),
@@ -373,7 +378,7 @@ class _P2PChatScreenState extends State<P2PChatScreen> {
                   builder: (context, snapshot) {
                     if (snapshot.hasError) {
                       return EvaEmptyState(
-                        icon: Icons.lock_outline_rounded,
+                        icon: PhosphorIconsLight.lock,
                         title: 'Не удалось открыть чат',
                         subtitle: 'Проверьте соединение и попробуйте ещё раз.',
                         actionLabel: 'Обновить',

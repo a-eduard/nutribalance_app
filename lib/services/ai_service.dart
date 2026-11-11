@@ -111,6 +111,7 @@ class AIService {
     } on FirebaseFunctionsException catch (e) {
       debugPrint('askDietitian: ${e.code} ${e.message}');
       if (e.code == 'resource-exhausted') throw const EvaQuotaException();
+      if (e.code == 'failed-precondition' && (e.message ?? '').isNotEmpty) throw EvaUnavailableException(e.message!);
       throw EvaUnavailableException(e.code == 'unauthenticated' ? 'Войдите в аккаунт заново' : 'Ева временно недоступна. Попробуй ещё раз.');
     } on TimeoutException {
       throw const EvaUnavailableException('Ответ занимает слишком много времени. Проверь соединение.');

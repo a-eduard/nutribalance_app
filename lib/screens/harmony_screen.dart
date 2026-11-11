@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:phosphor_flutter/phosphor_flutter.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 
@@ -159,7 +160,7 @@ class _HarmonyScreenState extends State<HarmonyScreen> {
           children: [
             const Padding(padding: EdgeInsets.symmetric(horizontal: 4), child: EvaSheetHeader(title: 'Настройки цикла')),
             EvaMenuTile(
-              icon: Icons.tune_rounded,
+              icon: PhosphorIconsLight.slidersHorizontal,
               title: 'Режим приложения',
               subtitle: modes[appMode] ?? 'Стандартный',
               onTap: () {
@@ -169,7 +170,7 @@ class _HarmonyScreenState extends State<HarmonyScreen> {
             ),
             if (appMode == 'standard' || appMode == 'simple') ...[
               EvaMenuTile(
-                icon: Icons.loop_rounded,
+                icon: PhosphorIconsLight.arrowsClockwise,
                 title: 'Длина цикла',
                 subtitle: '$cycleLength ${EvaFormat.plural(cycleLength, 'день', 'дня', 'дней')}',
                 onTap: () {
@@ -178,7 +179,7 @@ class _HarmonyScreenState extends State<HarmonyScreen> {
                 },
               ),
               EvaMenuTile(
-                icon: Icons.water_drop_outlined,
+                icon: PhosphorIconsLight.drop,
                 title: 'Длина месячных',
                 subtitle: '$periodDuration ${EvaFormat.plural(periodDuration, 'день', 'дня', 'дней')}',
                 onTap: () {
@@ -189,7 +190,7 @@ class _HarmonyScreenState extends State<HarmonyScreen> {
             ],
             if (appMode == 'standard')
               EvaMenuTile(
-                icon: Icons.auto_awesome_outlined,
+                icon: PhosphorIconsLight.sparkle,
                 title: 'День овуляции',
                 subtitle: manualOvDay != null ? '$manualOvDay-й день цикла' : 'Рассчитывается автоматически',
                 onTap: () {
@@ -215,6 +216,18 @@ class _HarmonyScreenState extends State<HarmonyScreen> {
             const EvaSheetHeader(title: 'Режим приложения'),
             ...modes.entries.map((entry) => EvaOptionTile(
                   title: entry.value,
+                  subtitle: const {
+                    'standard': 'Месячные, овуляция, фертильные дни и ПМС',
+                    'simple': 'Только прогноз месячных — без овуляции',
+                    'pregnancy': 'Срок по неделям, дата родов, советы',
+                    'menopause': 'Самочувствие и симптомы без прогноза цикла',
+                  }[entry.key],
+                  icon: const {
+                    'standard': PhosphorIconsLight.flowerLotus,
+                    'simple': PhosphorIconsLight.drop,
+                    'pregnancy': PhosphorIconsLight.baby,
+                    'menopause': PhosphorIconsLight.leaf,
+                  }[entry.key],
                   selected: currentMode == entry.key,
                   onTap: () async {
                     Navigator.pop(ctx);
@@ -288,21 +301,19 @@ class _HarmonyScreenState extends State<HarmonyScreen> {
     );
   }
 
+  void _reopenDay(DateTime day, Map<String, dynamic> uData, String uid, double globalWeight) {
+    if (!mounted) return;
+    Future.delayed(const Duration(milliseconds: 250), () {
+      if (mounted) _onDaySelected(day, uData, uid, globalWeight);
+    });
+  }
+
   Future<void> _onDaySelected(DateTime selectedDay, Map<String, dynamic> uData, String uid, double globalWeight) async {
     setState(() => _selectedDay = selectedDay);
     // ФИКС ГОНКИ: раньше шторка открывалась ДО загрузки данных выбранного дня
     // и показывала/сохраняла симптомы предыдущего дня.
     await _loadDayLogs(selectedDay);
     if (!mounted) return;
-
-    final now = DateTime.now();
-    final bool isToday = selectedDay.year == now.year && selectedDay.month == now.month && selectedDay.day == now.day;
-    final cheatStatus = CycleCalculator.getCheatStatus(targetDate: selectedDay, userData: uData);
-    if (isToday && cheatStatus == 'cheat_day') {
-      EvaSnack.show(context, 'Сегодня можно побаловать себя любимой едой — без чувства вины ✨', duration: const Duration(seconds: 4));
-    } else if (isToday && cheatStatus == 'cheat_meal') {
-      EvaSnack.show(context, 'Воскресенье — день для души: любимые блюда без угрызений совести ✨', duration: const Duration(seconds: 4));
-    }
 
     final String docId = _docIdFor(selectedDay);
     final logRef = FirebaseFirestore.instance.collection('users').doc(uid).collection('cycle_logs').doc(docId);
@@ -319,7 +330,7 @@ class _HarmonyScreenState extends State<HarmonyScreen> {
           _patchCache(selectedDay, {'symptoms': map});
           if (mounted) setState(() => _currentDaySymptoms = map);
         },
-      ),
+      ).then((_) => _reopenDay(selectedDay, uData, uid, globalWeight)),
       onMoodTap: () => HarmonyMoodSheet.show(
         context: context,
         selectedDay: selectedDay,
@@ -328,7 +339,7 @@ class _HarmonyScreenState extends State<HarmonyScreen> {
           _patchCache(selectedDay, {'moods': list});
           if (mounted) setState(() => _currentMoods = list);
         },
-      ),
+      ).then((_) => _reopenDay(selectedDay, uData, uid, globalWeight)),
       onTempTap: () => HarmonyBottomSheets.showTemperatureSheet(
         context: context,
         currentTemp: _currentTemperature,
@@ -347,8 +358,21 @@ class _HarmonyScreenState extends State<HarmonyScreen> {
           _patchCache(selectedDay, {'weight': val});
           setState(() => _currentWeight = val);
           logRef.set({'weight': val, 'updatedAt': FieldValue.serverTimestamp()}, SetOptions(merge: true)).catchError((e) => debugPrint('$e'));
-          FirebaseFirestore.instance.collection('users').doc(uid).set({'weight': val}, SetOptions(merge: true)).catchError((e) => debugPrint('$e'));
+          // История веса для графика «Мой прогресс» и отчёта врачу.
+          FirebaseFirestore.instance.collection('users').doc(uid).collection('weight_logs').doc(docId).set(
+            {'weight': val, 'date': docId, 'timestamp': FieldValue.serverTimestamp()},
+            SetOptions(merge: true),
+          ).catchError((e) => debugPrint('$e'));
 
+          // Вес за прошлый день — только запись в истории. Текущий вес и норму КБЖУ
+          // меняем, лишь когда отмечают сегодняшний (или будущий) день.
+          final DateTime today = DateTime.now();
+          final bool isCurrent = !DateTime(selectedDay.year, selectedDay.month, selectedDay.day).isBefore(DateTime(today.year, today.month, today.day));
+          if (!isCurrent) {
+            EvaSnack.showOn(messenger, theme, 'Вес за ${selectedDay.day}.${selectedDay.month.toString().padLeft(2, '0')} сохранён', type: EvaSnackType.success);
+            return;
+          }
+          FirebaseFirestore.instance.collection('users').doc(uid).set({'weight': val}, SetOptions(merge: true)).catchError((e) => debugPrint('$e'));
           final int age = evaInt(uData['age']);
           final double height = evaDouble(uData['height']);
           final String goal = (uData['goal'] ?? 'Похудеть').toString();
@@ -380,7 +404,7 @@ class _HarmonyScreenState extends State<HarmonyScreen> {
           _patchCache(selectedDay, {'meds': list});
           if (mounted) setState(() => _currentMeds = list);
         },
-      ),
+      ).then((_) => _reopenDay(selectedDay, uData, uid, globalWeight)),
     );
   }
 
@@ -457,18 +481,18 @@ class _HarmonyScreenState extends State<HarmonyScreen> {
                         children: [
                           const EvaOverline('Женское здоровье'),
                           const SizedBox(height: 4),
-                          Text('Гармония', style: theme.textTheme.displaySmall),
+                          Text('Календарь', style: theme.textTheme.displaySmall),
                         ],
                       ),
                     ),
                     EvaCircleButton(
-                      icon: Icons.insights_rounded,
+                      icon: PhosphorIconsLight.chartBar,
                       tooltip: 'Статистика и отчёт',
                       onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const HarmonyOverviewScreen())),
                     ),
                     const SizedBox(width: 10),
                     EvaCircleButton(
-                      icon: Icons.tune_rounded,
+                      icon: PhosphorIconsLight.gearSix,
                       tooltip: 'Настройки цикла',
                       onTap: () => _showSettingsSheet(userData, theme),
                     ),
@@ -515,6 +539,10 @@ class _HarmonyScreenState extends State<HarmonyScreen> {
                     ),
                   ),
                 ],
+                if (appMode != 'pregnancy') ...[
+                  const SizedBox(height: 12),
+                  _CycleLegend(simple: appMode == 'simple' || appMode == 'menopause'),
+                ],
                 const SizedBox(height: 10),
                 Padding(
                   padding: const EdgeInsets.symmetric(horizontal: 4),
@@ -537,7 +565,7 @@ class _HarmonyScreenState extends State<HarmonyScreen> {
                         width: 46,
                         height: 46,
                         decoration: BoxDecoration(color: Colors.white.withValues(alpha: 0.2), shape: BoxShape.circle),
-                        child: const Icon(Icons.auto_awesome_rounded, color: Colors.white),
+                        child: const Icon(PhosphorIconsLight.sparkle, color: Colors.white),
                       ),
                       const SizedBox(width: 14),
                       Expanded(
@@ -558,6 +586,44 @@ class _HarmonyScreenState extends State<HarmonyScreen> {
             ),
           );
         },
+      ),
+    );
+  }
+}
+
+/// Что значат цвета дней в календаре.
+class _CycleLegend extends StatelessWidget {
+  final bool simple;
+  const _CycleLegend({required this.simple});
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final bool isDark = theme.brightness == Brightness.dark;
+    Widget item(Widget dot, String label) => Row(mainAxisSize: MainAxisSize.min, children: [
+          dot,
+          const SizedBox(width: 6),
+          Text(label, style: theme.textTheme.labelMedium?.copyWith(color: theme.colorScheme.onSurfaceVariant)),
+        ]);
+    Widget dot(Color fill, {Color? ring}) => Container(
+          width: 14,
+          height: 14,
+          decoration: BoxDecoration(color: fill, shape: BoxShape.circle, border: ring == null ? null : Border.all(color: ring, width: 1.5)),
+        );
+    return EvaCard(
+      padding: const EdgeInsets.fromLTRB(16, 14, 16, 14),
+      child: Wrap(
+        spacing: 16,
+        runSpacing: 10,
+        children: [
+          item(dot(theme.colorScheme.primary), 'Месячные'),
+          if (!simple) ...[
+            item(dot(isDark ? const Color(0xFF00695C).withValues(alpha: 0.5) : const Color(0xFFE0F2F1)), 'Фертильные дни'),
+            item(dot(isDark ? const Color(0xFFE65100).withValues(alpha: 0.35) : const Color(0xFFFFE0B2), ring: isDark ? const Color(0xFFFFB74D) : const Color(0xFFE65100)), 'Овуляция'),
+            item(dot(isDark ? const Color(0xFF6A1B9A).withValues(alpha: 0.5) : const Color(0xFFF3E5F5)), 'ПМС'),
+          ],
+          item(dot(Colors.transparent, ring: theme.colorScheme.primary.withValues(alpha: 0.6)), 'Сегодня'),
+        ],
       ),
     );
   }

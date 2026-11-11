@@ -9,6 +9,9 @@ import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 
 import '../screens/ai_chat_screen.dart';
 import '../screens/p2p_chat_screen.dart';
+import '../screens/partner/partner_share_screen.dart';
+import '../screens/course/course_screen.dart';
+import '../screens/challenges/challenges_screen.dart';
 import 'app_navigator.dart';
 import 'local_notification_service.dart';
 
@@ -148,6 +151,12 @@ class PushNotificationService {
         final String target = otherId;
         final String name = (data['senderName'] ?? title ?? data['title'] ?? 'Собеседник').toString();
         nav.push(MaterialPageRoute(builder: (_) => P2PChatScreen(otherUserId: target, otherUserName: name)));
+      } else if (type == 'course') {
+        nav.push(MaterialPageRoute(builder: (_) => const CourseScreen()));
+      } else if (type == 'challenge') {
+        nav.push(MaterialPageRoute(builder: (_) => const ChallengesScreen()));
+      } else if (type == 'partner' && data['to'] == 'owner') {
+        nav.push(MaterialPageRoute(builder: (_) => const PartnerShareScreen()));
       } else if (type == 'eva' || type == 'ai') {
         nav.push(MaterialPageRoute(builder: (_) => const AIChatScreen(botType: 'dietitian')));
       }

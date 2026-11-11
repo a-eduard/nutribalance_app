@@ -1,6 +1,7 @@
 // Файл: lib/screens/harmony/widgets/harmony_meds_sheet.dart
 
 import 'package:flutter/material.dart';
+import 'package:phosphor_flutter/phosphor_flutter.dart';
 import '../../../theme/eva_colors.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
@@ -17,13 +18,13 @@ class HarmonyMedsSheet extends StatefulWidget {
     required this.onSave,
   });
 
-  static void show({
+  static Future<void> show({
     required BuildContext context,
     required DateTime selectedDay,
     required List<String> currentMeds,
     required Function(List<String>) onSave,
   }) {
-    showModalBottomSheet(
+    return showModalBottomSheet<void>(
       context: context,
       backgroundColor: Theme.of(context).colorScheme.surface,
       isScrollControlled: true,
@@ -137,7 +138,7 @@ class _HarmonyMedsSheetState extends State<HarmonyMedsSheet> {
             decoration: InputDecoration(
               hintText: "Поиск препарата...",
               hintStyle: TextStyle(color: theme.colorScheme.onSurfaceVariant.withValues(alpha: 0.5)),
-              prefixIcon: Icon(Icons.search, color: theme.colorScheme.onSurfaceVariant),
+              prefixIcon: Icon(PhosphorIconsLight.magnifyingGlass, color: theme.colorScheme.onSurfaceVariant),
               filled: true,
               fillColor: theme.colorScheme.onSurfaceVariant.withValues(alpha: 0.1),
               border: OutlineInputBorder(borderRadius: BorderRadius.circular(16), borderSide: BorderSide.none),
@@ -152,7 +153,7 @@ class _HarmonyMedsSheetState extends State<HarmonyMedsSheet> {
               itemBuilder: (context, index) {
                 if (index == _filteredMeds.length) {
                   return ListTile(
-                    leading: CircleAvatar(backgroundColor: theme.colorScheme.onSurfaceVariant.withValues(alpha: 0.1), child: Icon(Icons.add, color: theme.colorScheme.primary)),
+                    leading: CircleAvatar(backgroundColor: theme.colorScheme.onSurfaceVariant.withValues(alpha: 0.1), child: Icon(PhosphorIconsLight.plus, color: theme.colorScheme.primary)),
                     title: Text('Добавить "${_searchController.text}"', style: TextStyle(color: theme.colorScheme.primary, fontWeight: FontWeight.bold)),
                     onTap: () {
                       final newMed = _searchController.text.trim();
@@ -175,8 +176,8 @@ class _HarmonyMedsSheetState extends State<HarmonyMedsSheet> {
                   leading: Text(_getEmojiForMed(med), style: const TextStyle(fontSize: 24)),
                   title: Text(med, style: TextStyle(color: theme.colorScheme.onSurface, fontWeight: isSelected ? FontWeight.bold : FontWeight.w500)),
                   trailing: isSelected 
-                    ? Icon(Icons.check_circle, color: theme.colorScheme.primary)
-                    : Icon(Icons.circle_outlined, color: theme.colorScheme.onSurfaceVariant),
+                    ? Icon(PhosphorIconsFill.checkCircle, color: theme.colorScheme.primary)
+                    : Icon(PhosphorIconsLight.circle, color: theme.colorScheme.onSurfaceVariant),
                   onTap: () => _toggleMed(med),
                 );
               },

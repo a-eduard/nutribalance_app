@@ -6,7 +6,7 @@ class ThemeService {
   factory ThemeService() => _instance;
   ThemeService._internal();
 
-  final ValueNotifier<ThemeMode> themeModeNotifier = ValueNotifier(ThemeMode.system);
+  final ValueNotifier<ThemeMode> themeModeNotifier = ValueNotifier(ThemeMode.dark);
   static const String _prefsKey = 'app_theme_mode';
 
   Future<void> init() async {
@@ -15,10 +15,11 @@ class ThemeService {
     
     if (savedMode == 'light') {
       themeModeNotifier.value = ThemeMode.light;
-    } else if (savedMode == 'dark') {
-      themeModeNotifier.value = ThemeMode.dark;
-    } else {
+    } else if (savedMode == 'system') {
       themeModeNotifier.value = ThemeMode.system;
+    } else {
+      // По умолчанию — тёмная: фирменный вид приложения.
+      themeModeNotifier.value = ThemeMode.dark;
     }
   }
 

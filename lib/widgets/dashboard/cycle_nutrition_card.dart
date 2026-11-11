@@ -3,6 +3,7 @@
 // просит Еву составить меню с учётом фазы.
 
 import 'package:flutter/material.dart';
+import 'package:phosphor_flutter/phosphor_flutter.dart';
 
 import '../../screens/ai_chat_screen.dart';
 import '../../theme/eva_colors.dart';
@@ -52,7 +53,7 @@ class CyclePhaseNutrition {
           foods: ['Тыквенные семечки', 'Лосось', 'Брокколи', 'Морковь', 'Цитрусы'],
           tip: 'Больше овощей и воды — поддержим естественный подъём энергии и сияние кожи.',
           color: EvaColors.ovulation,
-          icon: Icons.auto_awesome_rounded,
+          icon: PhosphorIconsLight.sparkle,
         );
       case 'pms':
         return const CyclePhaseNutrition(
@@ -63,7 +64,7 @@ class CyclePhaseNutrition {
           foods: ['Банан', 'Орехи', 'Бурый рис', 'Тыква', 'Тёмный шоколад'],
           tip: 'Тяга к сладкому — это нормально. Сложные углеводы и магний помогут сохранить ровное настроение.',
           color: EvaColors.luteal,
-          icon: Icons.nightlight_round,
+          icon: PhosphorIconsLight.moon,
         );
       case 'follicular':
         return const CyclePhaseNutrition(
@@ -85,7 +86,7 @@ class CyclePhaseNutrition {
           foods: ['Зелёные овощи', 'Творог', 'Нежирное мясо', 'Бобовые', 'Цельнозерновой хлеб'],
           tip: 'Избегай сырой рыбы и непастеризованных сыров. Витамины и добавки — только по назначению врача.',
           color: EvaColors.pregnancy,
-          icon: Icons.favorite_rounded,
+          icon: PhosphorIconsLight.heart,
         );
       case 'menopause':
         return const CyclePhaseNutrition(
@@ -96,7 +97,7 @@ class CyclePhaseNutrition {
           foods: ['Творог', 'Рыба', 'Кунжут', 'Бобовые', 'Зелень'],
           tip: 'Кальций и белок поддерживают кости и мышцы; меньше кофеина и острого — реже приливы.',
           color: EvaColors.lavender,
-          icon: Icons.spa_rounded,
+          icon: PhosphorIconsLight.flowerLotus,
         );
       default:
         return const CyclePhaseNutrition(
@@ -105,7 +106,7 @@ class CyclePhaseNutrition {
           subtitle: 'Питание сегодня',
           focus: ['Белок', 'Клетчатка', 'Вода'],
           foods: ['Яйца', 'Гречка', 'Овощи', 'Фрукты', 'Кефир'],
-          tip: 'Отметь начало цикла в «Гармонии» — и я буду подсказывать питание под каждую фазу.',
+          tip: 'Отметь начало цикла в «Календаре» — и я буду подсказывать питание под каждую фазу.',
           color: EvaColors.sage,
           icon: Icons.restaurant_rounded,
         );
@@ -118,6 +119,29 @@ class CycleNutritionCard extends StatelessWidget {
   final String? phaseLabel;
 
   const CycleNutritionCard({super.key, required this.phaseType, this.phaseLabel});
+
+  /// «Меню на сегодня» из вкладки «Ева»: фазу Ева берёт из досье.
+  static void askEvaForMenu(BuildContext context, String phaseType) {
+    if (phaseType.isNotEmpty) {
+      CycleNutritionCard(phaseType: phaseType)._askEva(context, CyclePhaseNutrition.forPhase(phaseType));
+      return;
+    }
+    Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (_) => const AIChatScreen(
+          botType: 'dietitian',
+          initialDisplayMessage: 'Что мне лучше есть сегодня?',
+          initialTechnicalPrompt:
+              'Составь меню на сегодня (завтрак, обед, ужин и перекус) с учётом моей текущей фазы цикла из досье, '
+              'моей нормы КБЖУ и простых продуктов из обычного супермаркета. Коротко объясни, почему это полезно именно сейчас. '
+              'Это только идеи — не записывай еду в дневник и не добавляй JSON log_food. '
+              'В конце выведи общий список ингредиентов в [SHOPPING_LIST].',
+          initialMode: 'meal_plan',
+        ),
+      ),
+    );
+  }
 
   void _askEva(BuildContext context, CyclePhaseNutrition info) {
     final String phase = phaseLabel ?? info.subtitle;
@@ -187,7 +211,7 @@ class CycleNutritionCard extends StatelessWidget {
                   child: Row(
                     mainAxisSize: MainAxisSize.min,
                     children: [
-                      const Icon(Icons.auto_awesome_rounded, color: Colors.white, size: 16),
+                      const Icon(PhosphorIconsLight.sparkle, color: Colors.white, size: 16),
                       const SizedBox(width: 6),
                       Text('Меню от Евы', style: theme.textTheme.labelLarge?.copyWith(color: Colors.white)),
                     ],

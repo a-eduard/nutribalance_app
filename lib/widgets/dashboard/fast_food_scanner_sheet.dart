@@ -2,10 +2,12 @@ import 'dart:convert';
 import 'dart:typed_data';
 
 import 'package:flutter/material.dart';
+import 'package:phosphor_flutter/phosphor_flutter.dart';
 import 'package:image_picker/image_picker.dart';
 
 import '../../paywall_screen.dart';
 import '../../screens/ai_chat_screen.dart';
+import '../../screens/label_scanner_screen.dart';
 import '../../services/ai_service.dart';
 import '../../services/database_service.dart';
 import '../../theme/eva_colors.dart';
@@ -222,19 +224,41 @@ class _FastFoodScannerSheetState extends State<FastFoodScannerSheet> {
       mainAxisSize: MainAxisSize.min,
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        const EvaSheetHeader(title: 'Что на тарелке?', subtitle: 'Сфотографируй блюдо — Ева посчитает калории и БЖУ'),
+        const EvaSheetHeader(title: 'Что добавим?', subtitle: 'Фото блюда — посчитаю калории. Этикетка — разберу состав'),
         if (_errorMessage != null)
           Padding(
             padding: const EdgeInsets.only(bottom: 12),
             child: EvaStatusBanner(visible: true, text: _errorMessage!, icon: Icons.info_outline_rounded),
           ),
-        EvaOptionTile(title: 'Сфотографировать', subtitle: 'Лучше сверху и при дневном свете', icon: Icons.photo_camera_outlined, selected: false, onTap: () => _pickImage(ImageSource.camera)),
-        EvaOptionTile(title: 'Выбрать из галереи', icon: Icons.photo_library_outlined, selected: false, onTap: () => _pickImage(ImageSource.gallery)),
+        EvaOptionTile(title: 'Сфотографировать', subtitle: 'Лучше сверху и при дневном свете', icon: PhosphorIconsLight.camera, selected: false, radio: false, onTap: () => _pickImage(ImageSource.camera)),
+        EvaOptionTile(title: 'Выбрать из галереи', icon: PhosphorIconsLight.images, selected: false, radio: false, onTap: () => _pickImage(ImageSource.gallery)),
+        EvaOptionTile(
+          title: 'Этикетка в магазине',
+          subtitle: 'Разбор состава: брать или нет',
+          icon: PhosphorIconsLight.scan,
+          selected: false, radio: false,
+          onTap: () {
+            final nav = Navigator.of(context);
+            nav.pop();
+            nav.push(MaterialPageRoute(builder: (_) => const LabelScannerScreen()));
+          },
+        ),
+        EvaOptionTile(
+          title: 'Состав косметики',
+          subtitle: 'Подойдёт ли крем или шампунь',
+          icon: PhosphorIconsLight.flowerLotus,
+          selected: false, radio: false,
+          onTap: () {
+            final nav = Navigator.of(context);
+            nav.pop();
+            nav.push(MaterialPageRoute(builder: (_) => const LabelScannerScreen(initialKind: 'cosmetic')));
+          },
+        ),
         EvaOptionTile(
           title: 'Описать словами',
           subtitle: 'Например: «гречка 150 г и котлета»',
-          icon: Icons.edit_note_rounded,
-          selected: false,
+          icon: PhosphorIconsLight.pencilSimpleLine,
+          selected: false, radio: false,
           onTap: () {
             final nav = Navigator.of(context);
             nav.pop();
@@ -279,7 +303,7 @@ class _FastFoodScannerSheetState extends State<FastFoodScannerSheet> {
               Container(width: 7, height: 7, decoration: BoxDecoration(color: color, shape: BoxShape.circle)),
               const SizedBox(width: 6),
               Expanded(child: Text(label, style: theme.textTheme.labelMedium?.copyWith(color: theme.colorScheme.onSurfaceVariant))),
-              Icon(Icons.edit_outlined, size: 14, color: theme.colorScheme.onSurfaceVariant),
+              Icon(PhosphorIconsLight.pencilSimple, size: 14, color: theme.colorScheme.onSurfaceVariant),
             ]),
             const SizedBox(height: 4),
             Text('$value г', style: theme.textTheme.titleLarge),
@@ -327,7 +351,7 @@ class _FastFoodScannerSheetState extends State<FastFoodScannerSheet> {
                         const SizedBox(width: 6),
                         Text('ккал', style: theme.textTheme.titleSmall?.copyWith(color: theme.colorScheme.onSurfaceVariant)),
                         const SizedBox(width: 6),
-                        Icon(Icons.edit_outlined, size: 16, color: theme.colorScheme.onSurfaceVariant),
+                        Icon(PhosphorIconsLight.pencilSimple, size: 16, color: theme.colorScheme.onSurfaceVariant),
                       ],
                     ),
                   ),

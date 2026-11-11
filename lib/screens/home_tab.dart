@@ -4,6 +4,7 @@ import 'package:cached_network_image/cached_network_image.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
+import 'package:phosphor_flutter/phosphor_flutter.dart';
 import 'package:flutter/services.dart';
 import 'package:intl/intl.dart';
 
@@ -11,9 +12,12 @@ import '../services/analytics_service.dart';
 import '../services/calculation_service.dart';
 import '../services/cycle_calculator.dart';
 import '../services/database_service.dart';
+import '../services/home_widget_service.dart';
 import '../services/review_prompt_service.dart';
 import '../theme/eva_colors.dart';
-import '../widgets/dashboard/cycle_nutrition_card.dart';
+import '../widgets/dashboard/for_you_strip.dart';
+import 'health_screen.dart';
+import 'community_screen.dart';
 import '../widgets/dashboard/nutrition_card.dart';
 import '../widgets/eva_ui.dart';
 import 'ai_chat_screen.dart';
@@ -23,7 +27,6 @@ import 'harmony/widgets/harmony_mood_sheet.dart';
 import 'harmony/widgets/harmony_symptoms_sheet.dart';
 import 'meal_detail_screen.dart';
 import 'shopping_list_screen.dart';
-import 'weekly_insights_screen.dart';
 import '../widgets/cycle_icons.dart';
 
 class HomeTab extends StatefulWidget {
@@ -114,6 +117,14 @@ class _HomeTabState extends State<HomeTab> with AutomaticKeepAliveClientMixin, W
   // Трекер дня (симптомы, настроение и т.д.)
   // ---------------------------------------------------------------------------
 
+  /// После симптомов/настроения/лекарств возвращаемся в карточку дня, а не на главный.
+  void _reopenDay(Map<String, dynamic> userData) {
+    if (!mounted) return;
+    Future.delayed(const Duration(milliseconds: 250), () {
+      if (mounted) _openDailyTracker(userData);
+    });
+  }
+
   Future<void> _openDailyTracker(Map<String, dynamic> userData) async {
     final uid = _uid;
     if (uid == null) return;
@@ -152,8 +163,8 @@ class _HomeTabState extends State<HomeTab> with AutomaticKeepAliveClientMixin, W
       context: context,
       day: day,
       userData: userData,
-      onSymptomsTap: () => HarmonySymptomsSheet.show(context: context, selectedDay: day, currentSymptoms: currentSymptoms, onSave: (_) {}),
-      onMoodTap: () => HarmonyMoodSheet.show(context: context, selectedDay: day, currentMoods: currentMoods, onSave: (_) {}),
+      onSymptomsTap: () => HarmonySymptomsSheet.show(context: context, selectedDay: day, currentSymptoms: currentSymptoms, onSave: (_) {}).then((_) => _reopenDay(userData)),
+      onMoodTap: () => HarmonyMoodSheet.show(context: context, selectedDay: day, currentMoods: currentMoods, onSave: (_) {}).then((_) => _reopenDay(userData)),
       onTempTap: () => HarmonyBottomSheets.showTemperatureSheet(
         context: context,
         currentTemp: currentTemp,
@@ -169,6 +180,11 @@ class _HomeTabState extends State<HomeTab> with AutomaticKeepAliveClientMixin, W
           final theme = Theme.of(context);
           logRef.set({'weight': val, 'updatedAt': FieldValue.serverTimestamp()}, SetOptions(merge: true)).catchError((e) => debugPrint('$e'));
           FirebaseFirestore.instance.collection('users').doc(uid).set({'weight': val}, SetOptions(merge: true)).catchError((e) => debugPrint('$e'));
+          // История веса для графика «Мой прогресс» и отчёта врачу.
+          FirebaseFirestore.instance.collection('users').doc(uid).collection('weight_logs').doc(docId).set(
+            {'weight': val, 'date': docId, 'timestamp': FieldValue.serverTimestamp()},
+            SetOptions(merge: true),
+          ).catchError((e) => debugPrint('$e'));
 
           final int age = evaInt(userData['age']);
           final double height = evaDouble(userData['height']);
@@ -197,7 +213,7 @@ class _HomeTabState extends State<HomeTab> with AutomaticKeepAliveClientMixin, W
               .catchError((e) => debugPrint('$e'));
         },
       ),
-      onMedsTap: () => HarmonyMedsSheet.show(context: context, selectedDay: day, currentMeds: currentMeds, onSave: (_) {}),
+      onMedsTap: () => HarmonyMedsSheet.show(context: context, selectedDay: day, currentMeds: currentMeds, onSave: (_) {}).then((_) => _reopenDay(userData)),
     );
   }
 
@@ -257,7 +273,7 @@ class _HomeTabState extends State<HomeTab> with AutomaticKeepAliveClientMixin, W
         stream: _userStream,
         builder: (context, userSnapshot) {
           if (userSnapshot.hasError) {
-            return const EvaEmptyState(icon: Icons.cloud_off_rounded, title: 'Нет соединения', subtitle: 'Данные появятся, когда восстановится сеть.');
+            return const EvaEmptyState(icon: PhosphorIconsLight.cloudSlash, title: 'Нет соединения', subtitle: 'Данные появятся, когда восстановится сеть.');
           }
           final Map<String, dynamic> userData = userSnapshot.data?.data() ?? <String, dynamic>{};
           final String name = (userData['name']?.toString().trim().isNotEmpty ?? false) ? userData['name'].toString().trim() : 'красотка';
@@ -290,9 +306,9 @@ class _HomeTabState extends State<HomeTab> with AutomaticKeepAliveClientMixin, W
                           const SizedBox(height: 14),
                           _WaterCard(key: ValueKey('water_$_docId'), serverGlasses: evaInt(mealsData?['water_glasses'])),
                           const SizedBox(height: 14),
-                          CycleNutritionCard(phaseType: phase.phaseType, phaseLabel: phase.phaseType == 'pregnancy' ? 'беременность, срок ${phase.title}' : phase.title),
+                          ActivityCard(connected: userData['healthConnect'] == true),
                           const SizedBox(height: 14),
-                          _buildInsightsTeaser(theme),
+                          ForYouStrip(userData: userData, phaseType: phase.phaseType, phaseLabel: phase.phaseType == 'pregnancy' ? 'беременность, срок ${phase.title}' : phase.title),
                           const SizedBox(height: 28),
                           _buildDiaryHeader(theme, mealsData),
                           const SizedBox(height: 12),
@@ -346,7 +362,9 @@ class _HomeTabState extends State<HomeTab> with AutomaticKeepAliveClientMixin, W
                   ],
                 ),
               ),
-              StreamBuilder<DocumentSnapshot<Map<String, dynamic>>>(
+              _LabeledAction(label: 'Чаты', child: _InboxButton(uid: _uid)),
+              const SizedBox(width: 10),
+              _LabeledAction(label: 'Покупки', child: StreamBuilder<DocumentSnapshot<Map<String, dynamic>>>(
                 stream: _shoppingStream,
                 builder: (context, snap) {
                   final List<dynamic> cats = snap.data?.data()?['categories'] is List ? snap.data!.data()!['categories'] : const [];
@@ -355,7 +373,7 @@ class _HomeTabState extends State<HomeTab> with AutomaticKeepAliveClientMixin, W
                     clipBehavior: Clip.none,
                     children: [
                       EvaCircleButton(
-                        icon: Icons.shopping_bag_outlined,
+                        icon: PhosphorIconsLight.shoppingBag,
                         tooltip: 'Список покупок',
                         onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const ShoppingListScreen())),
                       ),
@@ -372,7 +390,7 @@ class _HomeTabState extends State<HomeTab> with AutomaticKeepAliveClientMixin, W
                     ],
                   );
                 },
-              ),
+              )),
             ],
           ),
           const SizedBox(height: 12),
@@ -431,7 +449,7 @@ class _HomeTabState extends State<HomeTab> with AutomaticKeepAliveClientMixin, W
         ),
         child: Row(
           children: [
-            EvaIconBubble(icon: Icons.child_friendly_rounded, color: stageColor, size: 56, iconSize: 28),
+            EvaIconBubble(icon: PhosphorIconsLight.baby, color: stageColor, size: 56, iconSize: 28),
             const SizedBox(width: 16),
             Expanded(
               child: Column(
@@ -462,6 +480,10 @@ class _HomeTabState extends State<HomeTab> with AutomaticKeepAliveClientMixin, W
     }
     final bool hasData = lastStartTs != null;
     final bool isDelay = phase.phaseType == 'delay';
+    final DateTime today = DateTime.now();
+    if (_selectedDate.year == today.year && _selectedDate.month == today.month && _selectedDate.day == today.day) {
+      HomeWidgetService.updateCycle(day: hasData ? currentDay : null, phase: phase.title);
+    }
 
     final Widget calendarButton = CycleActionButton(
       kind: CycleIconKind.calendar,
@@ -562,21 +584,21 @@ class _HomeTabState extends State<HomeTab> with AutomaticKeepAliveClientMixin, W
           if (isDelay) ...[
             EvaPrimaryButton(
               label: 'Месячные начались',
-              icon: Icons.water_drop_rounded,
+              icon: PhosphorIconsFill.drop,
               height: 46,
               onPressed: _markPeriodStartedToday,
             ),
             const SizedBox(height: 10),
             EvaSecondaryButton(
               label: 'Отметить день',
-              icon: Icons.edit_note_rounded,
+              icon: PhosphorIconsLight.pencilSimpleLine,
               height: 46,
               onPressed: () => _openDailyTracker(userData),
             ),
           ] else
             EvaPrimaryButton(
               label: 'Отметить день',
-              icon: Icons.edit_note_rounded,
+              icon: PhosphorIconsLight.pencilSimpleLine,
               height: 46,
               onPressed: () => _openDailyTracker(userData),
             ),
@@ -597,7 +619,7 @@ class _HomeTabState extends State<HomeTab> with AutomaticKeepAliveClientMixin, W
             width: 48,
             height: 48,
             decoration: BoxDecoration(color: Colors.white.withValues(alpha: 0.2), shape: BoxShape.circle),
-            child: const Icon(Icons.auto_awesome_rounded, color: Colors.white, size: 24),
+            child: const Icon(PhosphorIconsLight.sparkle, color: Colors.white, size: 24),
           ),
           const SizedBox(width: 14),
           Expanded(
@@ -606,41 +628,11 @@ class _HomeTabState extends State<HomeTab> with AutomaticKeepAliveClientMixin, W
               children: [
                 Text('Спроси Еву', style: theme.textTheme.titleLarge?.copyWith(color: Colors.white)),
                 const SizedBox(height: 2),
-                Text('Питание, самочувствие, анализы — 24/7', style: theme.textTheme.bodySmall?.copyWith(color: Colors.white.withValues(alpha: 0.9))),
+                Text('Питание, уход, анализы — 24/7', style: theme.textTheme.bodySmall?.copyWith(color: Colors.white.withValues(alpha: 0.9))),
               ],
             ),
           ),
           const Icon(Icons.arrow_forward_rounded, color: Colors.white),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildInsightsTeaser(ThemeData theme) {
-    return EvaCard(
-      onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const WeeklyInsightsScreen())),
-      padding: const EdgeInsets.all(18),
-      child: Row(
-        children: [
-          EvaIconBubble(icon: Icons.insights_rounded, color: context.eva.lavender, size: 46, iconSize: 22),
-          const SizedBox(width: 14),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Row(
-                  children: [
-                    Flexible(child: Text('Итоги недели от Евы', style: theme.textTheme.titleMedium)),
-                    const SizedBox(width: 8),
-                    EvaPill(text: 'Новое', color: context.eva.lavender),
-                  ],
-                ),
-                const SizedBox(height: 2),
-                Text('Разбор питания и самочувствия + 3 совета', style: theme.textTheme.bodySmall),
-              ],
-            ),
-          ),
-          Icon(Icons.chevron_right_rounded, color: theme.colorScheme.onSurfaceVariant),
         ],
       ),
     );
@@ -671,7 +663,7 @@ class _HomeTabState extends State<HomeTab> with AutomaticKeepAliveClientMixin, W
     if (items.isEmpty) {
       return EvaEmptyState(
         card: true,
-        icon: Icons.restaurant_rounded,
+        icon: PhosphorIconsLight.forkKnife,
         illustration: Image.asset('assets/images/empty_diary.png', width: 150, height: 150, fit: BoxFit.contain, cacheWidth: 450),
         title: 'Дневник пока пуст',
         subtitle: 'Нажми на камеру внизу, чтобы записать первый приём пищи',
@@ -696,7 +688,7 @@ class _HomeTabState extends State<HomeTab> with AutomaticKeepAliveClientMixin, W
               alignment: Alignment.centerRight,
               padding: const EdgeInsets.only(right: 24),
               decoration: BoxDecoration(color: theme.colorScheme.error.withValues(alpha: 0.12), borderRadius: BorderRadius.circular(EvaRadius.card)),
-              child: Icon(Icons.delete_outline_rounded, color: theme.colorScheme.error, size: 26),
+              child: Icon(PhosphorIconsLight.trash, color: theme.colorScheme.error, size: 26),
             ),
             confirmDismiss: (_) async {
               return await showDialog<bool>(
@@ -786,7 +778,7 @@ class _HomeTabState extends State<HomeTab> with AutomaticKeepAliveClientMixin, W
   Widget _mealPlaceholder(ThemeData theme) {
     return Container(
       color: theme.colorScheme.primary.withValues(alpha: 0.1),
-      child: Icon(Icons.restaurant_rounded, color: theme.colorScheme.primary, size: 26),
+      child: Icon(PhosphorIconsLight.forkKnife, color: theme.colorScheme.primary, size: 26),
     );
   }
 }
@@ -875,7 +867,7 @@ class _WaterCardState extends State<_WaterCard> {
                       borderRadius: BorderRadius.circular(12),
                     ),
                     child: Icon(
-                      filled ? Icons.water_drop_rounded : Icons.water_drop_outlined,
+                      filled ? PhosphorIconsFill.drop : PhosphorIconsLight.drop,
                       color: filled ? EvaColors.water : theme.colorScheme.onSurfaceVariant.withValues(alpha: 0.45),
                       size: 20,
                     ),
@@ -984,5 +976,90 @@ class CycleRingPainter extends CustomPainter {
         old.hasData != hasData ||
         old.baseColor != baseColor ||
         old.dotColor != dotColor;
+  }
+}
+
+/// Конверт с сообщениями от людей (партнёр, поддержка, специалист) + счётчик непрочитанных.
+/// Круглая кнопка в шапке с короткой подписью под ней — чтобы было понятно без догадок.
+class _LabeledAction extends StatelessWidget {
+  final String label;
+  final Widget child;
+  const _LabeledAction({required this.label, required this.child});
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        child,
+        const SizedBox(height: 4),
+        Text(label, style: TextStyle(fontFamily: EvaFonts.sans, fontSize: 11, fontWeight: FontWeight.w600, color: theme.colorScheme.onSurfaceVariant)),
+      ],
+    );
+  }
+}
+
+class _InboxButton extends StatefulWidget {
+  final String? uid;
+  const _InboxButton({required this.uid});
+
+  @override
+  State<_InboxButton> createState() => _InboxButtonState();
+}
+
+class _InboxButtonState extends State<_InboxButton> {
+  Stream<QuerySnapshot<Map<String, dynamic>>>? _stream;
+
+  @override
+  void initState() {
+    super.initState();
+    final uid = widget.uid;
+    if (uid != null) _stream = FirebaseFirestore.instance.collection('chats').where('users', arrayContains: uid).snapshots();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final uid = widget.uid;
+    return StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
+      stream: _stream,
+      builder: (context, snap) {
+        int unread = 0;
+        for (final d in snap.data?.docs ?? const <QueryDocumentSnapshot<Map<String, dynamic>>>[]) {
+          unread += evaInt(d.data()['unread_$uid']);
+        }
+        return Stack(
+          clipBehavior: Clip.none,
+          children: [
+            EvaCircleButton(
+              icon: PhosphorIconsLight.envelopeSimple,
+              tooltip: 'Сообщения',
+              onTap: () {
+                Analytics.event('inbox_open', {'unread': unread});
+                Navigator.push(context, MaterialPageRoute(builder: (_) => const CommunityScreen(pushed: true)));
+              },
+            ),
+            if (unread > 0)
+              Positioned(
+                right: -2,
+                top: -2,
+                child: Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1.5),
+                  constraints: const BoxConstraints(minWidth: 18),
+                  decoration: BoxDecoration(
+                    color: theme.colorScheme.primary,
+                    borderRadius: BorderRadius.circular(100),
+                    border: Border.all(color: theme.colorScheme.surface, width: 1.5),
+                  ),
+                  child: Text(unread > 99 ? '99+' : '$unread',
+                      textAlign: TextAlign.center,
+                      style: const TextStyle(fontFamily: EvaFonts.sans, color: Colors.white, fontSize: 10, fontWeight: FontWeight.w700)),
+                ),
+              ),
+          ],
+        );
+      },
+    );
   }
 }

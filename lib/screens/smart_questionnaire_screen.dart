@@ -2,6 +2,7 @@
 
 import 'package:flutter/material.dart';
 import '../theme/eva_colors.dart';
+import '../widgets/eva_ui.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 
@@ -23,6 +24,7 @@ class _SmartQuestionnaireScreenState extends State<SmartQuestionnaireScreen> {
   final List<Map<String, dynamic>> _questions = [
     {'id': 'Тип питания', 'q': 'Твой тип питания?', 'type': 'single', 'opts': ['Всеядная', 'Вегетарианка', 'Веган', 'Пескетарианка', 'Свой вариант']},
     {'id': 'Аллергии', 'q': 'Есть ли пищевая аллергия или непереносимость?', 'type': 'multi', 'opts': ['Нет', 'Лактоза', 'Глютен', 'Орехи', 'Морепродукты', 'Свой вариант']},
+    {'id': 'Цель с Евой', 'q': 'Чего тебе хочется в первую очередь?', 'type': 'multi', 'opts': ['Похудеть без стресса', 'Наладить питание', 'Понимать свой цикл', 'Улучшить кожу', 'Больше энергии', 'Свой вариант']},
     {'id': 'Режим питания', 'q': 'Сколько раз в день тебе комфортно есть?', 'type': 'single', 'opts': ['2-3 больших приема', '4-5 небольших порций', 'Ем, когда придется', 'Свой вариант']},
     {'id': 'Отношение к готовке', 'q': 'Готовка для тебя — это...?', 'type': 'single', 'opts': ['Обожаю кулинарию', 'Готовлю только простое и быстрое', 'Ненавижу готовить, ем вне дома', 'Свой вариант']},
     {'id': 'Вода', 'q': 'Твое отношение к воде?', 'type': 'single', 'opts': ['Пью свою норму легко', 'Постоянно забываю пить', 'Свой вариант']},
@@ -42,6 +44,11 @@ class _SmartQuestionnaireScreenState extends State<SmartQuestionnaireScreen> {
     {'id': 'Частота алкоголя', 'q': 'Как часто ты употребляешь алкоголь?', 'type': 'single', 'opts': ['Вообще не пью', 'Только по праздникам', '1-2 раза в неделю по выходным', 'Пару раз в неделю после работы', 'Свой вариант']},
     {'id': 'Вид алкоголя', 'q': 'Какой алкоголь предпочитаешь?', 'type': 'multi', 'opts': ['Сухое вино', 'Сладкое вино и шампанское', 'Коктейли', 'Пиво', 'Крепкий алкоголь', 'Свой вариант']},
     {'id': 'Нелюбимая еда', 'q': 'Какие продукты ты терпеть не можешь?', 'type': 'text', 'hint': 'Впиши через запятую или пропусти'},
+    {'id': 'Дни перед месячными', 'q': 'Как обычно проходят дни перед месячными?', 'type': 'multi', 'opts': ['Тянет на сладкое', 'Отёки', 'Раздражительность', 'Усталость', 'Высыпания', 'Почти не замечаю', 'Свой вариант']},
+    {'id': 'Тип кожи', 'q': 'Какой у тебя тип кожи?', 'type': 'single', 'opts': ['Сухая', 'Нормальная', 'Комбинированная', 'Жирная', 'Чувствительная', 'Не знаю']},
+    {'id': 'Кожа: что беспокоит', 'q': 'Что беспокоит в коже?', 'type': 'multi', 'opts': ['Высыпания', 'Сухость и шелушение', 'Жирный блеск', 'Покраснения', 'Пигментация', 'Первые морщинки', 'Ничего', 'Свой вариант']},
+    {'id': 'Уход: бюджет', 'q': 'Сколько готова тратить на одно средство ухода?', 'type': 'single', 'opts': ['До 500 ₽', '500–1500 ₽', '1500–3000 ₽', 'Больше 3000 ₽', 'Свой вариант']},
+    {'id': 'Уход: время', 'q': 'Сколько времени готова уделять уходу за кожей?', 'type': 'single', 'opts': ['2–3 минуты, только база', '5–10 минут', 'Люблю долгие ритуалы']},
     {'id': 'Здоровье', 'q': 'Хронические заболевания или травмы (для ИИ)?', 'type': 'text', 'hint': 'Напиши, если есть, например "болят колени"'},
   ];
 
@@ -170,6 +177,12 @@ class _SmartQuestionnaireScreenState extends State<SmartQuestionnaireScreen> {
           .doc(uid)
           .set({'questionnaire': finalAnswers}, SetOptions(mergeFields: ['questionnaire']))
           .catchError((e) => debugPrint('questionnaire: $e'));
+      // Тип кожи из анкеты — сразу в профиль: его видят косметолог, сканер и анализ кожи.
+      final dynamic skin = finalAnswers['Тип кожи'];
+      final String skinText = (skin is List ? (skin.isNotEmpty ? skin.first : '') : (skin ?? '')).toString().toLowerCase();
+      if (['сухая', 'нормальная', 'комбинированная', 'жирная', 'чувствительная'].contains(skinText)) {
+        FirebaseFirestore.instance.collection('users').doc(uid).set({'skinType': skinText}, SetOptions(merge: true)).catchError((e) => debugPrint('skinType: $e'));
+      }
 
       if (!mounted) return;
       msg.showSnackBar(const SnackBar(content: Text('Анкета сохранена! Ева стала умнее 🧠✨')));
@@ -206,6 +219,12 @@ class _SmartQuestionnaireScreenState extends State<SmartQuestionnaireScreen> {
         backgroundColor: theme.scaffoldBackgroundColor, 
         elevation: 0,
         iconTheme: IconThemeData(color: theme.colorScheme.onSurface),
+        leading: IconButton(icon: const Icon(Icons.arrow_back_ios_new_rounded, size: 20), onPressed: () => Navigator.maybePop(context)),
+        actions: [
+          // Анкета длинная: ответы сохраняются в любой момент, остальное можно дополнить позже.
+          TextButton(onPressed: _isLoading ? null : _saveAndExit, child: const Text('Готово')),
+          const SizedBox(width: 4),
+        ],
         title: ClipRRect(
           borderRadius: BorderRadius.circular(8),
           child: LinearProgressIndicator(
@@ -231,7 +250,7 @@ class _SmartQuestionnaireScreenState extends State<SmartQuestionnaireScreen> {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Text("Вопрос ${index + 1} из ${_questions.length}", style: TextStyle(color: theme.colorScheme.onSurfaceVariant, fontWeight: FontWeight.bold, fontSize: 14)),
+                Text("Вопрос ${index + 1} из ${_questions.length}", style: TextStyle(color: theme.colorScheme.onSurfaceVariant, fontWeight: FontWeight.w600, fontSize: 13, letterSpacing: 0.3)),
                 const SizedBox(height: 16),
                 Text(q['q'], style: TextStyle(color: theme.colorScheme.onSurface, fontSize: 28, fontFamily: EvaFonts.serif, fontWeight: FontWeight.w500, height: 1.2)),
                 const SizedBox(height: 32),
@@ -247,15 +266,10 @@ class _SmartQuestionnaireScreenState extends State<SmartQuestionnaireScreen> {
                   ),
                 ),
 
-                SizedBox(
-                  width: double.infinity, height: 56,
-                  child: ElevatedButton(
-                    style: ElevatedButton.styleFrom(backgroundColor: theme.colorScheme.primary, shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)), elevation: 0),
-                    onPressed: _isLoading ? null : _nextPage,
-                    child: _isLoading 
-                      ? SizedBox(width: 24, height: 24, child: CircularProgressIndicator(color: theme.colorScheme.onPrimary, strokeWidth: 2))
-                      : Text(index == _questions.length - 1 ? "СОХРАНИТЬ И ВЫЙТИ" : "ДАЛЕЕ", style: TextStyle(color: theme.colorScheme.onPrimary, fontWeight: FontWeight.w800, fontSize: 16, letterSpacing: 1.0)),
-                  ),
+                EvaPrimaryButton(
+                  label: index == _questions.length - 1 ? 'Сохранить' : 'Далее',
+                  loading: _isLoading,
+                  onPressed: _isLoading ? null : _nextPage,
                 ),
                 const SizedBox(height: 16),
               ],
@@ -277,6 +291,7 @@ class _SmartQuestionnaireScreenState extends State<SmartQuestionnaireScreen> {
         ChoiceChip(
           label: Text(option, style: TextStyle(color: isSelected ? theme.colorScheme.onPrimary : theme.colorScheme.onSurface, fontWeight: FontWeight.w600, fontSize: 15)),
           selected: isSelected,
+          showCheckmark: false,
           selectedColor: theme.colorScheme.primary,
           backgroundColor: theme.colorScheme.onSurfaceVariant.withValues(alpha: 0.1),
           padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),

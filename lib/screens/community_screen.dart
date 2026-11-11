@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';
+import 'package:phosphor_flutter/phosphor_flutter.dart';
 
 import '../services/chat_service.dart';
 import '../theme/eva_colors.dart';
@@ -11,7 +12,9 @@ import 'ai_chat_screen.dart';
 import 'p2p_chat_screen.dart';
 
 class CommunityScreen extends StatefulWidget {
-  const CommunityScreen({super.key});
+  /// Открыт поверх другого экрана (из конверта на «Сегодня») — показываем «назад».
+  final bool pushed;
+  const CommunityScreen({super.key, this.pushed = false});
 
   @override
   State<CommunityScreen> createState() => _CommunityScreenState();
@@ -93,9 +96,19 @@ class _CommunityScreenState extends State<CommunityScreen> with AutomaticKeepAli
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
+                      if (widget.pushed)
+                        Padding(
+                          padding: const EdgeInsets.only(bottom: 4),
+                          child: IconButton(
+                            padding: EdgeInsets.zero,
+                            alignment: Alignment.centerLeft,
+                            icon: const Icon(Icons.arrow_back_ios_new_rounded, size: 20),
+                            onPressed: () => Navigator.maybePop(context),
+                          ),
+                        ),
                       const EvaOverline('Общение'),
                       const SizedBox(height: 4),
-                      Text('Комьюнити', style: theme.textTheme.displaySmall),
+                      Text('Сообщения', style: theme.textTheme.displaySmall),
                       const SizedBox(height: 16),
                       TextField(
                         controller: _searchController,
@@ -216,7 +229,7 @@ class _CommunityScreenState extends State<CommunityScreen> with AutomaticKeepAli
         if (docs.isEmpty) {
           return const SliverToBoxAdapter(
             child: EvaEmptyState(
-              icon: Icons.chat_bubble_outline_rounded,
+              icon: PhosphorIconsLight.chatCircleDots,
               title: 'Пока нет диалогов',
               subtitle: 'Найдите подругу по никнейму или напишите Еве — она всегда на связи.',
             ),
@@ -291,7 +304,7 @@ class _EvaPinnedCard extends StatelessWidget {
             width: 52,
             height: 52,
             decoration: BoxDecoration(color: Colors.white.withValues(alpha: 0.2), shape: BoxShape.circle),
-            child: const Icon(Icons.auto_awesome_rounded, color: Colors.white, size: 26),
+            child: const Icon(PhosphorIconsLight.sparkle, color: Colors.white, size: 26),
           ),
           const SizedBox(width: 14),
           Expanded(

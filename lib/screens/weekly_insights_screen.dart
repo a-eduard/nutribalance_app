@@ -4,6 +4,7 @@
 
 import 'package:cloud_functions/cloud_functions.dart';
 import 'package:flutter/material.dart';
+import 'package:phosphor_flutter/phosphor_flutter.dart';
 import 'package:intl/intl.dart';
 
 import '../theme/eva_colors.dart';
@@ -104,7 +105,7 @@ class _WeeklyInsightsScreenState extends State<WeeklyInsightsScreen> {
                         _buildCaloriesChart(theme),
                         ..._buildLists(theme),
                         const SizedBox(height: 24),
-                        EvaPrimaryButton(label: 'Обсудить с Евой', icon: Icons.auto_awesome_rounded, onPressed: _discussWithEva),
+                        EvaPrimaryButton(label: 'Обсудить с Евой', icon: PhosphorIconsLight.sparkle, onPressed: _discussWithEva),
                       ],
                     ),
                   ),

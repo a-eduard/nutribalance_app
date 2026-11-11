@@ -1,6 +1,7 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
+import 'package:phosphor_flutter/phosphor_flutter.dart';
 import 'package:flutter/services.dart';
 
 import '../theme/eva_colors.dart';
@@ -8,7 +9,7 @@ import '../widgets/dashboard/fast_food_scanner_sheet.dart';
 import '../widgets/eva_ui.dart';
 import '../services/analytics_service.dart';
 import 'ai_chat_screen.dart';
-import 'community_screen.dart';
+import 'eva_hub_screen.dart';
 import 'harmony_screen.dart';
 import 'home_tab.dart';
 import 'profile_screen.dart';
@@ -28,10 +29,10 @@ class _DashboardScreenState extends State<DashboardScreen> {
   Stream<QuerySnapshot<Map<String, dynamic>>>? _unreadStream;
 
   static const _tabs = <_NavItem>[
-    _NavItem(Icons.home_outlined, Icons.home_rounded, 'Главная'),
-    _NavItem(Icons.spa_outlined, Icons.spa_rounded, 'Гармония'),
-    _NavItem(Icons.chat_bubble_outline_rounded, Icons.chat_bubble_rounded, 'Чаты'),
-    _NavItem(Icons.person_outline_rounded, Icons.person_rounded, 'Профиль'),
+    _NavItem(PhosphorIconsLight.houseSimple, PhosphorIconsFill.houseSimple, 'Сегодня'),
+    _NavItem(PhosphorIconsLight.calendarHeart, PhosphorIconsFill.calendarHeart, 'Календарь'),
+    _NavItem(PhosphorIconsLight.sparkle, PhosphorIconsFill.sparkle, 'Ева'),
+    _NavItem(PhosphorIconsLight.user, PhosphorIconsFill.user, 'Профиль'),
   ];
 
   @override
@@ -144,7 +145,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
       case 1:
         return const HarmonyScreen();
       case 2:
-        return const CommunityScreen();
+        return const EvaHubScreen();
       default:
         return const ProfileScreen();
     }
@@ -165,7 +166,8 @@ class _DashboardScreenState extends State<DashboardScreen> {
         onSelect: _select,
         onCenterTap: () => FastFoodScannerSheet.show(context),
         badgeFor: (index) {
-          if (index != 2 || uid == null || _unreadStream == null) return null;
+          // Непрочитанные сообщения людей — на «Сегодня» (там конверт с чатами).
+          if (index != 0 || uid == null || _unreadStream == null) return null;
           return StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
             stream: _unreadStream,
             builder: (context, snapshot) {

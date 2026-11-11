@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="eva_widget_label">Моя Ева: цикл и калории</string>
+    <string name="eva_widget_description">День цикла и сколько калорий осталось на сегодня</string>
+</resources>

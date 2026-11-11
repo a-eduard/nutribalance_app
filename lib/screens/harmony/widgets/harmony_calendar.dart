@@ -109,16 +109,7 @@ class _HarmonyCalendarState extends State<HarmonyCalendar> {
       border = Border.all(color: theme.colorScheme.onSurface.withValues(alpha: 0.75), width: 2);
     }
 
-    final String cheatStatus = CycleCalculator.getCheatStatus(targetDate: day, userData: widget.userData);
-    Widget contentWidget;
-
-    if (cheatStatus == 'cheat_day' && !isOutside) {
-      contentWidget = const Text('🎂', style: TextStyle(fontSize: 16));
-    } else if (cheatStatus == 'cheat_meal' && !isOutside) {
-      contentWidget = const Text('🧁', style: TextStyle(fontSize: 16));
-    } else {
-      contentWidget = Text(day.day.toString(), style: TextStyle(color: txtColor, fontWeight: FontWeight.bold, fontSize: 15));
-    }
+    final Widget contentWidget = Text(day.day.toString(), style: TextStyle(color: txtColor, fontWeight: FontWeight.bold, fontSize: 15));
 
     return Container(
       margin: const EdgeInsets.all(6.0),

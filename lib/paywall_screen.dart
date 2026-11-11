@@ -10,6 +10,7 @@ import 'services/subscription_service.dart';
 import 'theme/eva_colors.dart';
 import 'widgets/eva_ui.dart';
 import 'services/analytics_service.dart';
+import 'screens/invite_friend_screen.dart';
 
 class PaywallScreen extends StatefulWidget {
   final bool isFromProfile;
@@ -28,8 +29,8 @@ class _PaywallScreenState extends State<PaywallScreen> {
   String _selectedPlan = 'year';
   String? _appliedPromo;
 
-  static const double _basePriceMonth = 299;
-  static const double _basePriceYear = 1490;
+  static const double _basePriceMonth = 449;
+  static const double _basePriceYear = 2990;
 
   late final TextEditingController _promoController;
 
@@ -37,8 +38,35 @@ class _PaywallScreenState extends State<PaywallScreen> {
   void initState() {
     super.initState();
     _promoController = TextEditingController();
+    _loadTrials();
     Analytics.event('paywall_view', {'source': widget.source ?? (widget.isFromProfile ? 'profile' : 'other')});
   }
+
+  /// Пробный период берём из RuStore, а не пишем вслепую: если у продукта в консоли
+  /// нет пробного периода, честно показываем оплату сразу.
+  /// null — ещё не загрузили (или RuStore недоступен): показываем нейтральный текст.
+  Map<String, int>? _trialDays;
+
+  Future<void> _loadTrials() async {
+    try {
+      final res = await RustoreBillingClient.products(['eva_pro_month', 'eva_pro_year']);
+      final Map<String, int> out = {};
+      for (final p in res.products) {
+        if (p == null) continue;
+        final t = p.subscription?.freeTrialPeriod;
+        final int days = t == null ? 0 : t.days + t.months * 30 + t.years * 365;
+        out[p.productId] = days;
+        debugPrint('RuStore product ${p.productId}: status=${p.productStatus}, trialDays=$days, price=${p.priceLabel}');
+      }
+      if (mounted && out.isNotEmpty) setState(() => _trialDays = out);
+    } catch (e) {
+      debugPrint('RuStore products: $e');
+    }
+  }
+
+  int _trialFor(String plan) => _trialDays?[plan == 'month' ? 'eva_pro_month' : 'eva_pro_year'] ?? 0;
+
+  String _trialWord(int d) => d == 1 ? '1 день' : (d >= 2 && d <= 4 ? '$d дня' : '$d дней');
 
   @override
   void dispose() {
@@ -73,12 +101,17 @@ class _PaywallScreenState extends State<PaywallScreen> {
           .call({'code': cleanCode});
       if (!mounted) return;
       final data = res.data is Map ? res.data as Map : const {};
-      Analytics.event('promo_redeemed', {'code': cleanCode, 'type': (data['type'] ?? 'trial').toString()});
+      final bool referral = data['referral'] == true;
+      Analytics.event('promo_redeemed', {'code': referral ? 'REFERRAL' : cleanCode, 'type': (data['type'] ?? 'trial').toString()});
       if (data['type'] == 'discount') {
         setState(() => _appliedPromo = (data['code'] ?? 'SALE50').toString());
         EvaSnack.show(context, 'Промокод применён: скидка ${data['percent'] ?? 50}% ✨', type: EvaSnackType.success);
       } else {
-        EvaSnack.show(context, 'Промокод активирован! Premium на ${data['days'] ?? 3} дн. ✨', type: EvaSnackType.success);
+        EvaSnack.show(
+          context,
+          referral ? 'Код подруги принят! PRO на ${data['days'] ?? 7} дн. вам обеим 💗' : 'Промокод активирован! Premium на ${data['days'] ?? 3} дн. ✨',
+          type: EvaSnackType.success,
+        );
         _close();
       }
     } on FirebaseFunctionsException catch (e) {
@@ -86,6 +119,7 @@ class _PaywallScreenState extends State<PaywallScreen> {
       final String msg = switch (e.code) {
         'already-exists' => 'Вы уже использовали этот промокод',
         'not-found' => 'Неверный промокод',
+        'failed-precondition' => e.message ?? 'Этот код нельзя применить',
         'unauthenticated' => 'Войдите в аккаунт, чтобы применить промокод',
         _ => 'Не удалось проверить промокод. Попробуйте позже.',
       };
@@ -185,8 +219,8 @@ class _PaywallScreenState extends State<PaywallScreen> {
     try {
       final bool discount = _appliedPromo == 'SALE50';
       final String productId = _selectedPlan == 'month'
-          ? (discount ? 'eva_sub_1_month_promo' : 'eva_sub_1_month')
-          : (discount ? 'eva_sub_1_year_promo' : 'eva_sub_1_year');
+          ? (discount ? 'eva_pro_month_promo' : 'eva_pro_month')
+          : (discount ? 'eva_pro_year_promo' : 'eva_pro_year');
       await _buySubscription(productId);
     } catch (e) {
       debugPrint("🔥 ОШИБКА ИНИЦИАЛИЗАЦИИ ПЛАТЕЖА: $e");
@@ -254,18 +288,21 @@ class _PaywallScreenState extends State<PaywallScreen> {
                         style: theme.textTheme.bodyLarge?.copyWith(color: theme.colorScheme.onSurfaceVariant),
                       ),
                       const SizedBox(height: 24),
-                      _feature(theme, Icons.auto_awesome_rounded, 'Ева без ограничений', 'Чат, фото тарелки и рецепты — сколько угодно'),
+                      _feature(theme, Icons.auto_awesome_rounded, 'Ева без ограничений', 'Чат, калории по фото и рецепты каждый день'),
+                      _feature(theme, Icons.face_retouching_natural_rounded, 'Ева-косметолог', 'Уход за кожей по фазе цикла и разбор составов'),
+                      _feature(theme, Icons.graphic_eq_rounded, 'Голос Евы', 'Ева читает ответы вслух — тёплым живым голосом'),
+                      _feature(theme, Icons.qr_code_scanner_rounded, 'Сканер состава', 'Продукты и косметика: брать или нет'),
+                      _feature(theme, Icons.local_florist_rounded, 'Курс «30 дней с Евой»', 'Привычки без диет — урок на 3 минуты в день'),
                       _feature(theme, Icons.description_outlined, 'Расшифровка анализов', 'PDF с результатами — простым языком'),
-                      _feature(theme, Icons.spa_outlined, 'Питание по фазе цикла', 'Меню, которое подстраивается под тебя'),
                       _feature(theme, Icons.insights_rounded, 'Итоги недели', 'Разбор привычек и персональные советы'),
                       const SizedBox(height: 22),
                       IntrinsicHeight(
                         child: Row(
                           crossAxisAlignment: CrossAxisAlignment.stretch,
                           children: [
-                            Expanded(child: _planCard(theme, 'month', '1 месяц', _basePriceMonth, 590)),
+                            Expanded(child: _planCard(theme, 'month', '1 месяц', _basePriceMonth, 0)),
                             const SizedBox(width: 12),
-                            Expanded(child: _planCard(theme, 'year', '1 год', _basePriceYear, 3588, badge: 'Выгода 58%', note: '≈ 124 ₽ в месяц')),
+                            Expanded(child: _planCard(theme, 'year', '1 год', _basePriceYear, 5388, badge: 'Выгода 45%', note: '≈ 249 ₽ в месяц')),
                           ],
                         ),
                       ),
@@ -283,13 +320,17 @@ class _PaywallScreenState extends State<PaywallScreen> {
                     mainAxisSize: MainAxisSize.min,
                     children: [
                       EvaPrimaryButton(
-                        label: discount ? 'Оплатить со скидкой' : 'Начать 3 дня бесплатно',
+                        label: discount
+                            ? 'Оплатить со скидкой'
+                            : (_trialFor(_selectedPlan) > 0 ? 'Попробовать ${_trialWord(_trialFor(_selectedPlan))} бесплатно' : 'Оформить подписку'),
                         loading: _isLoading,
                         onPressed: _processPayment,
                       ),
                       const SizedBox(height: 8),
                       Text(
-                        '3 дня бесплатно, затем $price ₽ / ${_selectedPlan == 'month' ? 'месяц' : 'год'}. Отмена в любой момент в RuStore.',
+                        (!discount && _trialFor(_selectedPlan) > 0)
+                            ? '${_trialWord(_trialFor(_selectedPlan))} бесплатно, затем $price ₽ / ${_selectedPlan == 'month' ? 'месяц' : 'год'}. Отмена в любой момент в RuStore.'
+                            : '$price ₽ / ${_selectedPlan == 'month' ? 'месяц' : 'год'}, продление автоматически. Отмена в любой момент в RuStore.',
                         textAlign: TextAlign.center,
                         style: theme.textTheme.bodySmall,
                       ),
@@ -299,6 +340,10 @@ class _PaywallScreenState extends State<PaywallScreen> {
                         children: [
                           TextButton(onPressed: _isLoading ? null : _showPromoDialog, child: Text(_appliedPromo != null ? 'Промокод $_appliedPromo ✓' : 'Промокод')),
                           TextButton(onPressed: _isLoading ? null : _restorePurchases, child: const Text('Восстановить покупки')),
+                          TextButton(
+                            onPressed: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const InviteFriendScreen())),
+                            child: const Text('Неделя PRO за подругу 💗'),
+                          ),
                           TextButton(
                             onPressed: () => launchUrl(
                               Uri.parse('https://docs.google.com/document/d/1GpHL1IbLlklUrKQ2jShjlNIrXd2V4V1H/edit?usp=sharing'),
@@ -371,10 +416,14 @@ class _PaywallScreenState extends State<PaywallScreen> {
                 const SizedBox(height: 32),
               Text(title, style: theme.textTheme.titleMedium?.copyWith(color: selected ? theme.colorScheme.primary : theme.colorScheme.onSurface)),
               const SizedBox(height: 6),
-              Text(
-                '${oldPrice.toInt()} ₽',
-                style: theme.textTheme.bodySmall?.copyWith(decoration: TextDecoration.lineThrough),
-              ),
+              // Зачёркнутая цена — только честная: годовая в сравнении с 12 месяцами помесячно.
+              if (oldPrice > basePrice)
+                Text(
+                  '${oldPrice.toInt()} ₽',
+                  style: theme.textTheme.bodySmall?.copyWith(decoration: TextDecoration.lineThrough),
+                )
+              else
+                const SizedBox(height: 18),
               Text('$finalPrice ₽', style: theme.textTheme.headlineLarge),
               if (note != null) ...[
                 const SizedBox(height: 6),

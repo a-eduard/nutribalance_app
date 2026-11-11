@@ -7,6 +7,7 @@ import 'package:file_picker/file_picker.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:firebase_storage/firebase_storage.dart';
 import 'package:flutter/material.dart';
+import 'package:phosphor_flutter/phosphor_flutter.dart';
 import 'package:flutter/services.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:intl/intl.dart';
@@ -23,6 +24,8 @@ import '../widgets/image_viewer.dart';
 import 'shopping_list_screen.dart';
 import '../services/analytics_service.dart';
 import '../services/review_prompt_service.dart';
+import '../services/eva_voice_service.dart';
+import '../widgets/voice_recorder_sheet.dart';
 
 class AIChatScreen extends StatefulWidget {
   final String botType;
@@ -106,6 +109,7 @@ class _AIChatScreenState extends State<AIChatScreen> {
 
   @override
   void dispose() {
+    EvaVoiceService.instance.stopPlayback();
     _controller.dispose();
     _scrollController.dispose();
     if (PushNotificationService.currentActiveChatId == widget.botType) {
@@ -149,15 +153,7 @@ class _AIChatScreenState extends State<AIChatScreen> {
           if (again.docs.isEmpty) DatabaseService().saveBotChatMessage(widget.botType, _defaultWelcome, 'ai');
         });
       } else if (historyCheck.docs.isEmpty) {
-        const String welcome = '''Привет! 🥰 Я Ева — твой личный ИИ-нутрициолог и заботливая подруга ✨
-
-Вот что я умею:
-- **Фото тарелки** — посчитаю калории и БЖУ.
-- **Результаты анализов (PDF)** — объясню простым языком, без паники.
-- **Любой вопрос** — поддержу, когда тревожно или нужен совет.
-
-С чего начнём? 😉''';
-        DatabaseService().saveBotChatMessage(widget.botType, welcome, 'ai');
+        DatabaseService().saveBotChatMessage(widget.botType, _isCosmetologist ? _cosmetologistWelcome : (_isAnalyses ? _analysesWelcome : _defaultWelcome), 'ai');
       }
     } catch (e) {
       debugPrint("Ошибка инициализации чата: $e");
@@ -226,33 +222,59 @@ class _AIChatScreenState extends State<AIChatScreen> {
   void _showAttachmentOptions() {
     EvaSheet.show<void>(
       context,
-      builder: (ctx) => Padding(
+      builder: (ctx) {
+        final Widget pdfTile = EvaOptionTile(title: 'Анализы (PDF)', subtitle: 'Расшифрую простым языком', icon: PhosphorIconsLight.filePdf, selected: false, radio: false, onTap: () {
+          Navigator.pop(ctx);
+          Future.delayed(const Duration(milliseconds: 250), _pickPdf);
+        });
+        return Padding(
         padding: const EdgeInsets.fromLTRB(20, 0, 20, 20),
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            const EvaSheetHeader(title: 'Что отправим Еве?', subtitle: 'Фото блюда, этикетки или результаты анализов'),
-            EvaOptionTile(title: 'Сделать фото', icon: Icons.photo_camera_outlined, selected: false, onTap: () {
+            EvaSheetHeader(title: 'Что отправим Еве?', subtitle: _isCosmetologist ? 'Фото средства, состава или кожи' : (_isAnalyses ? 'PDF или фото бланка анализов' : 'Фото блюда, этикетки или результаты анализов')),
+            // В чате анализов PDF — главный сценарий, ставим первым.
+            if (_isAnalyses) pdfTile,
+            EvaOptionTile(title: 'Сделать фото', subtitle: _isAnalyses ? 'Сфотографируй бланк целиком, без бликов' : null, icon: PhosphorIconsLight.camera, selected: false, radio: false, onTap: () {
               Navigator.pop(ctx);
               Future.delayed(const Duration(milliseconds: 250), _takePhoto);
             }),
-            EvaOptionTile(title: 'Выбрать из галереи', subtitle: 'До $_maxImages фото', icon: Icons.photo_library_outlined, selected: false, onTap: () {
+            EvaOptionTile(title: 'Выбрать из галереи', subtitle: 'До $_maxImages фото', icon: PhosphorIconsLight.images, selected: false, radio: false, onTap: () {
               Navigator.pop(ctx);
               Future.delayed(const Duration(milliseconds: 250), _pickImages);
             }),
-            EvaOptionTile(title: 'Анализы (PDF)', subtitle: 'Расшифрую простым языком', icon: Icons.picture_as_pdf_outlined, selected: false, onTap: () {
-              Navigator.pop(ctx);
-              Future.delayed(const Duration(milliseconds: 250), _pickPdf);
-            }),
+            if (!_isAnalyses && !_isCosmetologist) pdfTile,
           ],
         ),
-      ),
+      );
+      },
     );
   }
 
   // ---------------------------------------------------------------------------
   // Отправка
   // ---------------------------------------------------------------------------
+
+  bool get _isCosmetologist => widget.botType == 'cosmetologist';
+  bool get _isAnalyses => widget.botType == 'analyses';
+
+  static const String _analysesWelcome = '''Привет! 🧪 Здесь мы разбираем твои анализы.
+
+Как это работает:
+- **Пришли PDF или фото бланка** — нажми ➕ внизу.
+- Я объясню каждый показатель простым языком и подскажу, что можно поправить питанием.
+- Сравню с прошлыми анализами, если присылала раньше.
+
+Диагноз ставит врач — я помогу понять цифры и подготовиться к приёму 💗''';
+
+  static const String _cosmetologistWelcome = '''Привет! 💆‍♀️ Я Ева-косметолог — помогу с уходом за кожей и волосами ✨
+
+Вот что я умею:
+- **Фото состава средства** — разберу, что в нём полезно и на что обратить внимание.
+- **Уход по фазе цикла** — подскажу, когда кожа капризничает и как ей помочь.
+- **Подбор ухода** — утро, вечер, SPF, без лишних трат.
+
+С чего начнём? Пришли фото средства, сделай анализ кожи по селфи во вкладке «Ева» или просто задай вопрос 😊''';
 
   static const String _defaultWelcome = '''Привет! 🥰 Я Ева — твой личный ИИ-нутрициолог и заботливая подруга ✨
 
@@ -534,6 +556,50 @@ class _AIChatScreenState extends State<AIChatScreen> {
   // Действия с сообщением
   // ---------------------------------------------------------------------------
 
+  Future<void> _recordVoice() async {
+    FocusScope.of(context).unfocus();
+    final String? text = await VoiceRecorderSheet.show(context);
+    if (text == null || text.trim().isEmpty || !mounted) return;
+    _triggerSendMessage('🎤 $text');
+  }
+
+  Future<void> _speak(String docId, String text) async {
+    try {
+      Analytics.event('eva_speak', {'bot': widget.botType});
+      await EvaVoiceService.instance.toggleSpeak(docId, text);
+    } on EvaVoiceException catch (e) {
+      if (!mounted) return;
+      if (e.needsPro) {
+        Analytics.event('eva_speak_paywall');
+        Navigator.push(context, MaterialPageRoute(builder: (_) => const PaywallScreen(isFromProfile: true, source: 'voice')));
+      } else {
+        EvaSnack.show(context, e.message, type: EvaSnackType.error);
+      }
+    } catch (_) {
+      if (mounted) EvaSnack.show(context, 'Не получилось озвучить', type: EvaSnackType.error);
+    }
+  }
+
+  Widget _listenButton(ThemeData theme, String docId, String text) {
+    return ValueListenableBuilder<String?>(
+      valueListenable: EvaVoiceService.instance.playingId,
+      builder: (context, playing, _) {
+        final bool active = playing == docId;
+        return ValueListenableBuilder<bool>(
+          valueListenable: EvaVoiceService.instance.loading,
+          builder: (context, loading, _) => TextButton.icon(
+            style: TextButton.styleFrom(visualDensity: VisualDensity.compact, padding: const EdgeInsets.symmetric(horizontal: 8)),
+            onPressed: () => _speak(docId, text),
+            icon: active && loading
+                ? const SizedBox(width: 14, height: 14, child: CircularProgressIndicator(strokeWidth: 2))
+                : Icon(active ? Icons.stop_circle_outlined : Icons.volume_up_rounded, size: 18),
+            label: Text(active ? (loading ? 'Ева готовит голос…' : 'Стоп') : 'Послушать', style: theme.textTheme.labelMedium),
+          ),
+        );
+      },
+    );
+  }
+
   void _showMessageActions(String docId, String text, String? firstImage) {
     EvaSheet.show<void>(
       context,
@@ -555,7 +621,7 @@ class _AIChatScreenState extends State<AIChatScreen> {
                 },
               ),
             EvaMenuTile(
-              icon: Icons.delete_outline_rounded,
+              icon: PhosphorIconsLight.trash,
               title: 'Удалить сообщение',
               destructive: true,
               trailing: const SizedBox.shrink(),
@@ -590,11 +656,11 @@ class _AIChatScreenState extends State<AIChatScreen> {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Text('Ева', style: theme.textTheme.titleLarge),
+                  Text(_isCosmetologist ? 'Ева · уход' : (_isAnalyses ? 'Ева · анализы' : 'Ева · питание'), style: theme.textTheme.titleLarge),
                   AnimatedSwitcher(
                     duration: const Duration(milliseconds: 250),
                     child: Text(
-                      (_isTyping || _waitingGreeting) ? 'печатает…' : 'ИИ-нутрициолог · на связи',
+                      (_isTyping || _waitingGreeting) ? 'печатает…' : (_isCosmetologist ? 'ИИ-косметолог · на связи' : (_isAnalyses ? 'Расшифровка анализов · на связи' : 'ИИ-нутрициолог · на связи')),
                       key: ValueKey(_isTyping || _waitingGreeting),
                       style: theme.textTheme.bodySmall?.copyWith(
                           color: (_isTyping || _waitingGreeting) ? theme.colorScheme.primary : theme.colorScheme.onSurfaceVariant),
@@ -606,9 +672,9 @@ class _AIChatScreenState extends State<AIChatScreen> {
           ],
         ),
         actions: [
-          IconButton(
+          if (!_isCosmetologist && !_isAnalyses) IconButton(
             tooltip: 'Список покупок',
-            icon: const Icon(Icons.shopping_bag_outlined),
+            icon: const Icon(PhosphorIconsLight.shoppingBag),
             onPressed: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const ShoppingListScreen())),
           ),
           const SizedBox(width: 4),
@@ -634,7 +700,12 @@ class _AIChatScreenState extends State<AIChatScreen> {
 
                   final docs = snapshot.data!.docs;
                   final bool greetingTyping = _waitingGreeting && docs.isEmpty;
-                  if (_waitingGreeting && docs.isNotEmpty) _waitingGreeting = false;
+                  if (_waitingGreeting && docs.isNotEmpty) {
+                    // Приветствие пришло — шапка тоже должна перестать писать «печатает…».
+                    WidgetsBinding.instance.addPostFrameCallback((_) {
+                      if (mounted && _waitingGreeting) setState(() => _waitingGreeting = false);
+                    });
+                  }
                   final bool typing = _isTyping || greetingTyping;
                   // Кнопки-ответы, которые прислала Ева (первое сообщение, напоминание).
                   List<String> quickReplies = const [];
@@ -688,6 +759,7 @@ class _AIChatScreenState extends State<AIChatScreen> {
               busy: _isTyping,
               hint: 'Спроси Еву…',
               allowEmptySend: _selectedImages.isNotEmpty || _selectedPdf != null,
+              onVoice: _recordVoice,
               top: _buildAttachmentPreview(theme),
             ),
           ],
@@ -791,6 +863,8 @@ class _AIChatScreenState extends State<AIChatScreen> {
               ],
             ),
           ),
+        if (!isUser && !isError && parsed.displayText.trim().length > 20)
+          Padding(padding: const EdgeInsets.only(left: 4), child: _listenButton(theme, doc.id, parsed.displayText)),
         if (parsed.shoppingListData != null)
           Padding(
             padding: EdgeInsets.zero,
@@ -846,9 +920,23 @@ class _AIChatScreenState extends State<AIChatScreen> {
     final suggestions = fromEva
         ? <(String?, String, String)>[
             for (final q in quickReplies) (null, q, q),
-            ('📸', 'Посчитать еду по фото', ''),
+            _isCosmetologist ? ('📸', 'Разобрать состав по фото', '') : (_isAnalyses ? ('📎', 'Загрузить анализы', '') : ('📸', 'Посчитать еду по фото', '')),
           ]
-        : <(String?, String, String)>[
+        : _isAnalyses
+            ? <(String?, String, String)>[
+                ('📎', 'Загрузить PDF или фото анализов', ''),
+                ('🩸', 'Какие анализы сдать раз в год?', 'Какие анализы женщине полезно сдавать раз в год и как к ним подготовиться?'),
+                ('🧾', 'Как подготовиться к сдаче крови?', 'Как правильно подготовиться к сдаче крови натощак?'),
+              ]
+            : _isCosmetologist
+            ? <(String?, String, String)>[
+                ('🧴', 'Разобрать мою полку', 'Разбери мою полку косметики: собери уход утром и вечером из того, что у меня есть, скажи, что дублируется, что не подходит моей коже и чего не хватает. Если полка пустая — подскажи, как её собрать в приложении.'),
+                ('🌙', 'Подобрать уход утром и вечером', 'Подбери мне простой уход утром и вечером под мой тип кожи'),
+                ('🌸', 'Уход в мою фазу цикла', 'Как ухаживать за кожей в мою текущую фазу цикла?'),
+                ('✨', 'Почему высыпания перед месячными?', 'Почему перед месячными появляются высыпания и что с этим делать?'),
+                ('📸', 'Разобрать состав по фото', ''),
+              ]
+            : <(String?, String, String)>[
             ('🥗', 'Что приготовить на ужин?', 'Предложи лёгкий и сытный ужин на сегодня с учётом моей нормы'),
             ('🌸', 'Питание в мою фазу цикла', 'Что мне лучше есть в текущей фазе цикла и почему?'),
             ('😴', 'Как улучшить сон?', 'Какие продукты и привычки помогут мне лучше спать?'),
@@ -998,7 +1086,7 @@ class _EvaAvatar extends StatelessWidget {
       width: size,
       height: size,
       decoration: BoxDecoration(gradient: context.eva.hero, shape: BoxShape.circle),
-      child: Icon(Icons.auto_awesome_rounded, color: Colors.white, size: size * 0.5),
+      child: Icon(PhosphorIconsLight.sparkle, color: Colors.white, size: size * 0.5),
     );
   }
 }
@@ -1033,7 +1121,7 @@ class _RecipeShoppingCardWidgetState extends State<RecipeShoppingCardWidget> {
           children: [
             Row(
               children: [
-                EvaIconBubble(icon: Icons.shopping_bag_outlined, color: context.eva.gold, size: 38, iconSize: 19),
+                EvaIconBubble(icon: PhosphorIconsLight.shoppingBag, color: context.eva.gold, size: 38, iconSize: 19),
                 const SizedBox(width: 12),
                 Expanded(child: Text('Ингредиенты для рецепта', style: theme.textTheme.titleMedium)),
               ],

@@ -1,4 +1,5 @@
 import 'dart:convert';
+import 'package:phosphor_flutter/phosphor_flutter.dart';
 import 'package:flutter/material.dart';
 import '../theme/eva_colors.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
@@ -301,7 +302,7 @@ class _MealDetailScreenState extends State<MealDetailScreen> {
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
               Text(value, style: TextStyle(color: theme.colorScheme.onSurface, fontSize: 18, fontWeight: FontWeight.w900)),
-              if (isEditable) Icon(Icons.edit, color: theme.colorScheme.onSurface, size: 16),
+              if (isEditable) Icon(PhosphorIconsLight.pencilSimple, color: theme.colorScheme.onSurface, size: 16),
             ],
           ),
         ],

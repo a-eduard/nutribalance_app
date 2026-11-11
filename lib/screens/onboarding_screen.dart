@@ -1,6 +1,7 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
+import 'package:phosphor_flutter/phosphor_flutter.dart';
 import 'package:flutter/services.dart';
 import 'package:intl/intl.dart';
 
@@ -9,6 +10,7 @@ import '../theme/eva_colors.dart';
 import '../widgets/eva_ui.dart';
 import '../services/analytics_service.dart';
 import 'ai_chat_screen.dart';
+import 'partner/partner_join_screen.dart';
 
 class OnboardingScreen extends StatefulWidget {
   const OnboardingScreen({super.key});
@@ -33,16 +35,16 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
   DateTime? _lastPeriodDate;
 
   static const List<(String, String, IconData)> _goals = [
-    ('Похудеть', 'Мягкий дефицит без жёстких диет', Icons.trending_down_rounded),
-    ('Поддержание веса', 'Баланс и хорошее самочувствие', Icons.balance_rounded),
-    ('Набрать вес', 'Энергия и сила', Icons.trending_up_rounded),
-    ('Здоровая беременность', 'Бережное питание для двоих', Icons.child_friendly_rounded),
+    ('Похудеть', 'Мягкий дефицит без жёстких диет', PhosphorIconsLight.trendDown),
+    ('Поддержание веса', 'Баланс и хорошее самочувствие', PhosphorIconsLight.scales),
+    ('Набрать вес', 'Энергия и сила', PhosphorIconsLight.trendUp),
+    ('Здоровая беременность', 'Бережное питание для двоих', PhosphorIconsLight.baby),
   ];
   static const List<(String, String, IconData)> _activities = [
-    ('Низкая (сидячий образ)', 'Офис, мало движения', Icons.chair_outlined),
-    ('Умеренная (1-2 тренировки)', 'Прогулки и 1–2 тренировки в неделю', Icons.directions_walk_rounded),
-    ('Высокая (3-5 тренировок)', 'Регулярный спорт', Icons.fitness_center_rounded),
-    ('Очень высокая (каждый день)', 'Ежедневные нагрузки', Icons.bolt_rounded),
+    ('Низкая (сидячий образ)', 'Офис, мало движения', PhosphorIconsLight.couch),
+    ('Умеренная (1-2 тренировки)', 'Прогулки и 1–2 тренировки в неделю', PhosphorIconsLight.personSimpleWalk),
+    ('Высокая (3-5 тренировок)', 'Регулярный спорт', PhosphorIconsLight.barbell),
+    ('Очень высокая (каждый день)', 'Ежедневные нагрузки', PhosphorIconsLight.lightning),
   ];
 
   static const int _steps = 4;
@@ -164,6 +166,13 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
       // После анкеты главный экран сразу откроет чат: Ева напишет первой.
       AIChatScreen.pendingGreeting = true;
       // Флаг завершения онбординга пишем последним — HomeWrapper сам откроет главный экран.
+      // Первая точка графика веса: стартовый вес из анкеты.
+      final DateTime n = DateTime.now();
+      final String dayId = "${n.year}-${n.month.toString().padLeft(2, '0')}-${n.day.toString().padLeft(2, '0')}";
+      FirebaseFirestore.instance.collection('users').doc(uid).collection('weight_logs').doc(dayId).set(
+        {'weight': weight, 'date': dayId, 'timestamp': FieldValue.serverTimestamp()},
+        SetOptions(merge: true),
+      ).catchError((e) => debugPrint('onboarding weight: $e'));
       FirebaseFirestore.instance.collection('users').doc(uid).set(userData, SetOptions(merge: true)).catchError((e) => debugPrint('onboarding save: $e'));
       Analytics.event('onboarding_complete', {'goal': _selectedGoal, 'app_mode': _isPregnancy ? 'pregnancy' : 'standard'});
     } catch (e) {
@@ -174,10 +183,89 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
     }
   }
 
+  /// Первый экран: для себя или партнёр (у партнёра своя короткая регистрация).
+  bool _roleChosen = false;
+
+  Widget _roleCard(ThemeData theme, {required String emoji, required String title, required String subtitle, required VoidCallback onTap, bool primary = false}) {
+    return Material(
+      color: primary ? theme.colorScheme.primary.withValues(alpha: 0.10) : theme.colorScheme.surface,
+      borderRadius: BorderRadius.circular(24),
+      child: InkWell(
+        borderRadius: BorderRadius.circular(24),
+        onTap: onTap,
+        child: Container(
+          padding: const EdgeInsets.all(20),
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(24),
+            border: Border.all(color: theme.colorScheme.primary.withValues(alpha: primary ? 0.55 : 0.25), width: 1.5),
+          ),
+          child: Row(
+            children: [
+              Text(emoji, style: const TextStyle(fontSize: 34)),
+              const SizedBox(width: 16),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(title, style: theme.textTheme.titleLarge),
+                    const SizedBox(height: 4),
+                    Text(subtitle, style: theme.textTheme.bodyMedium?.copyWith(color: theme.colorScheme.onSurfaceVariant)),
+                  ],
+                ),
+              ),
+              Icon(Icons.chevron_right_rounded, color: theme.colorScheme.primary),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildRoleChoice(ThemeData theme) {
+    return Scaffold(
+      body: EvaBackground(
+        child: SafeArea(
+          child: ListView(
+            padding: const EdgeInsets.fromLTRB(24, 48, 24, 24),
+            children: [
+              Text('Добро пожаловать', style: theme.textTheme.displaySmall),
+              const SizedBox(height: 8),
+              Text('Кто будет пользоваться приложением?', style: theme.textTheme.bodyLarge?.copyWith(color: theme.colorScheme.onSurfaceVariant)),
+              const SizedBox(height: 28),
+              _roleCard(
+                theme,
+                emoji: '🌸',
+                title: 'Я — для себя',
+                subtitle: 'Цикл, питание, уход за кожей и Ева — 24/7',
+                primary: true,
+                onTap: () {
+                  Analytics.event('onboarding_role', {'role': 'self'});
+                  setState(() => _roleChosen = true);
+                },
+              ),
+              const SizedBox(height: 14),
+              _roleCard(
+                theme,
+                emoji: '💙',
+                title: 'Я — партнёр',
+                subtitle: 'У меня есть код от неё. Буду знать её фазу и как поддержать',
+                onTap: () {
+                  Analytics.event('onboarding_role', {'role': 'partner'});
+                  Navigator.push(context, MaterialPageRoute(builder: (_) => const PartnerJoinScreen()));
+                },
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final palette = context.eva;
+    if (!_roleChosen) return _buildRoleChoice(theme);
 
     return Scaffold(
       body: EvaBackground(
@@ -190,9 +278,9 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
                   children: [
                     AnimatedOpacity(
                       duration: const Duration(milliseconds: 200),
-                      opacity: _currentIndex == 0 ? 0 : 1,
+                      opacity: 1,
                       child: IconButton(
-                        onPressed: _currentIndex == 0 ? null : _back,
+                        onPressed: _currentIndex == 0 ? () => setState(() => _roleChosen = false) : _back,
                         icon: const Icon(Icons.arrow_back_ios_new_rounded, size: 20),
                       ),
                     ),
@@ -255,12 +343,12 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
     return ListView(
       padding: const EdgeInsets.fromLTRB(24, 24, 24, 24),
       children: [
-        _stepHeader(theme, 'Давай знакомиться ✨', 'Это нужно, чтобы точно рассчитать твою норму'),
+        _stepHeader(theme, 'Давай знакомиться', 'Это нужно, чтобы точно рассчитать твою норму'),
         TextField(
           controller: _nameController,
           textCapitalization: TextCapitalization.words,
           textInputAction: TextInputAction.next,
-          decoration: const InputDecoration(labelText: 'Имя', prefixIcon: Icon(Icons.person_outline_rounded)),
+          decoration: const InputDecoration(labelText: 'Имя', prefixIcon: Icon(PhosphorIconsLight.user)),
         ),
         const SizedBox(height: 12),
         TextField(
@@ -324,7 +412,7 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
     return ListView(
       padding: const EdgeInsets.fromLTRB(24, 24, 24, 24),
       children: [
-        _stepHeader(theme, 'Женское здоровье 🌸', 'Ева будет адаптировать питание под фазы твоего цикла'),
+        _stepHeader(theme, 'Твой цикл', 'Ева подстроит питание, уход и советы под фазы цикла'),
         EvaCard(
           onTap: () async {
             final picked = await showDatePicker(
@@ -359,7 +447,7 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
           ),
         ),
         const SizedBox(height: 16),
-        Text('Не помнишь точно? Укажи примерную дату — её всегда можно изменить в «Гармонии».', style: theme.textTheme.bodySmall),
+        Text('Не помнишь точно? Укажи примерную дату — её всегда можно изменить в «Календаре».', style: theme.textTheme.bodySmall),
       ],
     );
   }
@@ -373,7 +461,7 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
           controller: _pregWeekController,
           keyboardType: TextInputType.number,
           inputFormatters: [FilteringTextInputFormatter.digitsOnly],
-          decoration: const InputDecoration(labelText: 'Текущая неделя беременности', hintText: 'от 1 до 42', prefixIcon: Icon(Icons.child_friendly_rounded)),
+          decoration: const InputDecoration(labelText: 'Текущая неделя беременности', hintText: 'от 1 до 42', prefixIcon: Icon(PhosphorIconsLight.baby)),
         ),
       ],
     );

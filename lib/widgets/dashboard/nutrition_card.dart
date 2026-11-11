@@ -1,9 +1,11 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
+import 'package:phosphor_flutter/phosphor_flutter.dart';
 
 import '../../screens/ai_chat_screen.dart';
 import '../../services/database_service.dart';
+import '../../services/home_widget_service.dart';
 import '../../theme/eva_colors.dart';
 import '../eva_ui.dart';
 import '../../services/analytics_service.dart';
@@ -294,6 +296,9 @@ class _NutritionSummaryCardState extends State<NutritionSummaryCard> {
     }
     final int target = baseTarget + bonus;
     final int remaining = target - curCal;
+    final DateTime now = DateTime.now();
+    final String todayId = "${now.year}-${now.month.toString().padLeft(2, '0')}-${now.day.toString().padLeft(2, '0')}";
+    if (widget.docId == todayId) HomeWidgetService.updateCalories(consumed: curCal, target: target);
     final bool exceeded = target > 0 && curCal > target;
     final int health = healthCount > 0 ? (healthSum / healthCount).round() : 0;
 
@@ -316,7 +321,7 @@ class _NutritionSummaryCardState extends State<NutritionSummaryCard> {
                     children: [
                       Text('Что съесть?', style: theme.textTheme.labelMedium?.copyWith(color: Colors.white)),
                       const SizedBox(width: 5),
-                      const Icon(Icons.auto_awesome_rounded, color: Colors.white, size: 14),
+                      const Icon(PhosphorIconsLight.sparkle, color: Colors.white, size: 14),
                     ],
                   ),
                 ),
@@ -363,7 +368,7 @@ class _NutritionSummaryCardState extends State<NutritionSummaryCard> {
                       spacing: 6,
                       runSpacing: 6,
                       children: [
-                        if (health > 0) EvaPill(text: 'Польза $health/10', icon: Icons.favorite_rounded, color: palette.sage),
+                        if (health > 0) EvaPill(text: 'Польза $health/10', icon: PhosphorIconsLight.heart, color: palette.sage),
                         if (bonus > 0) EvaPill(text: '+$bonus бонус', icon: Icons.celebration_rounded, color: palette.gold),
                       ],
                     ),

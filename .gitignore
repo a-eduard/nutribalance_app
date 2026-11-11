@@ -56,3 +56,9 @@ firebase-debug.log
 **/ios/Runner/GoogleService-Info.plist
 **/macos/Runner/GoogleService-Info.plist
 firebase-export-*/
+marketing/
+
+# секрет Replicate
+marketing/video/.replicate_token*
+
+marketing/video/.gemini_key*

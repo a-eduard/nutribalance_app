@@ -20,13 +20,17 @@ service cloud.firestore {
 
     function privilegedKeys() {
       return ['isPro', 'proUntil', 'hasSpecialistAccess', 'specialistUntil', 'usedPromoCodes',
-              'free_messages_left', 'free_scans_left'];
+              'free_messages_left', 'free_scans_left',
+              'referralCode', 'referredBy', 'referredAt', 'referralCount', 'referralRewards', 'evaNudgeSent',
+              'appRole', 'partnerCode', 'partnerUid', 'partnerOf', 'proUsage'];
     }
 
     match /users/{uid} {
       allow read: if isOwner(uid);
       allow create: if isOwner(uid)
-        && !request.resource.data.keys().hasAny(['proUntil', 'hasSpecialistAccess', 'specialistUntil', 'usedPromoCodes'])
+        && !request.resource.data.keys().hasAny(['proUntil', 'hasSpecialistAccess', 'specialistUntil', 'usedPromoCodes',
+                                                  'referralCode', 'referredBy', 'referralCount', 'referralRewards',
+                                                  'appRole', 'partnerCode', 'partnerUid', 'partnerOf'])
         && request.resource.data.get('isPro', false) == false;
       allow update: if isOwner(uid)
         && !request.resource.data.diff(resource.data).affectedKeys().hasAny(privilegedKeys());

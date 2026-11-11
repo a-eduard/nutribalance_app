@@ -1,4 +1,6 @@
 import 'package:flutter/material.dart';
+import '../../../widgets/eva_ui.dart';
+import 'package:phosphor_flutter/phosphor_flutter.dart';
 import '../../../theme/eva_colors.dart';
 import 'package:flutter/cupertino.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
@@ -84,7 +86,7 @@ class HarmonyBottomSheets {
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            Text(DateFormat('dd MMMM yyyy', 'ru_RU').format(day), style: TextStyle(fontSize: 20, fontFamily: EvaFonts.serif, fontWeight: FontWeight.w500, color: theme.colorScheme.onSurface)),
+            Text(DateFormat('d MMMM yyyy', 'ru_RU').format(day), style: TextStyle(fontSize: 20, fontFamily: EvaFonts.serif, fontWeight: FontWeight.w500, color: theme.colorScheme.onSurface)),
             
             // ИНФОРМАЦИЯ О ФАЗЕ ЦИКЛА
             const SizedBox(height: 16),
@@ -112,7 +114,7 @@ class HarmonyBottomSheets {
                   Expanded(
                     child: _buildActionButton(
                       title: isStartDay ? "Убрать начало" : "Начало периода",
-                      icon: Icons.water_drop,
+                      icon: PhosphorIconsFill.drop,
                       isActive: isStartDay,
                       theme: theme,
                       onTap: () {
@@ -130,7 +132,7 @@ class HarmonyBottomSheets {
                   Expanded(
                     child: _buildActionButton(
                       title: isEndDay ? "Убрать конец" : "Конец периода",
-                      icon: Icons.check_circle_outline,
+                      icon: PhosphorIconsLight.checkCircle,
                       isActive: isEndDay,
                       theme: theme,
                       onTap: () {
@@ -156,12 +158,12 @@ class HarmonyBottomSheets {
               crossAxisSpacing: 12,
               childAspectRatio: 1.0,
               children: [
-                _buildSquareAction("Симптомы", Icons.tune, Colors.orange, theme, () { Navigator.pop(ctx); Analytics.event('harmony_action', {'type': 'symptoms'}); onSymptomsTap(); }),
-                _buildSquareAction("Настроение", Icons.emoji_emotions, Colors.purple, theme, () { Navigator.pop(ctx); Analytics.event('harmony_action', {'type': 'mood'}); onMoodTap(); }),
-                _buildSquareAction("Медикаменты", Icons.medication_outlined, Colors.teal, theme, () { Navigator.pop(ctx); Analytics.event('harmony_action', {'type': 'meds'}); onMedsTap(); }),
-                _buildSquareAction("Вес", Icons.monitor_weight_outlined, Colors.blueGrey, theme, () { Navigator.pop(ctx); Analytics.event('harmony_action', {'type': 'weight'}); onWeightTap(); }),
-                _buildSquareAction("Секс", Icons.favorite_outline, Colors.pinkAccent, theme, () { Navigator.pop(ctx); onSexTap(); }),
-                _buildSquareAction("БТТ", Icons.thermostat_outlined, Colors.redAccent, theme, () { Navigator.pop(ctx); onTempTap(); }),
+                _buildSquareAction("Симптомы", PhosphorIconsDuotone.heartbeat, EvaColors.menstruation, theme, () { Navigator.pop(ctx); Analytics.event('harmony_action', {'type': 'symptoms'}); onSymptomsTap(); }),
+                _buildSquareAction("Настроение", PhosphorIconsDuotone.smiley, EvaColors.lavender, theme, () { Navigator.pop(ctx); Analytics.event('harmony_action', {'type': 'mood'}); onMoodTap(); }),
+                _buildSquareAction("Лекарства", PhosphorIconsDuotone.pill, EvaColors.sage, theme, () { Navigator.pop(ctx); Analytics.event('harmony_action', {'type': 'meds'}); onMedsTap(); }),
+                _buildSquareAction("Вес", PhosphorIconsDuotone.scales, EvaColors.champagne, theme, () { Navigator.pop(ctx); Analytics.event('harmony_action', {'type': 'weight'}); onWeightTap(); }),
+                _buildSquareAction("Близость", PhosphorIconsDuotone.heart, EvaColors.rose, theme, () { Navigator.pop(ctx); onSexTap(); }),
+                _buildSquareAction("Температура", PhosphorIconsDuotone.thermometer, EvaColors.warning, theme, () { Navigator.pop(ctx); onTempTap(); }),
               ],
             ),
             const SizedBox(height: 16),
@@ -232,13 +234,12 @@ class HarmonyBottomSheets {
                   const SizedBox(height: 40),
                   SizedBox(
                     width: double.infinity, height: 50,
-                    child: ElevatedButton(
-                      style: ElevatedButton.styleFrom(backgroundColor: theme.colorScheme.primary, shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)), elevation: 0),
-                      onPressed: () {
+                    child: EvaPrimaryButton(
+                                            onPressed: () {
                         onSave(wholeNumber + (decimalNumber / 10.0));
                         Navigator.pop(ctx);
                       },
-                      child: Text("СОХРАНИТЬ", style: TextStyle(color: theme.colorScheme.onPrimary, fontWeight: FontWeight.w800, fontSize: 15)),
+                      label: 'Сохранить',
                     ),
                   )
                 ],
@@ -309,13 +310,12 @@ class HarmonyBottomSheets {
                   const SizedBox(height: 40),
                   SizedBox(
                     width: double.infinity, height: 50,
-                    child: ElevatedButton(
-                      style: ElevatedButton.styleFrom(backgroundColor: theme.colorScheme.primary, shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)), elevation: 0),
-                      onPressed: () {
+                    child: EvaPrimaryButton(
+                                            onPressed: () {
                         onSave(wholeNumber + (decimalNumber / 10.0));
                         Navigator.pop(ctx);
                       },
-                      child: Text("СОХРАНИТЬ", style: TextStyle(color: theme.colorScheme.onPrimary, fontWeight: FontWeight.w800, fontSize: 15)),
+                      label: 'Сохранить',
                     ),
                   )
                 ],
@@ -421,12 +421,12 @@ class HarmonyBottomSheets {
                                   children: [
                                     IconButton(
                                       onPressed: tempOrgasmCount > 1 ? () => setModalState(() => tempOrgasmCount--) : null,
-                                      icon: Icon(Icons.remove_circle_outline, color: tempOrgasmCount > 1 ? theme.colorScheme.primary : Colors.grey.withValues(alpha: 0.3), size: 28),
+                                      icon: Icon(PhosphorIconsLight.minusCircle, color: tempOrgasmCount > 1 ? theme.colorScheme.primary : Colors.grey.withValues(alpha: 0.3), size: 28),
                                     ),
                                     Text('$tempOrgasmCount', style: TextStyle(fontSize: 20, fontFamily: EvaFonts.serif, fontWeight: FontWeight.w500, color: theme.colorScheme.onSurface)),
                                     IconButton(
                                       onPressed: () => setModalState(() => tempOrgasmCount++),
-                                      icon: Icon(Icons.add_circle_outline, color: theme.colorScheme.primary, size: 28),
+                                      icon: Icon(PhosphorIconsLight.plusCircle, color: theme.colorScheme.primary, size: 28),
                                     ),
                                   ],
                                 )
@@ -440,13 +440,12 @@ class HarmonyBottomSheets {
                   const SizedBox(height: 32),
                   SizedBox(
                     width: double.infinity, height: 50,
-                    child: ElevatedButton(
-                      style: ElevatedButton.styleFrom(backgroundColor: theme.colorScheme.primary, shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)), elevation: 0),
-                      onPressed: () {
+                    child: EvaPrimaryButton(
+                                            onPressed: () {
                         onSave(tempData, tempOrgasmCount);
                         Navigator.pop(ctx);
                       },
-                      child: Text("СОХРАНИТЬ", style: TextStyle(color: theme.colorScheme.onPrimary, fontWeight: FontWeight.w800, fontSize: 15)),
+                      label: 'Сохранить',
                     ),
                   )
                 ],
@@ -496,10 +495,9 @@ class HarmonyBottomSheets {
                   const SizedBox(height: 32),
                   SizedBox(
                     width: double.infinity, height: 50, 
-                    child: ElevatedButton(
-                      style: ElevatedButton.styleFrom(backgroundColor: theme.colorScheme.primary, shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)), elevation: 0), 
-                      onPressed: () { onSave(tempValue); Navigator.pop(ctx); }, 
-                      child: Text("СОХРАНИТЬ", style: TextStyle(color: theme.colorScheme.onPrimary, fontWeight: FontWeight.w800, fontSize: 15))
+                    child: EvaPrimaryButton(
+                                            onPressed: () { onSave(tempValue); Navigator.pop(ctx); }, 
+                      label: 'Сохранить'
                     )
                   )
                 ],
@@ -603,12 +601,16 @@ class HarmonyBottomSheets {
     return InkWell(
       onTap: onTap, borderRadius: BorderRadius.circular(16),
       child: Container(
-        decoration: BoxDecoration(color: color.withValues(alpha: 0.1), borderRadius: BorderRadius.circular(16)),
+        decoration: BoxDecoration(
+          color: color.withValues(alpha: 0.08),
+          borderRadius: BorderRadius.circular(20),
+          border: Border.all(color: color.withValues(alpha: 0.22)),
+        ),
         child: Column(
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
-            Icon(icon, color: color, size: 28), const SizedBox(height: 8),
-            Text(title, style: TextStyle(color: theme.colorScheme.onSurface, fontWeight: FontWeight.bold, fontSize: 11), textAlign: TextAlign.center),
+            PhosphorIcon(icon, color: color, size: 30, duotoneSecondaryOpacity: 0.28), const SizedBox(height: 8),
+            Text(title, style: TextStyle(color: theme.colorScheme.onSurface, fontWeight: FontWeight.w600, fontSize: 12), textAlign: TextAlign.center),
           ],
         ),
       ),

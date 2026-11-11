@@ -1,4 +1,5 @@
 import 'dart:convert';
+import 'package:phosphor_flutter/phosphor_flutter.dart';
 import 'package:flutter/material.dart';
 import '../services/database_service.dart';
 import '../theme/eva_colors.dart';
@@ -150,7 +151,7 @@ class _AIChatSaveCardWidgetState extends State<AIChatSaveCardWidget> {
                 Container(width: 7, height: 7, decoration: BoxDecoration(color: color, shape: BoxShape.circle)),
                 const SizedBox(width: 6),
                 Expanded(child: Text(label, style: theme.textTheme.labelMedium?.copyWith(color: theme.colorScheme.onSurfaceVariant), maxLines: 1, overflow: TextOverflow.ellipsis)),
-                if (!_isSaved) Icon(Icons.edit_outlined, size: 14, color: theme.colorScheme.onSurfaceVariant),
+                if (!_isSaved) Icon(PhosphorIconsLight.pencilSimple, size: 14, color: theme.colorScheme.onSurfaceVariant),
               ],
             ),
             const SizedBox(height: 4),
@@ -349,7 +350,7 @@ class _AIChatSaveCardWidgetState extends State<AIChatSaveCardWidget> {
                     Padding(padding: const EdgeInsets.only(bottom: 6), child: Text("ккал", style: theme.textTheme.titleSmall?.copyWith(color: theme.colorScheme.onSurfaceVariant))),
                     if (!_isSaved) ...[
                       const SizedBox(width: 6),
-                      Padding(padding: const EdgeInsets.only(bottom: 8), child: Icon(Icons.edit_outlined, size: 16, color: theme.colorScheme.onSurfaceVariant)),
+                      Padding(padding: const EdgeInsets.only(bottom: 8), child: Icon(PhosphorIconsLight.pencilSimple, size: 16, color: theme.colorScheme.onSurfaceVariant)),
                     ],
                   ],
                 ),

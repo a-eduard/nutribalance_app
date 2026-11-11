@@ -752,8 +752,10 @@ class EvaOptionTile extends StatelessWidget {
   final bool selected;
   final VoidCallback onTap;
   final IconData? icon;
+  /// false — пункт-действие (открывает экран), а не выбор: справа стрелка вместо кружка.
+  final bool radio;
 
-  const EvaOptionTile({super.key, required this.title, required this.selected, required this.onTap, this.subtitle, this.icon});
+  const EvaOptionTile({super.key, required this.title, required this.selected, required this.onTap, this.subtitle, this.icon, this.radio = true});
 
   @override
   Widget build(BuildContext context) {
@@ -792,9 +794,11 @@ class EvaOptionTile extends StatelessWidget {
               ),
               AnimatedSwitcher(
                 duration: const Duration(milliseconds: 180),
-                child: selected
-                    ? Icon(Icons.check_circle_rounded, key: const ValueKey('on'), color: primary, size: 22)
-                    : Icon(Icons.circle_outlined, key: const ValueKey('off'), color: theme.colorScheme.outline, size: 22),
+                child: !radio
+                    ? Icon(Icons.chevron_right_rounded, key: const ValueKey('go'), color: theme.colorScheme.onSurfaceVariant, size: 22)
+                    : selected
+                        ? Icon(Icons.check_circle_rounded, key: const ValueKey('on'), color: primary, size: 22)
+                        : Icon(Icons.circle_outlined, key: const ValueKey('off'), color: theme.colorScheme.outline, size: 22),
               ),
             ],
           ),
@@ -944,6 +948,8 @@ class EvaSnack {
     messenger.showSnackBar(
       SnackBar(
         duration: duration,
+        // С Flutter 3.35 снэкбар с кнопкой по умолчанию висит, пока её не нажмут.
+        persist: false,
         action: action,
         content: Row(
           children: [

@@ -2,6 +2,7 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:cloud_functions/cloud_functions.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
+import 'package:phosphor_flutter/phosphor_flutter.dart';
 import 'package:font_awesome_flutter/font_awesome_flutter.dart';
 import 'package:intl/intl.dart';
 import 'package:url_launcher/url_launcher.dart';
@@ -14,12 +15,20 @@ import '../widgets/eva_ui.dart';
 import 'p2p_chat_screen.dart';
 import 'profile_settings_screen.dart';
 import 'admin_stats_screen.dart';
+import 'admin_broadcast_screen.dart';
+import 'invite_friend_screen.dart';
+import 'partner/partner_share_screen.dart';
 import 'progress_screen.dart';
+import 'health_screen.dart';
 import 'smart_questionnaire_screen.dart';
 import 'specialist_paywall_screen.dart';
 import 'weekly_insights_screen.dart';
 
 class ProfileScreen extends StatefulWidget {
+  /// Чат «Личный специалист» (платный) — скрыт до перезапуска услуги.
+  static bool showSpecialist = false;
+  /// Служебные кнопки администратора (бэкфилл профилей, тест Crashlytics).
+  static bool showDebugTools = false;
   const ProfileScreen({super.key});
 
   static const String supportAdminUid = 'VlTTLh2o7GVaXUzw32sNUtQ6alD3';
@@ -128,7 +137,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
                   children: [
                     Expanded(child: Text('Профиль', style: theme.textTheme.displaySmall)),
                     EvaCircleButton(
-                      icon: Icons.settings_outlined,
+                      icon: PhosphorIconsLight.gearSix,
                       tooltip: 'Настройки',
                       onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const ProfileSettingsScreen())),
                     ),
@@ -148,10 +157,10 @@ class _ProfileScreenState extends State<ProfileScreen> {
                   child: pro
                       ? EvaPill(
                           text: proUntil != null ? 'Premium до ${DateFormat('d MMMM', 'ru').format(proUntil)}' : 'Premium',
-                          icon: Icons.workspace_premium_rounded,
+                          icon: PhosphorIconsLight.crown,
                           color: context.eva.gold,
                         )
-                      : EvaPill(text: 'Бесплатный план', icon: Icons.spa_outlined, color: theme.colorScheme.onSurfaceVariant),
+                      : EvaPill(text: 'Бесплатный план', icon: PhosphorIconsLight.flowerLotus, color: theme.colorScheme.onSurfaceVariant),
                 ),
                 const SizedBox(height: 22),
                 if (!pro) _buildPremiumCard(theme, freeLeft),
@@ -160,7 +169,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
                   children: [
                     Expanded(
                       child: _QuickTile(
-                        icon: Icons.insights_rounded,
+                        icon: PhosphorIconsLight.chartLineUp,
                         color: context.eva.lavender,
                         title: 'Итоги недели',
                         onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const WeeklyInsightsScreen())),
@@ -169,7 +178,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
                     const SizedBox(width: 12),
                     Expanded(
                       child: _QuickTile(
-                        icon: Icons.show_chart_rounded,
+                        icon: PhosphorIconsLight.trendUp,
                         color: context.eva.sage,
                         title: 'Мой прогресс',
                         onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const ProgressScreen())),
@@ -179,16 +188,42 @@ class _ProfileScreenState extends State<ProfileScreen> {
                 ),
                 const SizedBox(height: 22),
                 EvaMenuGroup(
+                  title: 'Для близких',
+                  children: [
+                    EvaMenuTile(
+                      icon: PhosphorIconsLight.heart,
+                      iconColor: EvaColors.rose,
+                      title: 'Режим партнёра',
+                      subtitle: 'Он будет знать твою фазу и как поддержать',
+                      onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const PartnerShareScreen())),
+                    ),
+                    EvaMenuTile(
+                      icon: PhosphorIconsLight.gift,
+                      iconColor: context.eva.gold,
+                      title: 'Пригласи подругу',
+                      subtitle: 'Неделя PRO тебе и ей — бесплатно',
+                      onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const InviteFriendScreen())),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 22),
+                EvaMenuGroup(
                   title: 'Персонализация',
                   children: [
                     EvaMenuTile(
-                      icon: Icons.psychology_alt_outlined,
+                      icon: PhosphorIconsLight.brain,
                       title: 'Сделать Еву умнее',
                       subtitle: 'Короткая анкета о привычках и здоровье',
                       onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const SmartQuestionnaireScreen())),
                     ),
                     EvaMenuTile(
-                      icon: Icons.tune_rounded,
+                      icon: PhosphorIconsLight.personSimpleWalk,
+                      title: 'Шаги, сон и вес',
+                      subtitle: 'Health Connect: браслет, Samsung Health, Mi Fitness',
+                      onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const HealthScreen())),
+                    ),
+                    EvaMenuTile(
+                      icon: PhosphorIconsLight.slidersHorizontal,
                       title: 'Мои параметры',
                       subtitle: 'Вес, рост, цель, активность',
                       onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const ProfileSettingsScreen())),
@@ -199,8 +234,10 @@ class _ProfileScreenState extends State<ProfileScreen> {
                 EvaMenuGroup(
                   title: 'Забота и поддержка',
                   children: [
+                    // Платный чат со специалистом (5 000 ₽) временно скрыт — вернём позже.
+                    if (ProfileScreen.showSpecialist)
                     EvaMenuTile(
-                      icon: Icons.star_rounded,
+                      icon: PhosphorIconsLight.star,
                       iconColor: context.eva.gold,
                       title: 'Личный специалист',
                       subtitle: specialist ? 'Чат открыт' : 'Консультации живого эксперта',
@@ -208,7 +245,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
                       onTap: () => _openSpecialist(specialist),
                     ),
                     EvaMenuTile(
-                      icon: Icons.favorite_border_rounded,
+                      icon: PhosphorIconsLight.heart,
                       title: 'Заботливая поддержка',
                       subtitle: 'Вопросы о приложении и подписке',
                       onTap: () => Navigator.push(
@@ -243,7 +280,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
                       },
                     ),
                     EvaMenuTile(
-                      icon: Icons.play_circle_outline_rounded,
+                      icon: PhosphorIconsLight.playCircle,
                       title: 'Видео-обзор приложения',
                       onTap: () {
                         Analytics.event('social_open', {'network': 'vk_video'});
@@ -257,7 +294,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
                   title: 'Подписка',
                   children: [
                     EvaMenuTile(
-                      icon: Icons.workspace_premium_outlined,
+                      icon: PhosphorIconsLight.crown,
                       iconColor: context.eva.gold,
                       title: pro ? 'Моя подписка' : 'Оформить Premium',
                       subtitle: pro
@@ -273,21 +310,27 @@ class _ProfileScreenState extends State<ProfileScreen> {
                     title: 'Администратор',
                     children: [
                       EvaMenuTile(
-                        icon: Icons.insights_rounded,
+                        icon: PhosphorIconsLight.chartLineUp,
                         iconColor: context.eva.gold,
                         title: 'Статистика приложения',
                         subtitle: 'Активные пользователи, регистрации, путь до оплаты',
                         onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const AdminStatsScreen())),
                       ),
-                      if (uid == ProfileScreen.supportAdminUid) ...[
                       EvaMenuTile(
-                        icon: Icons.manage_accounts_outlined,
+                        icon: PhosphorIconsLight.megaphoneSimple,
+                        title: 'Рассылка',
+                        subtitle: 'Сообщение всем пользователям в чат и пушем',
+                        onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const AdminBroadcastScreen())),
+                      ),
+                      if (uid == ProfileScreen.supportAdminUid && ProfileScreen.showDebugTools) ...[
+                      EvaMenuTile(
+                        icon: PhosphorIconsLight.userGear,
                         title: 'Обновить публичные профили',
                         subtitle: 'Один раз после обновления сервера — для поиска в чатах',
                         onTap: _runBackfill,
                       ),
                       const EvaMenuTile(
-                        icon: Icons.bug_report_outlined,
+                        icon: PhosphorIconsLight.bug,
                         title: 'Тестовый сбой Crashlytics',
                         subtitle: 'Приложение закроется. Откройте его снова — отчёт уйдёт в Firebase',
                         onTap: Analytics.testCrash,

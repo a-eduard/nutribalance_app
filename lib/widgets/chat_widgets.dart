@@ -1,7 +1,9 @@
 // Общие элементы чатов (P2P и чат с Евой).
 
+import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
+import 'package:url_launcher/url_launcher.dart';
 
 import '../theme/eva_colors.dart';
 import 'eva_ui.dart';
@@ -141,6 +143,8 @@ class ChatInputBar extends StatefulWidget {
   final String hint;
   final Widget? top;
   final bool allowEmptySend;
+  /// Голосовое сообщение: если задано, при пустом поле вместо «отправить» — микрофон.
+  final VoidCallback? onVoice;
 
   const ChatInputBar({
     super.key,
@@ -151,6 +155,7 @@ class ChatInputBar extends StatefulWidget {
     this.hint = 'Сообщение…',
     this.top,
     this.allowEmptySend = false,
+    this.onVoice,
   });
 
   @override
@@ -192,6 +197,8 @@ class _ChatInputBarState extends State<ChatInputBar> {
     final theme = Theme.of(context);
     final palette = context.eva;
     final bool canSend = (_hasText || widget.allowEmptySend) && !widget.busy;
+    final bool voiceMode = widget.onVoice != null && !_hasText && !widget.allowEmptySend && !widget.busy;
+    final bool active = canSend || voiceMode;
 
     return Container(
       decoration: BoxDecoration(
@@ -239,17 +246,17 @@ class _ChatInputBarState extends State<ChatInputBar> {
                   ),
                   const SizedBox(width: 8),
                   EvaPressable(
-                    onTap: canSend ? widget.onSend : null,
+                    onTap: voiceMode ? widget.onVoice : (canSend ? widget.onSend : null),
                     pressedScale: 0.9,
                     child: AnimatedContainer(
                       duration: const Duration(milliseconds: 200),
                       width: 48,
                       height: 48,
                       decoration: BoxDecoration(
-                        gradient: canSend ? palette.hero : null,
-                        color: canSend ? null : palette.fieldFill,
+                        gradient: active ? palette.hero : null,
+                        color: active ? null : palette.fieldFill,
                         shape: BoxShape.circle,
-                        boxShadow: canSend
+                        boxShadow: active
                             ? [BoxShadow(color: theme.colorScheme.primary.withValues(alpha: 0.3), blurRadius: 14, offset: const Offset(0, 6))]
                             : null,
                       ),
@@ -258,7 +265,7 @@ class _ChatInputBarState extends State<ChatInputBar> {
                               padding: const EdgeInsets.all(14),
                               child: CircularProgressIndicator(strokeWidth: 2, color: theme.colorScheme.primary),
                             )
-                          : Icon(Icons.arrow_upward_rounded, color: canSend ? Colors.white : theme.colorScheme.onSurfaceVariant, size: 24),
+                          : Icon(voiceMode ? Icons.mic_rounded : Icons.arrow_upward_rounded, color: active ? Colors.white : theme.colorScheme.onSurfaceVariant, size: 24),
                     ),
                   ),
                 ],
@@ -279,7 +286,8 @@ class EvaMarkdownText extends StatelessWidget {
 
   const EvaMarkdownText(this.text, {super.key, this.style, this.accent});
 
-  static final RegExp _bold = RegExp(r'\*\*(.+?)\*\*|__(.+?)__');
+  // **жирный** / __жирный__ / *курсив* / _курсив_
+  static final RegExp _bold = RegExp(r'\*\*(.+?)\*\*|__(.+?)__|(?<![\*\w])\*(?!\s)(.+?)(?<!\s)\*(?![\*\w])|(?<![_\w])_(?!\s)(.+?)(?<!\s)_(?![_\w])');
   static final RegExp _numbered = RegExp(r'^(\d{1,2})[\.\)]\s+(.*)$');
 
   List<InlineSpan> _inline(String s, TextStyle base) {
@@ -287,7 +295,10 @@ class EvaMarkdownText extends StatelessWidget {
     int last = 0;
     for (final m in _bold.allMatches(s)) {
       if (m.start > last) spans.add(TextSpan(text: s.substring(last, m.start)));
-      spans.add(TextSpan(text: m.group(1) ?? m.group(2), style: base.copyWith(fontWeight: FontWeight.w700)));
+      final String? bold = m.group(1) ?? m.group(2);
+      spans.add(bold != null
+          ? TextSpan(text: bold, style: base.copyWith(fontWeight: FontWeight.w700))
+          : TextSpan(text: m.group(3) ?? m.group(4), style: base.copyWith(fontStyle: FontStyle.italic)));
       last = m.end;
     }
     if (last < s.length) spans.add(TextSpan(text: s.substring(last)));
@@ -306,6 +317,14 @@ class EvaMarkdownText extends StatelessWidget {
       final String trimmed = line.trimLeft();
       if (trimmed.isEmpty) {
         if (children.isNotEmpty) children.add(const SizedBox(height: 6));
+        continue;
+      }
+      // Разделитель --- / *** / ___ — тонкая линия вместо символов.
+      if (RegExp(r'^([-*_])\1{2,}$').hasMatch(trimmed)) {
+        children.add(Padding(
+          padding: const EdgeInsets.symmetric(vertical: 8),
+          child: Divider(height: 1, thickness: 1, color: (base.color ?? theme.colorScheme.onSurface).withValues(alpha: 0.12)),
+        ));
         continue;
       }
       if (trimmed.startsWith('#')) {
@@ -344,5 +363,78 @@ class EvaMarkdownText extends StatelessWidget {
     }
 
     return Column(crossAxisAlignment: CrossAxisAlignment.start, mainAxisSize: MainAxisSize.min, children: children);
+  }
+}
+
+/// Текст сообщения с кликабельными ссылками (https://…, vk.ru/…, t.me/…).
+/// Ссылка открывается во внешнем приложении: ВКонтакте, Telegram или браузере.
+class EvaLinkText extends StatefulWidget {
+  final String text;
+  final TextStyle? style;
+  final Color? linkColor;
+
+  const EvaLinkText(this.text, {super.key, this.style, this.linkColor});
+
+  static final RegExp _url = RegExp(r'((?:https?:\/\/)[^\s]+|(?:www\.|t\.me\/|vk\.(?:ru|com)\/)[^\s]+)', caseSensitive: false);
+
+  @override
+  State<EvaLinkText> createState() => _EvaLinkTextState();
+}
+
+class _EvaLinkTextState extends State<EvaLinkText> {
+  final List<TapGestureRecognizer> _recognizers = [];
+
+  @override
+  void dispose() {
+    for (final r in _recognizers) {
+      r.dispose();
+    }
+    super.dispose();
+  }
+
+  Future<void> _open(String raw) async {
+    final String href = raw.startsWith(RegExp('https?://', caseSensitive: false)) ? raw : 'https://$raw';
+    final Uri? uri = Uri.tryParse(href);
+    if (uri == null) return;
+    try {
+      await launchUrl(uri, mode: LaunchMode.externalApplication);
+    } catch (e) {
+      debugPrint('open link: $e');
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    for (final r in _recognizers) {
+      r.dispose();
+    }
+    _recognizers.clear();
+    final String text = widget.text;
+    final matches = EvaLinkText._url.allMatches(text).toList();
+    if (matches.isEmpty) return Text(text, style: widget.style);
+    final TextStyle base = widget.style ?? DefaultTextStyle.of(context).style;
+    final TextStyle linkStyle = base.copyWith(
+      color: widget.linkColor ?? base.color,
+      decoration: TextDecoration.underline,
+      decorationColor: (widget.linkColor ?? base.color)?.withValues(alpha: 0.7),
+      fontWeight: FontWeight.w600,
+    );
+    final List<InlineSpan> spans = [];
+    int last = 0;
+    for (final m in matches) {
+      String url = m.group(0)!;
+      // точку/запятую/скобку в конце предложения в ссылку не включаем
+      final trail = RegExp(r'[.,;:!?)»]+$').firstMatch(url);
+      final String tail = trail?.group(0) ?? '';
+      if (tail.isNotEmpty) url = url.substring(0, url.length - tail.length);
+      if (m.start > last) spans.add(TextSpan(text: text.substring(last, m.start)));
+      final rec = TapGestureRecognizer()..onTap = () => _open(url);
+      _recognizers.add(rec);
+      spans.add(TextSpan(text: url, style: linkStyle, recognizer: rec));
+      if (tail.isNotEmpty) spans.add(TextSpan(text: tail));
+      last = m.end;
+    }
+    if (last < text.length) spans.add(TextSpan(text: text.substring(last)));
+    return Text.rich(TextSpan(style: base, children: spans));
   }
 }

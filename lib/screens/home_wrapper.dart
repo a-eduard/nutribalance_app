@@ -10,6 +10,7 @@ import '../widgets/eva_ui.dart';
 import 'auth_screen.dart';
 import 'dashboard_screen.dart';
 import 'onboarding_screen.dart';
+import 'partner/partner_home_screen.dart';
 import '../services/analytics_service.dart';
 
 class HomeWrapper extends StatelessWidget {
@@ -147,6 +148,9 @@ class _FirestoreRoleLoaderState extends State<FirestoreRoleLoader> {
         final data = snapshot.data!.data() ?? <String, dynamic>{};
         SubscriptionService().refreshIfNeeded(data);
         _reportUserProperties(data);
+
+        // Партнёрский аккаунт (режим партнёра) — отдельный упрощённый экран.
+        if (data['appRole'] == 'partner') return const PartnerHomeScreen();
 
         final bool isOnboardingCompleted = data['isOnboardingCompleted'] ?? true;
         if (isOnboardingCompleted == false) {

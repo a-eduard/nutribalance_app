@@ -1,6 +1,7 @@
 // Файл: lib/screens/harmony/widgets/harmony_mood_sheet.dart
 
 import 'package:flutter/material.dart';
+import 'package:phosphor_flutter/phosphor_flutter.dart';
 import '../../../theme/eva_colors.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
@@ -17,13 +18,13 @@ class HarmonyMoodSheet extends StatefulWidget {
     required this.onSave,
   });
 
-  static void show({
+  static Future<void> show({
     required BuildContext context,
     required DateTime selectedDay,
     required List<String> currentMoods,
     required Function(List<String>) onSave,
   }) {
-    showModalBottomSheet(
+    return showModalBottomSheet<void>(
       context: context,
       backgroundColor: Theme.of(context).colorScheme.surface,
       isScrollControlled: true,
@@ -136,7 +137,7 @@ class _HarmonyMoodSheetState extends State<HarmonyMoodSheet> {
             decoration: InputDecoration(
               hintText: "Поиск настроения...",
               hintStyle: TextStyle(color: theme.colorScheme.onSurfaceVariant.withValues(alpha: 0.5)),
-              prefixIcon: Icon(Icons.search, color: theme.colorScheme.onSurfaceVariant),
+              prefixIcon: Icon(PhosphorIconsLight.magnifyingGlass, color: theme.colorScheme.onSurfaceVariant),
               filled: true,
               fillColor: theme.colorScheme.onSurfaceVariant.withValues(alpha: 0.1),
               border: OutlineInputBorder(borderRadius: BorderRadius.circular(16), borderSide: BorderSide.none),
@@ -151,7 +152,7 @@ class _HarmonyMoodSheetState extends State<HarmonyMoodSheet> {
               itemBuilder: (context, index) {
                 if (index == _filteredMoods.length) {
                   return ListTile(
-                    leading: CircleAvatar(backgroundColor: theme.colorScheme.onSurfaceVariant.withValues(alpha: 0.1), child: Icon(Icons.add, color: theme.colorScheme.primary)),
+                    leading: CircleAvatar(backgroundColor: theme.colorScheme.onSurfaceVariant.withValues(alpha: 0.1), child: Icon(PhosphorIconsLight.plus, color: theme.colorScheme.primary)),
                     title: Text('Добавить "${_searchController.text}"', style: TextStyle(color: theme.colorScheme.primary, fontWeight: FontWeight.bold)),
                     onTap: () {
                       final newMood = _searchController.text.trim();
@@ -174,8 +175,8 @@ class _HarmonyMoodSheetState extends State<HarmonyMoodSheet> {
                   leading: Text(_getEmojiForMood(mood), style: const TextStyle(fontSize: 24)),
                   title: Text(mood, style: TextStyle(color: theme.colorScheme.onSurface, fontWeight: isSelected ? FontWeight.bold : FontWeight.w500)),
                   trailing: isSelected 
-                    ? Icon(Icons.check_circle, color: theme.colorScheme.primary)
-                    : Icon(Icons.circle_outlined, color: theme.colorScheme.onSurfaceVariant),
+                    ? Icon(PhosphorIconsFill.checkCircle, color: theme.colorScheme.primary)
+                    : Icon(PhosphorIconsLight.circle, color: theme.colorScheme.onSurfaceVariant),
                   onTap: () => _toggleMood(mood),
                 );
               },

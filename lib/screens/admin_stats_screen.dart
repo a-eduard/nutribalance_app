@@ -27,6 +27,10 @@ class _AdminStatsScreenState extends State<AdminStatsScreen> {
     'eva_sub_1_month_promo': 'Месяц (промо)',
     'eva_sub_1_year': 'Год',
     'eva_sub_1_year_promo': 'Год (промо)',
+    'eva_pro_month': 'Месяц · 449',
+    'eva_pro_month_promo': 'Месяц · промо',
+    'eva_pro_year': 'Год · 2 990',
+    'eva_pro_year_promo': 'Год · промо',
     'specialist_chat_monthly': 'Чат со специалистом',
   };
 
@@ -118,6 +122,10 @@ class _AdminStatsScreenState extends State<AdminStatsScreen> {
                         _buildFunnel(theme),
                         const SizedBox(height: 16),
                         _buildPurchases(theme),
+                        const SizedBox(height: 16),
+                        _buildAiCosts(theme),
+                        const SizedBox(height: 16),
+                        _buildPremiumUsers(theme),
                         const SizedBox(height: 16),
                         _buildBars(
                           theme,
@@ -317,6 +325,113 @@ class _AdminStatsScreenState extends State<AdminStatsScreen> {
                 ]),
               ),
           ],
+        ],
+      ),
+    );
+  }
+
+  static const Map<String, String> _aiNames = {
+    'chat_text': 'Чат с Евой (текст)',
+    'chat_text_ds': 'Чат с Евой (DeepSeek)',
+    'chat_cosmetologist': 'Косметолог (текст)',
+    'chat_cosmetologist_ds': 'Косметолог (DeepSeek)',
+    'chat_photo': 'Фото в чате / еда',
+    'chat_pdf': 'Анализы PDF',
+    'scan_food': 'Сканер: продукты',
+    'scan_cosmetic': 'Сканер: косметика',
+    'greeting': 'Приветствие после анкеты',
+    'weekly_insights': 'Итоги недели',
+    'skin_analysis': 'Анализ кожи по фото',
+    'voice_transcribe': 'Голосовые → текст',
+    'tts': 'Озвучка ответов (PRO)',
+  };
+
+  String _rub(dynamic v) {
+    final double d = v is num ? v.toDouble() : 0;
+    return d >= 100 ? '${d.round()} ₽' : '${d.toStringAsFixed(2)} ₽';
+  }
+
+  Widget _buildPremiumUsers(ThemeData theme) {
+    final List users = _data?['premiumUsers'] is List ? _data!['premiumUsers'] as List : const [];
+    return EvaCard(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          EvaOverline('У кого Premium сейчас · ${users.length}'),
+          const SizedBox(height: 10),
+          if (users.isEmpty) Text('Нет активных Premium', style: theme.textTheme.bodySmall),
+          for (final raw in users.whereType<Map>())
+            Padding(
+              padding: const EdgeInsets.only(bottom: 10),
+              child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                Text('${raw['name']}${raw['owner'] == true ? ' (это ты)' : ''}  ${raw['email'] ?? ''}',
+                    maxLines: 1, overflow: TextOverflow.ellipsis, style: theme.textTheme.titleSmall),
+                Text(
+                  '${raw['source']}${evaInt(raw['until']) > 0 ? ' · до ${DateFormat('d MMM yyyy', 'ru').format(DateTime.fromMillisecondsSinceEpoch(evaInt(raw['until'])))}' : ''}',
+                  style: theme.textTheme.bodySmall?.copyWith(color: theme.colorScheme.onSurfaceVariant),
+                ),
+              ]),
+            ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildAiCosts(ThemeData theme) {
+    final ai = _map('ai');
+    final Map<String, dynamic> features = ai['features'] is Map ? Map<String, dynamic>.from(ai['features'] as Map) : {};
+    final entries = features.entries.toList()
+      ..sort((a, b) => ((b.value as Map)['rub'] as num? ?? 0).compareTo((a.value as Map)['rub'] as num? ?? 0));
+    final int wau = _n(_map('users'), 'wau') ?? 0;
+    final double week = (ai['week'] as num?)?.toDouble() ?? 0;
+    return EvaCard(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const EvaOverline('Расходы на ИИ'),
+          const SizedBox(height: 12),
+          Row(children: [
+            Expanded(child: _kv(theme, _rub(ai['today']), 'сегодня')),
+            Expanded(child: _kv(theme, _rub(week), 'за 7 дней')),
+            Expanded(child: _kv(theme, wau > 0 ? _rub(week / wau) : '—', 'на активного / нед.')),
+          ]),
+          if (entries.isEmpty) ...[
+            const SizedBox(height: 10),
+            Text('Учёт включается после деплоя функций — данные появятся с первых запросов к Еве.', style: theme.textTheme.bodySmall),
+          ] else ...[
+            const SizedBox(height: 14),
+            for (final e in entries)
+              Padding(
+                padding: const EdgeInsets.only(top: 6),
+                child: Row(children: [
+                  Expanded(child: Text(_aiNames[e.key] ?? e.key, style: theme.textTheme.bodyMedium)),
+                  Text('${_fmt(evaInt((e.value as Map)['calls']))} × ', style: theme.textTheme.labelSmall),
+                  SizedBox(
+                    width: 64,
+                    child: Text(
+                      evaInt((e.value as Map)['calls']) > 0 ? _rub(((e.value as Map)['rub'] as num) / evaInt((e.value as Map)['calls'])) : '—',
+                      textAlign: TextAlign.right,
+                      style: theme.textTheme.labelSmall,
+                    ),
+                  ),
+                  SizedBox(width: 72, child: Text(_rub((e.value as Map)['rub']), textAlign: TextAlign.right, style: theme.textTheme.titleSmall)),
+                ]),
+              ),
+            const SizedBox(height: 8),
+            Text('Курс для расчёта: ${ai['usdRub'] ?? 100} ₽/\$. Колонки: запросов × цена одного = итого за 7 дней.',
+                style: theme.textTheme.labelSmall?.copyWith(color: theme.colorScheme.onSurfaceVariant)),
+          ],
+          const SizedBox(height: 10),
+          Text(
+            'Модели: текст — ${ai['textProvider'] == 'deepseek' ? 'DeepSeek ${ai['deepseekModel']}${ai['deepseekKey'] == true ? '' : ' (нет ключа!)'} → запасной ${ai['textModel']}' : ai['textModel']}, фото — ${ai['visionModel']}',
+            style: theme.textTheme.labelSmall?.copyWith(color: theme.colorScheme.onSurfaceVariant),
+          ),
+          if (evaInt(ai['deepseekErrors']) > 0)
+            Padding(
+              padding: const EdgeInsets.only(top: 6),
+              child: Text('DeepSeek не ответил ${ai['deepseekErrors']} раз(а) за 7 дней. Последняя причина: ${ai['deepseekLastError'] ?? '—'}',
+                  style: theme.textTheme.labelSmall?.copyWith(color: theme.colorScheme.error)),
+            ),
         ],
       ),
     );

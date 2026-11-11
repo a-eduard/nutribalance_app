@@ -2,6 +2,7 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:cloud_functions/cloud_functions.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
+import 'package:phosphor_flutter/phosphor_flutter.dart';
 import 'package:flutter_rustore_billing/flutter_rustore_billing.dart';
 
 import '../theme/eva_colors.dart';
@@ -102,7 +103,7 @@ class _SpecialistPaywallScreenState extends State<SpecialistPaywallScreen> {
                     ),
                     const SizedBox(height: 28),
                     _feature(theme, Icons.medical_information_outlined, 'Разбор анализов', 'Эксперт лично расшифрует результаты и даст понятные рекомендации.'),
-                    _feature(theme, Icons.chat_bubble_outline_rounded, 'Связь без очередей', 'Задавай вопросы в удобное время — без записи и ожидания.'),
+                    _feature(theme, PhosphorIconsLight.chatCircleDots, 'Связь без очередей', 'Задавай вопросы в удобное время — без записи и ожидания.'),
                     _feature(theme, Icons.self_improvement_rounded, 'Спокойствие', 'Поможем отличить норму от поводов для беспокойства.'),
                   ],
                 ),

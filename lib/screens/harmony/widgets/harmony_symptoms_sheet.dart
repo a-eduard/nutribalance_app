@@ -1,4 +1,6 @@
 import 'package:flutter/material.dart';
+import '../../../widgets/eva_ui.dart';
+import 'package:phosphor_flutter/phosphor_flutter.dart';
 import '../../../theme/eva_colors.dart';
 import 'package:flutter/cupertino.dart';
 import '../../../../services/database_service.dart';
@@ -15,7 +17,7 @@ class HarmonySymptomsSheet extends StatefulWidget {
     required this.onSave,
   });
 
-  static void show({
+  static Future<void> show({
     required BuildContext context,
     required DateTime selectedDay,
     required Map<String, int> currentSymptoms,
@@ -23,7 +25,7 @@ class HarmonySymptomsSheet extends StatefulWidget {
   }) {
     final theme = Theme.of(context); // Адаптация цвета шторки
     
-    showModalBottomSheet(
+    return showModalBottomSheet<void>(
       context: context,
       backgroundColor: theme.colorScheme.surface, // ИСПРАВЛЕНО
       isScrollControlled: true,
@@ -96,13 +98,27 @@ class _HarmonySymptomsSheetState extends State<HarmonySymptomsSheet> {
   void initState() {
     super.initState();
     _selectedSymptoms = Map.from(widget.currentSymptoms);
-    _filteredSymptoms = List.from(_allSymptoms);
-    
     for (var key in _selectedSymptoms.keys) {
       if (!_allSymptoms.contains(key)) {
         _allSymptoms.add(key);
       }
     }
+    _filteredSymptoms = _ordered();
+  }
+
+  /// Самые частые симптомы цикла — наверх, чтобы не листать список от «Абсцесса».
+  static const List<String> _common = [
+    'Мышечные спазмы', 'Боль в животе', 'Вздутие живота', 'Головные боли', 'Болезненность груди', 'Усталость',
+    'Изменения настроения', 'Раздражительность', 'Угревая сыпь', 'Боли в спине', 'Тяга (сладкая еда)', 'Тошнота/рвота',
+    'Бессонница', 'Тревога', 'Обильные менструации', 'Вагинальные выделения',
+  ];
+
+  /// Без поиска: отмеченные сегодня → частые → остальные по алфавиту.
+  List<String> _ordered() {
+    final selected = _allSymptoms.where((s) => _selectedSymptoms.containsKey(s)).toList();
+    final common = _common.where((s) => _allSymptoms.contains(s) && !_selectedSymptoms.containsKey(s)).toList();
+    final rest = _allSymptoms.where((s) => !selected.contains(s) && !common.contains(s)).toList();
+    return [...selected, ...common, ...rest];
   }
 
   // ИСПРАВЛЕНО: Добавлен обязательный dispose
@@ -129,7 +145,7 @@ class _HarmonySymptomsSheetState extends State<HarmonySymptomsSheet> {
   void _filterSearch(String query) {
     setState(() {
       if (query.isEmpty) {
-        _filteredSymptoms = List.from(_allSymptoms);
+        _filteredSymptoms = _ordered();
       } else {
         _filteredSymptoms = _allSymptoms.where((s) => s.toLowerCase().contains(query.toLowerCase())).toList();
       }
@@ -179,20 +195,19 @@ class _HarmonySymptomsSheetState extends State<HarmonySymptomsSheet> {
                             setState(() => _selectedSymptoms.remove(symptom));
                             Navigator.pop(pickerCtx);
                           },
-                          child: const Icon(Icons.delete_outline, color: Colors.redAccent),
+                          child: const Icon(PhosphorIconsLight.trash, color: Colors.redAccent),
                         ),
                       ),
                       const SizedBox(width: 12),
                     ],
                     Expanded(
                       flex: 3,
-                      child: ElevatedButton(
-                        style: ElevatedButton.styleFrom(padding: const EdgeInsets.symmetric(vertical: 14), backgroundColor: theme.colorScheme.primary, elevation: 0, shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16))),
-                        onPressed: () {
+                      child: EvaPrimaryButton(
+                                                onPressed: () {
                           setState(() => _selectedSymptoms[symptom] = currentScore);
                           Navigator.pop(pickerCtx);
                         },
-                        child: Text("СОХРАНИТЬ", style: TextStyle(color: theme.colorScheme.onPrimary, fontWeight: FontWeight.w800)),
+                        label: 'Сохранить',
                       ),
                     ),
                   ],
@@ -243,7 +258,7 @@ class _HarmonySymptomsSheetState extends State<HarmonySymptomsSheet> {
             decoration: InputDecoration(
               hintText: "Поиск симптома...",
               hintStyle: TextStyle(color: theme.colorScheme.onSurfaceVariant.withValues(alpha: 0.6)),
-              prefixIcon: Icon(Icons.search, color: theme.colorScheme.onSurfaceVariant),
+              prefixIcon: Icon(PhosphorIconsLight.magnifyingGlass, color: theme.colorScheme.onSurfaceVariant),
               filled: true,
               fillColor: theme.colorScheme.onSurface.withValues(alpha: 0.05), // Легкий фон в зависимости от темы
               border: OutlineInputBorder(borderRadius: BorderRadius.circular(16), borderSide: BorderSide.none),
@@ -259,7 +274,7 @@ class _HarmonySymptomsSheetState extends State<HarmonySymptomsSheet> {
               itemBuilder: (context, index) {
                 if (index == _filteredSymptoms.length) {
                   return ListTile(
-                    leading: CircleAvatar(backgroundColor: theme.colorScheme.onSurface.withValues(alpha: 0.05), child: Icon(Icons.add, color: theme.colorScheme.primary)),
+                    leading: CircleAvatar(backgroundColor: theme.colorScheme.onSurface.withValues(alpha: 0.05), child: Icon(PhosphorIconsLight.plus, color: theme.colorScheme.primary)),
                     title: Text('Добавить "${_searchController.text}"', style: TextStyle(color: theme.colorScheme.primary, fontWeight: FontWeight.bold)),
                     onTap: () {
                       final newSymptom = _searchController.text.trim();
@@ -288,7 +303,7 @@ class _HarmonySymptomsSheetState extends State<HarmonySymptomsSheet> {
                         decoration: BoxDecoration(color: theme.colorScheme.primary, shape: BoxShape.circle),
                         child: Text(score.toString(), style: TextStyle(color: theme.colorScheme.onPrimary, fontWeight: FontWeight.bold, fontSize: 12)),
                       )
-                    : Icon(Icons.add_circle_outline, color: theme.colorScheme.onSurfaceVariant.withValues(alpha: 0.4)),
+                    : Icon(PhosphorIconsLight.plusCircle, color: theme.colorScheme.onSurfaceVariant.withValues(alpha: 0.4)),
                   onTap: () => _showIntensityPicker(symptom),
                 );
               },

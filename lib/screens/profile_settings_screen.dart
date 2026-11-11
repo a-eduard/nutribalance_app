@@ -4,6 +4,7 @@ import 'dart:io';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
+import 'package:phosphor_flutter/phosphor_flutter.dart';
 import 'package:flutter/services.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:url_launcher/url_launcher.dart';
@@ -47,6 +48,7 @@ class _ProfileSettingsScreenState extends State<ProfileSettingsScreen> {
   bool _isFetching = true;
   bool _isLoading = false;
   bool _notificationsEnabled = false;
+  bool _programReminders = true;
 
   String? _currentPhotoUrl;
   File? _newPhotoFile;
@@ -57,6 +59,14 @@ class _ProfileSettingsScreenState extends State<ProfileSettingsScreen> {
   void initState() {
     super.initState();
     _loadUserData();
+  }
+
+  /// 165.0 → «165», 60.5 → «60.5».
+  static String _num(dynamic v) {
+    if (v == null) return '';
+    final double? d = v is num ? v.toDouble() : double.tryParse(v.toString());
+    if (d == null) return v.toString();
+    return d == d.roundToDouble() ? d.toInt().toString() : d.toStringAsFixed(1);
   }
 
   @override
@@ -86,12 +96,13 @@ class _ProfileSettingsScreenState extends State<ProfileSettingsScreen> {
         setState(() {
           _nameController.text = (userData['name'] ?? '').toString();
           _notificationsEnabled = userData['notificationsEnabled'] == true;
+          _programReminders = userData['programRemindersOff'] != true;
           _nicknameController.text = (userData['nickname'] ?? '').toString().toLowerCase().replaceAll(RegExp(r'[^a-z0-9_]'), '');
           _currentPhotoUrl = userData['photoUrl']?.toString();
           _selectedGender = (userData['gender'] ?? 'не указан').toString();
           _ageController.text = userData['age'] != null ? '${evaInt(userData['age'])}' : '';
-          _heightController.text = userData['height']?.toString() ?? '';
-          _weightController.text = userData['weight']?.toString() ?? '';
+          _heightController.text = _num(userData['height']);
+          _weightController.text = _num(userData['weight']);
           final String goal = (userData['goal'] ?? userData['goals'] ?? 'Похудеть').toString();
           _selectedGoal = _goals.contains(goal) ? goal : (goal == 'Поддержать вес' ? 'Поддержание веса' : goal == 'Набрать массу' ? 'Набрать вес' : 'Похудеть');
           final String act = (userData['activityLevel'] ?? 'Умеренная (1-2 тренировки)').toString();
@@ -112,6 +123,13 @@ class _ProfileSettingsScreenState extends State<ProfileSettingsScreen> {
     } catch (e) {
       debugPrint("Ошибка выбора фото: $e");
     }
+  }
+
+  void _toggleProgramReminders(bool value) {
+    setState(() => _programReminders = value);
+    final uid = FirebaseAuth.instance.currentUser?.uid;
+    if (uid == null) return;
+    FirebaseFirestore.instance.collection('users').doc(uid).set({'programRemindersOff': !value}, SetOptions(merge: true)).catchError((e) => debugPrint('$e'));
   }
 
   Future<void> _toggleNotifications(bool value) async {
@@ -356,7 +374,7 @@ class _ProfileSettingsScreenState extends State<ProfileSettingsScreen> {
                               child: CircleAvatar(
                                 backgroundColor: palette.fieldFill,
                                 backgroundImage: avatar,
-                                child: avatar == null ? Icon(Icons.person_rounded, size: 48, color: theme.colorScheme.onSurfaceVariant) : null,
+                                child: avatar == null ? Icon(PhosphorIconsLight.user, size: 48, color: theme.colorScheme.onSurfaceVariant) : null,
                               ),
                             ),
                           ),
@@ -366,7 +384,7 @@ class _ProfileSettingsScreenState extends State<ProfileSettingsScreen> {
                             child: Container(
                               padding: const EdgeInsets.all(8),
                               decoration: BoxDecoration(color: theme.colorScheme.primary, shape: BoxShape.circle, border: Border.all(color: theme.colorScheme.surface, width: 3)),
-                              child: const Icon(Icons.photo_camera_rounded, size: 16, color: Colors.white),
+                              child: const Icon(PhosphorIconsFill.camera, size: 16, color: Colors.white),
                             ),
                           ),
                         ],
@@ -378,7 +396,7 @@ class _ProfileSettingsScreenState extends State<ProfileSettingsScreen> {
                   TextField(
                     controller: _nameController,
                     textCapitalization: TextCapitalization.words,
-                    decoration: const InputDecoration(labelText: 'Имя', prefixIcon: Icon(Icons.person_outline_rounded)),
+                    decoration: const InputDecoration(labelText: 'Имя', prefixIcon: Icon(PhosphorIconsLight.user)),
                   ),
                   const SizedBox(height: 12),
                   TextField(
@@ -387,7 +405,7 @@ class _ProfileSettingsScreenState extends State<ProfileSettingsScreen> {
                       labelText: 'Никнейм (для поиска в чатах)',
                       prefixText: '@',
                       errorText: _nicknameError,
-                      prefixIcon: const Icon(Icons.alternate_email_rounded),
+                      prefixIcon: const Icon(PhosphorIconsLight.at),
                     ),
                     inputFormatters: [
                       TextInputFormatter.withFunction((oldValue, newValue) {
@@ -414,7 +432,7 @@ class _ProfileSettingsScreenState extends State<ProfileSettingsScreen> {
                         child: TextField(
                           controller: _heightController,
                           keyboardType: const TextInputType.numberWithOptions(decimal: true),
-                          decoration: const InputDecoration(labelText: 'Рост', suffixText: 'см'),
+                          decoration: const InputDecoration(labelText: 'Рост', suffixText: ' см'),
                         ),
                       ),
                       const SizedBox(width: 10),
@@ -431,13 +449,13 @@ class _ProfileSettingsScreenState extends State<ProfileSettingsScreen> {
                   EvaMenuGroup(
                     children: [
                       EvaMenuTile(
-                        icon: Icons.flag_outlined,
+                        icon: PhosphorIconsLight.flag,
                         title: 'Цель',
                         subtitle: _selectedGoal,
                         onTap: () => _pickFromList('Твоя цель', _goals, _selectedGoal, (v) => setState(() => _selectedGoal = v)),
                       ),
                       EvaMenuTile(
-                        icon: Icons.directions_run_rounded,
+                        icon: PhosphorIconsLight.personSimpleRun,
                         title: 'Активность',
                         subtitle: _selectedActivity,
                         onTap: () => _pickFromList('Уровень активности', _activities, _selectedActivity, (v) => setState(() => _selectedActivity = v)),
@@ -451,18 +469,25 @@ class _ProfileSettingsScreenState extends State<ProfileSettingsScreen> {
                     title: 'Приложение',
                     children: [
                       EvaMenuTile(
-                        icon: Icons.notifications_none_rounded,
+                        icon: PhosphorIconsLight.bell,
                         title: 'Заботливые напоминания',
                         subtitle: 'Вода, обед и итоги дня',
                         trailing: Switch(value: _notificationsEnabled, onChanged: _toggleNotifications),
                         onTap: () => _toggleNotifications(!_notificationsEnabled),
+                      ),
+                      EvaMenuTile(
+                        icon: PhosphorIconsLight.trophy,
+                        title: 'Курс и челленджи',
+                        subtitle: 'Одно напоминание вечером об уроке и отметке',
+                        trailing: Switch(value: _programReminders, onChanged: _toggleProgramReminders),
+                        onTap: () => _toggleProgramReminders(!_programReminders),
                       ),
                       ValueListenableBuilder<ThemeMode>(
                         valueListenable: ThemeService().themeModeNotifier,
                         builder: (context, mode, _) {
                           const labels = {ThemeMode.system: 'Как в системе', ThemeMode.light: 'Светлая', ThemeMode.dark: 'Тёмная'};
                           return EvaMenuTile(
-                            icon: Icons.palette_outlined,
+                            icon: PhosphorIconsLight.palette,
                             title: 'Тема оформления',
                             subtitle: labels[mode],
                             onTap: () => EvaSheet.show<void>(
@@ -495,7 +520,7 @@ class _ProfileSettingsScreenState extends State<ProfileSettingsScreen> {
                     title: 'Помощь и документы',
                     children: [
                       EvaMenuTile(
-                        icon: Icons.support_agent_rounded,
+                        icon: PhosphorIconsLight.headset,
                         title: 'Написать в поддержку',
                         onTap: () => Navigator.push(
                           context,
@@ -503,13 +528,13 @@ class _ProfileSettingsScreenState extends State<ProfileSettingsScreen> {
                         ),
                       ),
                       EvaMenuTile(
-                        icon: Icons.description_outlined,
+                        icon: PhosphorIconsLight.fileText,
                         iconColor: theme.colorScheme.onSurfaceVariant,
                         title: 'Пользовательское соглашение',
                         onTap: () => launchUrl(Uri.parse(_termsUrl), mode: LaunchMode.externalApplication),
                       ),
                       EvaMenuTile(
-                        icon: Icons.privacy_tip_outlined,
+                        icon: PhosphorIconsLight.shieldCheck,
                         iconColor: theme.colorScheme.onSurfaceVariant,
                         title: 'Политика конфиденциальности',
                         onTap: () => launchUrl(Uri.parse(_privacyUrl), mode: LaunchMode.externalApplication),
@@ -520,9 +545,9 @@ class _ProfileSettingsScreenState extends State<ProfileSettingsScreen> {
                   EvaMenuGroup(
                     title: 'Аккаунт',
                     children: [
-                      EvaMenuTile(icon: Icons.lock_reset_rounded, iconColor: palette.lavender, title: 'Сменить пароль', onTap: _changePassword),
-                      EvaMenuTile(icon: Icons.logout_rounded, iconColor: theme.colorScheme.onSurfaceVariant, title: 'Выйти из аккаунта', onTap: _isLoading ? null : _logout),
-                      EvaMenuTile(icon: Icons.delete_outline_rounded, title: 'Удалить аккаунт', destructive: true, onTap: _showDeleteAccountDialog),
+                      EvaMenuTile(icon: PhosphorIconsLight.lockKey, iconColor: palette.lavender, title: 'Сменить пароль', onTap: _changePassword),
+                      EvaMenuTile(icon: PhosphorIconsLight.signOut, iconColor: theme.colorScheme.onSurfaceVariant, title: 'Выйти из аккаунта', onTap: _isLoading ? null : _logout),
+                      EvaMenuTile(icon: PhosphorIconsLight.trash, title: 'Удалить аккаунт', destructive: true, onTap: _showDeleteAccountDialog),
                     ],
                   ),
                   const SizedBox(height: 16),

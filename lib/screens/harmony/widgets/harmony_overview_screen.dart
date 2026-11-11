@@ -1,9 +1,11 @@
 import 'package:flutter/material.dart';
+import 'package:phosphor_flutter/phosphor_flutter.dart';
 import '../../../theme/eva_colors.dart';
+import '../../../widgets/eva_ui.dart';
+import '../../../widgets/weight_chart.dart';
 import 'package:flutter/cupertino.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
-import 'package:fl_chart/fl_chart.dart';
 import 'package:intl/intl.dart';
 import '../../../../services/database_service.dart';
 import '../../../../services/pdf_report_service.dart';
@@ -34,11 +36,10 @@ class _HarmonyOverviewScreenState extends State<HarmonyOverviewScreen> {
       child: Scaffold(
         backgroundColor: theme.scaffoldBackgroundColor,
         appBar: AppBar(
-          backgroundColor: theme.colorScheme.surface,
+          backgroundColor: theme.scaffoldBackgroundColor,
           elevation: 0,
-          iconTheme: IconThemeData(color: theme.colorScheme.onSurface),
-          title: Text("Обзор", style: TextStyle(color: theme.colorScheme.onSurface, fontWeight: FontWeight.w900)),
-          centerTitle: true,
+          leading: IconButton(icon: const Icon(Icons.arrow_back_ios_new_rounded, size: 20), onPressed: () => Navigator.maybePop(context)),
+          title: const Text("Обзор"),
           bottom: TabBar(
             labelColor: theme.colorScheme.primary,
             unselectedLabelColor: theme.colorScheme.onSurfaceVariant,
@@ -47,7 +48,7 @@ class _HarmonyOverviewScreenState extends State<HarmonyOverviewScreen> {
             tabs: const [
               Tab(text: "Статистика"),
               Tab(text: "Вес"),
-              Tab(text: "PDF Отчет"),
+              Tab(text: "Для врача"),
             ],
           ),
         ),
@@ -70,7 +71,6 @@ class _HarmonyOverviewScreenState extends State<HarmonyOverviewScreen> {
         final data = snapshot.data ?? {};
 
         final Timestamp? lastStart = data['lastPeriodStartDate'] as Timestamp?;
-        String lastPeriodStr = lastStart != null ? DateFormat('dd MMMM yyyy', 'ru_RU').format(lastStart.toDate()) : 'Нет данных';
 
         return SingleChildScrollView(
           padding: const EdgeInsets.all(20),
@@ -78,29 +78,81 @@ class _HarmonyOverviewScreenState extends State<HarmonyOverviewScreen> {
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               Text("Цикл", style: TextStyle(fontSize: 20, fontFamily: EvaFonts.serif, fontWeight: FontWeight.w500, color: theme.colorScheme.onSurface)),
-              const SizedBox(height: 16),
-              _buildStatCard("Последняя менструация", lastPeriodStr, Icons.water_drop, theme.colorScheme.primary, theme),
-              _buildStatCard("Средняя длина цикла", "${data['cycleLength'] ?? 0} дн.", Icons.loop, Colors.teal, theme),
-              _buildStatCard("Продолжительность месячных", "${data['periodDuration'] ?? 0} дн.", Icons.calendar_today, Colors.orange, theme),
-              
-              const SizedBox(height: 32),
-              Text("Секс (Количество занятий)", style: TextStyle(fontSize: 20, fontFamily: EvaFonts.serif, fontWeight: FontWeight.w500, color: theme.colorScheme.onSurface)),
-              const SizedBox(height: 16),
-              _buildStatCard("За неделю", "${data['sexWeek'] ?? 0}", Icons.favorite, Colors.pinkAccent, theme),
-              _buildStatCard("За месяц", "${data['sexMonth'] ?? 0}", Icons.favorite, Colors.pinkAccent, theme),
-              _buildStatCard("За год", "${data['sexYear'] ?? 0}", Icons.favorite, Colors.pinkAccent, theme),
-
-              const SizedBox(height: 32),
-              Text("Интимность (Оргазмы)", style: TextStyle(fontSize: 20, fontFamily: EvaFonts.serif, fontWeight: FontWeight.w500, color: theme.colorScheme.onSurface)),
-              const SizedBox(height: 16),
-              _buildStatCard("За неделю", "${data['orgasmsWeek'] ?? 0}", Icons.auto_awesome, Colors.deepPurpleAccent, theme),
-              _buildStatCard("За месяц", "${data['orgasmsMonth'] ?? 0}", Icons.auto_awesome, Colors.deepPurpleAccent, theme),
-              _buildStatCard("За год", "${data['orgasmsYear'] ?? 0}", Icons.bar_chart, Colors.blueAccent, theme),
+              const SizedBox(height: 12),
+              _statRowCard(theme, [
+                ('Последние месячные', lastStart != null ? DateFormat('d MMM', 'ru_RU').format(lastStart.toDate()) : '—', PhosphorIconsFill.drop),
+                ('Длина цикла', '${data['cycleLength'] ?? 0} дн.', PhosphorIconsLight.arrowsClockwise),
+                ('Месячные', '${data['periodDuration'] ?? 0} дн.', PhosphorIconsLight.calendarBlank),
+              ]),
+              const SizedBox(height: 28),
+              Text("Близость", style: TextStyle(fontSize: 20, fontFamily: EvaFonts.serif, fontWeight: FontWeight.w500, color: theme.colorScheme.onSurface)),
+              const SizedBox(height: 12),
+              _intimacyTable(theme, data),
+              const SizedBox(height: 10),
+              Text('Видно только тебе. В отчёт для врача попадает, только если включишь это при выгрузке.',
+                  style: theme.textTheme.bodySmall?.copyWith(color: theme.colorScheme.onSurfaceVariant)),
               const SizedBox(height: 40),
             ],
           ),
         );
       },
+    );
+  }
+
+  Widget _statRowCard(ThemeData theme, List<(String, String, IconData)> items) {
+    return Container(
+      padding: const EdgeInsets.symmetric(vertical: 18, horizontal: 8),
+      decoration: BoxDecoration(color: theme.colorScheme.surface, borderRadius: BorderRadius.circular(22), border: Border.all(color: context.eva.hairline)),
+      child: Row(
+        children: [
+          for (final it in items)
+            Expanded(
+              child: Column(children: [
+                Icon(it.$3, size: 22, color: theme.colorScheme.primary),
+                const SizedBox(height: 8),
+                Text(it.$2, maxLines: 1, overflow: TextOverflow.ellipsis, style: theme.textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w700)),
+                const SizedBox(height: 2),
+                Text(it.$1, textAlign: TextAlign.center, maxLines: 2, style: theme.textTheme.bodySmall?.copyWith(color: theme.colorScheme.onSurfaceVariant)),
+              ]),
+            ),
+        ],
+      ),
+    );
+  }
+
+  Widget _intimacyTable(ThemeData theme, Map<String, dynamic> d) {
+    TextStyle head = theme.textTheme.labelMedium!.copyWith(color: theme.colorScheme.onSurfaceVariant);
+    Widget cell(String t, {bool bold = false, TextAlign align = TextAlign.center}) => Padding(
+          padding: const EdgeInsets.symmetric(vertical: 10),
+          child: Text(t, textAlign: align, style: bold ? theme.textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w700) : theme.textTheme.bodyMedium),
+        );
+    return Container(
+      padding: const EdgeInsets.fromLTRB(16, 8, 16, 8),
+      decoration: BoxDecoration(color: theme.colorScheme.surface, borderRadius: BorderRadius.circular(22), border: Border.all(color: context.eva.hairline)),
+      child: Table(
+        columnWidths: const {0: FlexColumnWidth(1.6), 1: FlexColumnWidth(), 2: FlexColumnWidth(), 3: FlexColumnWidth()},
+        defaultVerticalAlignment: TableCellVerticalAlignment.middle,
+        children: [
+          TableRow(children: [
+            const SizedBox(),
+            Padding(padding: const EdgeInsets.symmetric(vertical: 8), child: Text('Неделя', textAlign: TextAlign.center, style: head)),
+            Padding(padding: const EdgeInsets.symmetric(vertical: 8), child: Text('Месяц', textAlign: TextAlign.center, style: head)),
+            Padding(padding: const EdgeInsets.symmetric(vertical: 8), child: Text('Год', textAlign: TextAlign.center, style: head)),
+          ]),
+          TableRow(children: [
+            cell('Близость', align: TextAlign.left),
+            cell('${d['sexWeek'] ?? 0}', bold: true),
+            cell('${d['sexMonth'] ?? 0}', bold: true),
+            cell('${d['sexYear'] ?? 0}', bold: true),
+          ]),
+          TableRow(children: [
+            cell('Оргазмы', align: TextAlign.left),
+            cell('${d['orgasmsWeek'] ?? 0}', bold: true),
+            cell('${d['orgasmsMonth'] ?? 0}', bold: true),
+            cell('${d['orgasmsYear'] ?? 0}', bold: true),
+          ]),
+        ],
+      ),
     );
   }
 
@@ -134,7 +186,7 @@ class _HarmonyOverviewScreenState extends State<HarmonyOverviewScreen> {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Text("Динамика веса", style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: theme.colorScheme.onSurface)),
+                Text("Динамика веса", style: theme.textTheme.titleLarge),
                 const SizedBox(height: 24),
                 StreamBuilder<QuerySnapshot>(
                   stream: FirebaseFirestore.instance.collection('users').doc(uid).collection('weight_logs')
@@ -143,67 +195,17 @@ class _HarmonyOverviewScreenState extends State<HarmonyOverviewScreen> {
                   builder: (context, snapshot) {
                     if (snapshot.connectionState == ConnectionState.waiting) return SizedBox(height: 200, child: Center(child: CircularProgressIndicator(color: theme.colorScheme.primary)));
                     final docs = snapshot.data?.docs ?? [];
-                    if (docs.length < 2) return SizedBox(height: 200, child: Center(child: Text("Недостаточно данных", style: TextStyle(color: theme.colorScheme.onSurfaceVariant))));
+                    if (docs.length < 2) return SizedBox(height: 200, child: Center(child: Text("Отметь вес хотя бы в два разных дня — появится график", textAlign: TextAlign.center, style: TextStyle(color: theme.colorScheme.onSurfaceVariant))));
 
-                    List<FlSpot> spots = [];
-                    List<String> dates = [];
-                    for (int i = 0; i < docs.length; i++) {
-                      final data = docs[i].data() as Map<String, dynamic>;
-                      spots.add(FlSpot(i.toDouble(), (data['weight'] as num).toDouble()));
-                      dates.add((data['date'] as String).substring(5).replaceAll('-', '.'));
-                    }
-
-                    int step = (dates.length / 5).ceil();
-                    if (step == 0) step = 1;
-
-                    return SizedBox(
-                      height: 220,
-                      child: LineChart(
-                        LineChartData(
-                          gridData: const FlGridData(show: false),
-                          titlesData: FlTitlesData(
-                            rightTitles: const AxisTitles(sideTitles: SideTitles(showTitles: false)),
-                            topTitles: const AxisTitles(sideTitles: SideTitles(showTitles: false)),
-                            bottomTitles: AxisTitles(
-                              sideTitles: SideTitles(showTitles: true, getTitlesWidget: (val, meta) {
-                                int idx = val.toInt();
-                                if (idx % step == 0 && idx < dates.length) return Padding(padding: const EdgeInsets.only(top: 8), child: Text(dates[idx], style: TextStyle(fontSize: 10, color: theme.colorScheme.onSurfaceVariant)));
-                                return const SizedBox();
-                              }),
-                            ),
-                          ),
-                          borderData: FlBorderData(show: false),
-                          lineBarsData: [
-                            LineChartBarData(
-                              spots: spots, isCurved: true, color: theme.colorScheme.primary, barWidth: 4,
-                              dotData: FlDotData(show: docs.length <= 30),
-                              belowBarData: BarAreaData(show: true, color: theme.colorScheme.primary.withValues(alpha: 0.1)),
-                            ),
-                          ],
-                        ),
-                      ),
-                    );
+                    return WeightLineChart(points: [
+                      for (final d in docs)
+                        MapEntry((d.data() as Map<String, dynamic>)['date'].toString(), ((d.data() as Map<String, dynamic>)['weight'] as num).toDouble()),
+                    ]);
                   },
                 ),
               ],
             ),
           )
-        ],
-      ),
-    );
-  }
-
-  Widget _buildStatCard(String title, String value, IconData icon, Color iconColor, ThemeData theme) {
-    return Container(
-      margin: const EdgeInsets.only(bottom: 12),
-      padding: const EdgeInsets.all(16),
-      decoration: BoxDecoration(color: theme.colorScheme.surface, borderRadius: BorderRadius.circular(20), boxShadow: [BoxShadow(color: Colors.black.withValues(alpha: 0.03), blurRadius: 10, offset: const Offset(0, 4))]),
-      child: Row(
-        children: [
-          Container(padding: const EdgeInsets.all(10), decoration: BoxDecoration(color: iconColor.withValues(alpha: 0.1), shape: BoxShape.circle), child: Icon(icon, color: iconColor, size: 24)),
-          const SizedBox(width: 16),
-          Expanded(child: Text(title, style: TextStyle(color: theme.colorScheme.onSurfaceVariant, fontSize: 14, fontWeight: FontWeight.w600))),
-          Text(value, style: TextStyle(color: theme.colorScheme.onSurface, fontSize: 18, fontWeight: FontWeight.w900)),
         ],
       ),
     );
@@ -220,11 +222,11 @@ class _HarmonyOverviewScreenState extends State<HarmonyOverviewScreen> {
             decoration: BoxDecoration(color: theme.colorScheme.surface, borderRadius: BorderRadius.circular(24), boxShadow: [BoxShadow(color: Colors.black.withValues(alpha: 0.05), blurRadius: 20, offset: const Offset(0, 10))]),
             child: Column(
               children: [
-                Icon(Icons.picture_as_pdf_rounded, size: 64, color: theme.colorScheme.primary),
+                Icon(PhosphorIconsLight.filePdf, size: 64, color: theme.colorScheme.primary),
                 const SizedBox(height: 24),
-                Text("Экспорт для врача", style: TextStyle(fontSize: 22, fontFamily: EvaFonts.serif, fontWeight: FontWeight.w500, color: theme.colorScheme.onSurface)),
+                Text("Отчёт для врача", style: TextStyle(fontSize: 22, fontFamily: EvaFonts.serif, fontWeight: FontWeight.w500, color: theme.colorScheme.onSurface)),
                 const SizedBox(height: 12),
-                Text("Сгенерируйте подробный отчет о циклах, симптомах и весе в формате PDF.", textAlign: TextAlign.center, style: TextStyle(color: theme.colorScheme.onSurfaceVariant, fontSize: 14, height: 1.4)),
+                Text("PDF за 3 месяца: параметры цикла и прогноз, симптомы, настроение, препараты, температура и вес. Удобно отправить врачу перед приёмом.", textAlign: TextAlign.center, style: TextStyle(color: theme.colorScheme.onSurfaceVariant, fontSize: 14, height: 1.4)),
                 const SizedBox(height: 24),
                 
                 Container(
@@ -232,38 +234,31 @@ class _HarmonyOverviewScreenState extends State<HarmonyOverviewScreen> {
                   child: SwitchListTile(
                     activeTrackColor: theme.colorScheme.primary,
                     title: Text("Скрыть интимные детали", style: TextStyle(fontSize: 14, fontWeight: FontWeight.bold, color: theme.colorScheme.onSurface)),
-                    subtitle: Text("Уберет данные о сексе и либидо из отчета", style: TextStyle(fontSize: 12, color: theme.colorScheme.onSurfaceVariant)),
+                    subtitle: Text("Данные о близости не попадут в отчёт", style: TextStyle(fontSize: 12, color: theme.colorScheme.onSurfaceVariant)),
                     value: _hideIntimateDetails,
                     onChanged: (val) => setState(() => _hideIntimateDetails = val),
                   ),
                 ),
                 
                 const SizedBox(height: 32),
-                SizedBox(
-                  width: double.infinity, height: 54,
-                  child: ElevatedButton(
-                    style: ElevatedButton.styleFrom(backgroundColor: theme.colorScheme.primary, shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)), elevation: 0),
-                    onPressed: _isGeneratingPdf 
-                      ? null 
+                EvaPrimaryButton(
+                  label: 'Скачать PDF',
+                  icon: PhosphorIconsLight.downloadSimple,
+                  loading: _isGeneratingPdf,
+                  onPressed: _isGeneratingPdf
+                      ? null
                       : () async {
                           setState(() => _isGeneratingPdf = true);
                           try {
-                            await PdfReportService.generateAndShareHarmonyReport(
-                              hideIntimateDetails: _hideIntimateDetails,
-                            );
+                            await PdfReportService.generateAndShareHarmonyReport(hideIntimateDetails: _hideIntimateDetails);
                           } catch (e) {
-                            if (mounted) {
-                              ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Ошибка генерации: $e'), backgroundColor: Colors.red));
-                            }
+                            debugPrint('pdf: $e');
+                            if (mounted) EvaSnack.show(context, 'Не получилось собрать отчёт. Попробуй ещё раз.', type: EvaSnackType.error);
                           } finally {
                             if (mounted) setState(() => _isGeneratingPdf = false);
                           }
-                      },
-                    child: _isGeneratingPdf 
-                      ? SizedBox(width: 24, height: 24, child: CircularProgressIndicator(color: theme.colorScheme.onPrimary, strokeWidth: 2))
-                      : Text("СГЕНЕРИРОВАТЬ PDF", style: TextStyle(color: theme.colorScheme.onPrimary, fontWeight: FontWeight.w900, letterSpacing: 1.0)),
-                  ),
-                )
+                        },
+                ),
               ],
             ),
           )

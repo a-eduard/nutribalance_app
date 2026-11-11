@@ -745,11 +745,24 @@ class DatabaseService {
         _db.collection('users').doc(user.uid).get(cacheOptions).timeout(const Duration(seconds: 2)),
         _db.collection('users').doc(user.uid).collection('nutrition_goal').doc('current').get(cacheOptions).timeout(const Duration(seconds: 2)),
         _db.collection('users').doc(user.uid).collection('cycle_logs').doc(todayDocId).get(cacheOptions).timeout(const Duration(seconds: 2)),
+        _db.collection('users').doc(user.uid).collection('health_daily').doc(todayDocId).get(cacheOptions).timeout(const Duration(seconds: 2)),
       ]);
 
       final userDoc = results[0] as DocumentSnapshot;
       final goalDoc = results[1] as DocumentSnapshot;
       final harmonyDoc = results[2] as DocumentSnapshot;
+      final healthData = (results[3] as DocumentSnapshot).data() as Map<String, dynamic>? ?? {};
+      String healthContext = '';
+      if (healthData.isNotEmpty) {
+        final int steps = (healthData['steps'] as num?)?.toInt() ?? 0;
+        final int sleepMin = (healthData['sleepMin'] as num?)?.toInt() ?? 0;
+        final int activeKcal = (healthData['activeKcal'] as num?)?.toInt() ?? 0;
+        healthContext = '\nАКТИВНОСТЬ СЕГОДНЯ (Health Connect, с браслета/телефона): шаги $steps'
+            '${sleepMin > 0 ? ', сон прошлой ночью ${sleepMin ~/ 60} ч ${sleepMin % 60} мин' : ''}'
+            '${activeKcal > 0 ? ', активные калории $activeKcal ккал' : ''}'
+            '${healthData['weightKg'] != null ? ', последний вес ${healthData['weightKg']} кг' : ''}.\n'
+            'Учитывай это в советах: мало сна — мягче к себе и больше белка/клетчатки; много шагов — можно чуть больше углеводов.\n';
+      }
 
       final userData = userDoc.data() as Map<String, dynamic>? ?? {};
 
@@ -815,7 +828,7 @@ class DatabaseService {
         }
       }
 
-      String harmonyContextText = "Сегодня данные в раздел Гармония не вносились.";
+      String harmonyContextText = "Сегодня данные в раздел Календарь не вносились.";
       if (harmonyDoc.exists) {
         final hData = harmonyDoc.data() as Map<String, dynamic>? ?? {};
         
@@ -839,7 +852,7 @@ class DatabaseService {
         final String sleep = hData['sleep'] ?? 'Не отмечено';
         
         harmonyContextText = """
-СЕГОДНЯШНЕЕ САМОЧУВСТВИЕ (из раздела Гармония):
+СЕГОДНЯШНЕЕ САМОЧУВСТВИЕ (из раздела Календарь):
 - Симптомы: $symptoms
 - Настроение: $mood
 - Медикаменты: $meds
@@ -873,8 +886,8 @@ $questionnaireContext
 ИНСТРУКЦИЯ ПО ЦИКЛУ ПОЛЬЗОВАТЕЛЯ:
 Фаза цикла: $cyclePhase.
 
-$harmonyContextText
-ВНИМАНИЕ: Ты ВИДИШЬ раздел Гармония (он передан тебе в тексте выше). НИКОГДА не говори пользователю "Я не вижу раздел Гармония". Если пользователь просит проанализировать его показатели, используй данные из блока "СЕГОДНЯШНЕЕ САМОЧУВСТВИЕ".
+$harmonyContextText$healthContext
+ВНИМАНИЕ: Ты ВИДИШЬ раздел Календарь (он передан тебе в тексте выше). НИКОГДА не говори пользователю "Я не вижу раздел Календарь". Если пользователь просит проанализировать его показатели, используй данные из блока "СЕГОДНЯШНЕЕ САМОЧУВСТВИЕ".
 
 🚨 КРИТИЧЕСКИ ВАЖНЫЕ ПРАВИЛА (ВЫПОЛНЯТЬ БЕЗУКОСНИТЕЛЬНО): 🚨
 1. АНАЛИЗ ЧУЖИХ ДАННЫХ: Если пользователь присылает анализы ДРУГОГО человека (дочери, мужа, родственника) — АНАЛИЗИРУЙ ИХ СТРОГО КАК ОТДЕЛЬНОГО ПАЦИЕНТА. КАТЕГОРИЧЕСКИ ЗАПРЕЩЕНО применять к ним цели пользователя (похудение/набор веса) и фазу цикла пользователя! 

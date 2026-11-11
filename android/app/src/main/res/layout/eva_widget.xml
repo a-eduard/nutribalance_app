@@ -1,0 +1,82 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:id="@+id/widget_root"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:background="@drawable/eva_widget_bg"
+    android:gravity="center_vertical"
+    android:orientation="horizontal"
+    android:paddingStart="18dp"
+    android:paddingEnd="18dp"
+    android:paddingTop="10dp"
+    android:paddingBottom="10dp">
+
+    <LinearLayout
+        android:layout_width="0dp"
+        android:layout_height="wrap_content"
+        android:layout_weight="1"
+        android:orientation="vertical">
+
+        <LinearLayout
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:gravity="center_vertical"
+            android:orientation="horizontal">
+            <TextView
+                android:id="@+id/widget_day"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="—"
+                android:textColor="#FFF4ECEE"
+                android:textSize="28sp"
+                android:fontFamily="serif" />
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginStart="6dp"
+                android:text="день\nцикла"
+                android:textColor="#FFB3A6AB"
+                android:textSize="10sp"
+                android:lineSpacingMultiplier="0.9" />
+        </LinearLayout>
+
+        <TextView
+            android:id="@+id/widget_phase"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:ellipsize="end"
+            android:maxLines="1"
+            android:text="Открой приложение"
+            android:textColor="#FFE9A3B8"
+            android:textSize="12sp" />
+    </LinearLayout>
+
+    <FrameLayout
+        android:layout_width="1dp"
+        android:layout_height="36dp"
+        android:layout_marginStart="10dp"
+        android:layout_marginEnd="14dp"
+        android:background="#33FFFFFF" />
+
+    <LinearLayout
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:gravity="end"
+        android:orientation="vertical">
+        <TextView
+            android:id="@+id/widget_kcal"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="—"
+            android:textColor="#FFF4ECEE"
+            android:textSize="26sp"
+            android:fontFamily="serif" />
+        <TextView
+            android:id="@+id/widget_kcal_label"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="ккал осталось"
+            android:textColor="#FFC6A27C"
+            android:textSize="11sp" />
+    </LinearLayout>
+</LinearLayout>

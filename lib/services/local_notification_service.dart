@@ -156,12 +156,15 @@ class LocalNotificationService {
     await cancelCareReminders();
 
     final String name = await _loadUserName();
+    // Курс идёт — вечером уже придёт пуш об уроке, второе вечернее «итоги дня» не шлём.
+    final bool courseActive = await _isCourseActive();
     final tz.TZDateTime now = tz.TZDateTime.now(tz.local);
     final NotificationDetails details = _careDetails;
 
     for (int dayOffset = 0; dayOffset < _daysAhead; dayOffset++) {
       for (int slotIndex = 0; slotIndex < _slots.length; slotIndex++) {
         final _CareSlot slot = _slots[slotIndex];
+        if (courseActive && slot.key == 'evening') continue;
         final tz.TZDateTime when = tz.TZDateTime(tz.local, now.year, now.month, now.day + dayOffset, slot.hour, slot.minute);
         if (!when.isAfter(now.add(const Duration(minutes: 1)))) continue;
 
@@ -186,6 +189,18 @@ class LocalNotificationService {
           debugPrint('schedule care: $e');
         }
       }
+    }
+  }
+
+  Future<bool> _isCourseActive() async {
+    try {
+      final uid = FirebaseAuth.instance.currentUser?.uid;
+      if (uid == null) return false;
+      final doc = await FirebaseFirestore.instance.collection('users').doc(uid).get().timeout(const Duration(seconds: 5));
+      final c = doc.data()?['course'];
+      return c is Map && c['active'] == true;
+    } catch (_) {
+      return false;
     }
   }
 
@@ -386,7 +401,7 @@ class LocalNotificationService {
       _CareMessage('С добрым утром ☀️', 'Три глубоких вдоха — и в путь',
           '{Name}, с добрым утром! ☀️ Прежде чем открыть соцсети, сделай три медленных вдоха и потянись. Это займёт минуту, но настроит тебя на спокойный день. Ты справишься со всем, что запланировала 💛'),
       _CareMessage('Доброе утро 💧', 'Как ты себя чувствуешь?',
-          'Доброе утро, {name}! 💧 Прислушайся к себе: как спалось, есть ли энергия? Отметь самочувствие в «Гармонии» — так мне будет проще давать советы именно под твой цикл и настроение.'),
+          'Доброе утро, {name}! 💧 Прислушайся к себе: как спалось, есть ли энергия? Отметь самочувствие в «Календаре» — так мне будет проще давать советы именно под твой цикл и настроение.'),
       _CareMessage('Утро для себя 🌿', 'Пара минут только для тебя',
           '{Name}, доброе утро! 🌿 Подари себе пару минут тишины: чашка чая, окно, спокойное дыхание. Забота о себе — не роскошь, а основа хорошего дня. Я в тебя верю!'),
     ]),
@@ -416,7 +431,7 @@ class LocalNotificationService {
       _CareMessage('Сладких снов 💤', 'Пусть ночь будет спокойной',
           '{Name}, ты сегодня отлично потрудилась 💤 Отложи телефон пораньше, проветри комнату и позволь себе полноценно отдохнуть. Во сне тело восстанавливается. Спокойной ночи!'),
       _CareMessage('Как прошёл день? 🌸', 'Расскажи мне, я выслушаю',
-          '{Name}, как прошёл твой день? 🌸 Если хочется — расскажи мне, я выслушаю. А ещё можно отметить настроение в «Гармонии»: со временем ты увидишь, как оно связано с циклом.'),
+          '{Name}, как прошёл твой день? 🌸 Если хочется — расскажи мне, я выслушаю. А ещё можно отметить настроение в «Календаре»: со временем ты увидишь, как оно связано с циклом.'),
     ]),
   ];
 }

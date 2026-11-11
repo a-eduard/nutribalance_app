@@ -3,6 +3,8 @@ import 'package:flutter/cupertino.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:fl_chart/fl_chart.dart';
+import '../theme/eva_colors.dart';
+import '../widgets/weight_chart.dart';
 
 class ProgressScreen extends StatefulWidget {
   const ProgressScreen({super.key});
@@ -32,11 +34,9 @@ class _ProgressScreenState extends State<ProgressScreen> {
     return Scaffold(
       backgroundColor: theme.scaffoldBackgroundColor,
       appBar: AppBar(
-        title: Text(
-          "Мой прогресс",
-          style: TextStyle(color: theme.colorScheme.onSurface, fontWeight: FontWeight.bold),
-        ),
-        backgroundColor: theme.colorScheme.surface,
+        title: const Text("Мой прогресс"),
+        leading: IconButton(icon: const Icon(Icons.arrow_back_ios_new_rounded, size: 20), onPressed: () => Navigator.maybePop(context)),
+        backgroundColor: theme.scaffoldBackgroundColor,
         elevation: 0,
         iconTheme: IconThemeData(color: theme.colorScheme.onSurface),
       ),
@@ -67,7 +67,7 @@ class _ProgressScreenState extends State<ProgressScreen> {
 
             Text(
               "Динамика веса",
-              style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: theme.colorScheme.onSurface),
+              style: theme.textTheme.titleLarge,
             ),
             const SizedBox(height: 16),
             _buildWeightChart(user.uid, theme),
@@ -75,7 +75,7 @@ class _ProgressScreenState extends State<ProgressScreen> {
             
             Text(
               "Дефицит и профицит",
-              style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: theme.colorScheme.onSurface),
+              style: theme.textTheme.titleLarge,
             ),
             const SizedBox(height: 16),
             _buildCaloriesChart(user.uid, theme),
@@ -109,7 +109,11 @@ class _ProgressScreenState extends State<ProgressScreen> {
         
         final docs = snapshot.data?.docs ?? [];
         if (docs.length < 2) {
-          return _buildEmptyState("Добавьте больше данных о весе для отображения графика", theme);
+          if (docs.length == 1) {
+            final w = (docs.first.data() as Map<String, dynamic>)['weight'];
+            return _buildEmptyState("Пока одна запись: ${w is num ? (w == w.roundToDouble() ? w.toInt() : w.toStringAsFixed(1)) : w} кг.\nОтметь вес ещё раз через пару дней — появится график.", theme);
+          }
+          return _buildEmptyState("Отмечай вес в календаре или в профиле — здесь появится график", theme);
         }
 
         List<FlSpot> spots = [];
@@ -120,18 +124,20 @@ class _ProgressScreenState extends State<ProgressScreen> {
           final weight = (data['weight'] as num).toDouble();
           final dateStr = data['date'] as String; 
           spots.add(FlSpot(i.toDouble(), weight));
-          dates.add(dateStr.substring(5).replaceAll('-', '.')); 
+          dates.add('${dateStr.substring(8, 10)}.${dateStr.substring(5, 7)}');
         }
 
         double firstWeight = (docs.first.data() as Map<String, dynamic>)['weight'].toDouble();
         double lastWeight = (docs.last.data() as Map<String, dynamic>)['weight'].toDouble();
         double diff = lastWeight - firstWeight;
+        String kg(double v) => v == v.roundToDouble() ? v.toInt().toString() : v.toStringAsFixed(1);
+        final String periodLabel = switch (_selectedPeriodDays) { 7 => 'За 7 дней', 30 => 'За месяц', _ => 'За год' };
 
         Widget summaryWidget;
         if (diff < 0) {
-          summaryWidget = Text("За $_selectedPeriodDays дней: минус ${diff.abs().toStringAsFixed(1)} кг", style: const TextStyle(color: Colors.green, fontWeight: FontWeight.bold, fontSize: 16));
+          summaryWidget = Text("$periodLabel: −${kg(double.parse(diff.abs().toStringAsFixed(1)))} кг", style: TextStyle(color: context.eva.success, fontWeight: FontWeight.bold, fontSize: 16));
         } else if (diff > 0) {
-          summaryWidget = Text("За $_selectedPeriodDays дней: плюс ${diff.toStringAsFixed(1)} кг", style: const TextStyle(color: Colors.redAccent, fontWeight: FontWeight.bold, fontSize: 16));
+          summaryWidget = Text("$periodLabel: +${kg(double.parse(diff.toStringAsFixed(1)))} кг", style: TextStyle(color: theme.colorScheme.onSurface, fontWeight: FontWeight.bold, fontSize: 16));
         } else {
           summaryWidget = Text("Вес стабилен", style: TextStyle(color: theme.colorScheme.onSurface, fontWeight: FontWeight.bold, fontSize: 16));
         }
@@ -143,48 +149,7 @@ class _ProgressScreenState extends State<ProgressScreen> {
 
         return Column(
           children: [
-            Container(
-              height: 220,
-              padding: const EdgeInsets.only(right: 16, top: 16),
-              child: LineChart(
-                LineChartData(
-                  gridData: const FlGridData(show: false),
-                  titlesData: FlTitlesData(
-                    rightTitles: const AxisTitles(sideTitles: SideTitles(showTitles: false)),
-                    topTitles: const AxisTitles(sideTitles: SideTitles(showTitles: false)),
-                    bottomTitles: AxisTitles(
-                      sideTitles: SideTitles(
-                        showTitles: true,
-                        getTitlesWidget: (value, meta) {
-                          int idx = value.toInt();
-                          if (idx % step == 0 && idx < dates.length) {
-                            return Padding(
-                              padding: const EdgeInsets.only(top: 8.0),
-                              child: Text(dates[idx], style: TextStyle(fontSize: 10, color: theme.colorScheme.onSurfaceVariant)),
-                            );
-                          }
-                          return const SizedBox();
-                        },
-                      ),
-                    ),
-                  ),
-                  borderData: FlBorderData(show: false),
-                  lineBarsData: [
-                    LineChartBarData(
-                      spots: spots,
-                      isCurved: true,
-                      color: theme.colorScheme.primary,
-                      barWidth: 4,
-                      dotData: FlDotData(show: docs.length <= 30),
-                      belowBarData: BarAreaData(
-                        show: true,
-                        color: theme.colorScheme.primary.withValues(alpha: 0.1),
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-            ),
+            WeightLineChart(points: [for (int i = 0; i < docs.length; i++) MapEntry((docs[i].data() as Map<String, dynamic>)['date'].toString(), spots[i].y)]),
             const SizedBox(height: 16),
             summaryWidget, 
           ],
@@ -214,7 +179,7 @@ class _ProgressScreenState extends State<ProgressScreen> {
         final double targetCals = (goalDoc.data() as Map<String, dynamic>?)?['calories']?.toDouble() ?? 2000;
 
         if (mealDocs.isEmpty) {
-          return _buildEmptyState("Записывайте приемы пищи, чтобы увидеть статистику", theme);
+          return _buildEmptyState("Добавляй приёмы пищи — здесь появится статистика", theme);
         }
 
         List<BarChartGroupData> groups = [];
@@ -359,4 +324,4 @@ class _ProgressScreenState extends State<ProgressScreen> {
       ),
     );
   }
-}
+}
